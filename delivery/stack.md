@@ -1,0 +1,68 @@
+---
+project: appbaua
+template: A
+---
+
+# Tech Stack
+
+Diese Datei ist verbindlich für den autonomen Worker. Befolge sie exakt.
+
+## Languages & Frameworks
+
+- Sprache: TypeScript auf Node.
+- Framework: Next.js (App Router) — fullstack, ein Deploy-Target.
+- UI: React (via Next.js).
+- Datenbank: PostgreSQL.
+
+## Commands
+
+Der Worker führt diese aus; halte sie copy-paste-fähig und aktuell.
+(Das Repo hat noch keine package.json — dies sind die Template-Defaults;
+beim Aufsetzen des Projekts gegen die tatsächlichen npm-Scripts prüfen.)
+
+- Install: `npm install`
+- Build:   `npm run build`
+- Test:    `npm test` (Vitest)
+- E2E:     `npx playwright test`
+- Lint:    `npm run lint` (ESLint)
+- Format:  `npx prettier --write .`
+- Types:   `npx tsc --noEmit`
+
+## Testing
+
+Verbindliche Testpolicy für den Worker.
+
+- Jedes Requirement wird mit automatisierten Tests geliefert, die seine
+  Akzeptanzkriterien abdecken. Eine Änderung ohne Test für ihr Verhalten
+  ist nicht fertig.
+- Jeder Bugfix beginnt mit einem fehlschlagenden Test, der den Bug
+  reproduziert; dann macht der Fix ihn grün (reproduce-first). Kein
+  Repro-Test → nicht gefixt.
+- Testebenen: Unit für Logik; Integration für alles, was eine Grenze
+  überschreitet (DB, API, externer Service); E2E (Playwright) nur für
+  kritische User-Flows, wenige und stabile.
+- Die vollständige Test-Suite (siehe Commands) muss vor der Promotion
+  nach prod grün sein — das ist die automatisierte Hälfte des Quality
+  Gates; die manuelle Abnahme des Nutzers auf der dev-URL ist die andere.
+
+## Conventions
+
+- Formatierung/Linting werden durch die Tools oben erzwungen; vor dem
+  Fertigmelden einer Änderung ausführen.
+- Ordnerstruktur: Next.js App Router unter `app/`; wiederverwendbare
+  Komponenten unter `components/`; serverseitige Logik/DB-Zugriff unter
+  `lib/`.
+- Naming: React-Komponenten in PascalCase, sonstige Dateien/Ordner in
+  kebab-case.
+- Datenbankzugriff gebündelt in `lib/` — keine direkten DB-Queries in
+  Komponenten.
+
+## Glossary
+
+Fachbegriffe, die über Requirements, Bugs und Code hinweg einheitlich
+verwendet werden. capture-requirement prüft neue Begriffe gegen diese
+Liste und ergänzt sie hier. Leer, bis der erste Begriff definiert ist.
+
+| Term | Meaning |
+|------|---------|
+|      |         |
