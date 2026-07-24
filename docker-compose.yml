@@ -63,6 +63,10 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
+      # Token with write access to target repos (clone + push to dev).
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      # Auth for the Claude Code CLI (real execution, req-006).
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       NODE_ENV: production
 
 volumes:

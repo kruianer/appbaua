@@ -66,7 +66,11 @@ APP_PORT=8090
 POSTGRES_USER=appbaua
 POSTGRES_PASSWORD=<starkes-passwort-dev>
 POSTGRES_DB=appbaua_dev
-GITHUB_TOKEN=<fine-grained-PAT-fuer-repo-erreichbarkeit>
+# PAT mit SCHREIBrechten (Contents: write) auf die Ziel-Repos — der Worker
+# klont und pusht auf deren dev-Branch (req-006), nicht nur Erreichbarkeit.
+GITHUB_TOKEN=<fine-grained-PAT-mit-write>
+# API-Key fuer die Claude-Code-CLI im Worker (echte Ausfuehrung, req-006).
+ANTHROPIC_API_KEY=<anthropic-api-key>
 ```
 
 Rechte einschränken:

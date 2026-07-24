@@ -6,7 +6,7 @@ import { runForever } from "../lib/worker-loop";
 
 async function main() {
   // eslint-disable-next-line no-console
-  console.log("[worker] starting simulated execution loop");
+  console.log("[worker] starting execution loop (Claude Code)");
   await runForever();
 }
 
