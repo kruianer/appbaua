@@ -56,6 +56,12 @@ Verbindliche Testpolicy für den Worker.
   kebab-case.
 - Datenbankzugriff gebündelt in `lib/` — keine direkten DB-Queries in
   Komponenten.
+- HTTPS: Das Frontend wird über HTTPS ausgeliefert (auch dev/Staging).
+  Grund: iOS/iPadOS geben Kamera und Mikrofon (getUserMedia) nur in einem
+  "secure context" frei; ohne HTTPS sind diese Funktionen später nicht
+  nutzbar. Für lokale Entwicklung gilt localhost als sicherer Kontext;
+  jede über das Netz erreichbare Umgebung (dev.appbaua.com,
+  app.appbaua.com) muss ein gültiges TLS-Zertifikat haben.
 
 ## Glossary
 

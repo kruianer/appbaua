@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/nocturne-b8cdb284-afff-4282-85c0-713869fc2d36/styles.css">
+  <script src="./icons.js"></script>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    html, body, #dc-root { height: 100%; }
+    @keyframes wpulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.75); } }
+  </style>
+</helmet>
+<div style="{{ themeVars }}">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:11px var(--space-4) 5px;font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:13px">
+    <span>9:41</span>
+    <span style="display:flex;align-items:center;gap:7px;font-size:15px">
+      <x-ic name="signal" size="18"></x-ic>
+      <x-ic name="wifi" size="18"></x-ic>
+      <x-ic name="battery" size="18"></x-ic>
+    </span>
+  </div>
+
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--space-3);padding:var(--space-2) var(--space-4) 0">
+    <div>
+      <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--color-accent);margin-bottom:2px">Coding-Worker</div>
+      <h3 style="margin:0">Repo-Verwaltung</h3>
+    </div>
+    <button class="btn btn-icon btn-secondary" aria-label="Theme wechseln" onClick="{{ toggleTheme }}" style="flex:none">
+      <sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}"><x-ic name="sun" size="20"></x-ic></sc-if>
+      <sc-if value="{{ isLight }}" hint-placeholder-val="{{ true }}"><x-ic name="moon" size="20"></x-ic></sc-if>
+    </button>
+  </div>
+
+  <div style="display:flex;align-items:center;gap:8px;padding:var(--space-2) var(--space-4) var(--space-3);font-size:13px;color:color-mix(in srgb, var(--color-text) 65%, transparent)">
+    <span style="{{ workerDotStyle }}"></span>
+    <span>Worker&nbsp;·&nbsp;{{ workerText }}</span>
+  </div>
+
+  <div style="flex:1;overflow-y:auto;padding:0 var(--space-4) var(--space-4)">
+    <sc-if value="{{ hasRepos }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:0 0 var(--space-2)">
+        <span style="font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb, var(--color-text) 55%, transparent)">Priorität · 1 = höchste</span>
+        <button class="btn btn-ghost" onClick="{{ openSheet }}" style="font-size:13px"><x-ic name="plus" size="18"></x-ic> Repo</button>
+      </div>
+      <div ref="{{ setListRef }}" style="display:flex;flex-direction:column;gap:var(--space-2)">
+        <sc-for list="{{ rows }}" as="row" hint-placeholder-count="4">
+          <div data-repo-row data-id="{{ row.id }}" style="{{ row.rowStyle }}">
+            <div onPointerDown="{{ row.startDrag }}" aria-label="Ziehen zum Umsortieren" style="flex:none;display:grid;place-items:center;width:30px;height:44px;cursor:grab;touch-action:none;color:color-mix(in srgb, var(--color-text) 42%, transparent)">
+              <x-ic name="grip" size="22"></x-ic>
+            </div>
+            <div style="{{ row.badgeStyle }}">{{ row.pos }}</div>
+            <div style="min-width:0;flex:1">
+              <div style="font-family:var(--font-heading);font-weight:var(--font-heading-weight);font-size:16px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.name }}</div>
+              <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 55%, transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.url }}</div>
+            </div>
+            <button role="switch" aria-checked="{{ row.ariaChecked }}" aria-label="Aktiv/Inaktiv" onClick="{{ row.toggle }}" style="{{ row.trackStyle }}"><span style="{{ row.knobStyle }}"></span></button>
+            <button class="btn btn-icon btn-ghost" aria-label="Entfernen" onClick="{{ row.remove }}" style="flex:none"><x-ic name="trash" size="19"></x-ic></button>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{ hasNoRepos }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3);padding:var(--space-8) var(--space-4);margin-top:var(--space-6)">
+        <div style="width:64px;height:64px;border-radius:999px;display:grid;place-items:center;background:color-mix(in srgb, var(--color-accent) 12%, transparent);color:var(--color-accent)"><x-ic name="folder" size="30"></x-ic></div>
+        <div>
+          <h4 style="margin:0 0 4px">Noch keine Repos</h4>
+          <p style="margin:0;font-size:14px;color:color-mix(in srgb, var(--color-text) 60%, transparent)">Füge dein erstes hinzu — der Worker legt damit los.</p>
+        </div>
+        <button class="btn btn-primary" onClick="{{ openSheet }}" style="margin-top:var(--space-2)"><x-ic name="plus" size="18"></x-ic> Repo hinzufügen</button>
+      </div>
+    </sc-if>
+  </div>
+
+  <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSheet }}" style="position:absolute;inset:0;z-index:20;display:flex;align-items:flex-end;background:color-mix(in srgb, #000 45%, transparent)">
+      <div onClick="{{ stop }}" style="width:100%;background:var(--color-surface);border-radius:var(--radius-lg) var(--radius-lg) 0 0;padding:var(--space-4) var(--space-4) var(--space-6);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:var(--space-3)">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <h4 style="margin:0">Repo hinzufügen</h4>
+          <button class="btn btn-icon btn-ghost" aria-label="Schließen" onClick="{{ closeSheet }}"><x-ic name="x" size="20"></x-ic></button>
+        </div>
+        <div class="field"><label>Git-URL *</label><input class="input" placeholder="github.com/kruianer/mein-repo" value="{{ gitUrl }}" onChange="{{ onGitUrl }}"></div>
+        <div class="field"><label>Anzeigename (optional)</label><input class="input" placeholder="mein-repo" value="{{ dispName }}" onChange="{{ onDispName }}"></div>
+        <sc-if value="{{ hasError }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;padding:9px 12px;border-radius:var(--radius-md);color:var(--color-accent-2-700);background:color-mix(in srgb, var(--color-accent-2) 12%, transparent)">
+            <x-ic name="warning" size="17"></x-ic><span>{{ error }}</span>
+          </div>
+        </sc-if>
+        <button class="btn btn-primary btn-block" onClick="{{ submitAdd }}"><x-ic name="plus" size="18"></x-ic> Hinzufügen</button>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ confirmOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;z-index:30;display:grid;place-items:center;padding:var(--space-4);background:color-mix(in srgb, #000 45%, transparent)">
+      <div style="width:100%;max-width:340px;background:var(--color-surface);border-radius:var(--radius-lg);padding:var(--space-4);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:var(--space-3)">
+        <h4 style="margin:0">Repo entfernen?</h4>
+        <p style="margin:0;font-size:14px;color:color-mix(in srgb, var(--color-text) 75%, transparent)">Repo <strong>{{ confirmName }}</strong> wirklich entfernen? Das lässt sich nicht rückgängig machen.</p>
+        <div style="display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-2)">
+          <button class="btn btn-secondary" onClick="{{ cancelRemove }}">Abbrechen</button>
+          <button class="btn btn-primary" onClick="{{ doRemove }}"><x-ic name="trash" size="18"></x-ic> Entfernen</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  nativeMode = 'dark';
+  state = {
+    mode: 'dark',
+    repos: [
+      { id: 'r1', name: 'appbaua', url: 'github.com/kruianer/appbaua', active: true },
+      { id: 'r2', name: 'datapipe', url: 'github.com/kruianer/datapipe', active: true },
+      { id: 'r3', name: 'webhook-relay', url: 'github.com/kruianer/webhook-relay', active: false },
+      { id: 'r4', name: 'auth-service', url: 'github.com/kruianer/auth-service', active: true },
+    ],
+    dragId: null,
+    sheetOpen: false,
+    confirmId: null,
+    gitUrl: '', dispName: '', error: '',
+  };
+
+  darkVars = { '--color-bg': 'var(--color-neutral-900)', '--color-surface': 'var(--color-neutral-800)', '--color-text': 'var(--color-neutral-100)', '--color-divider': 'color-mix(in srgb, var(--color-neutral-100) 16%, transparent)' };
+  lightVars = { '--color-bg': 'var(--color-neutral-100)', '--color-surface': 'var(--color-neutral-200)', '--color-text': 'var(--color-neutral-900)', '--color-divider': 'color-mix(in srgb, var(--color-neutral-900) 16%, transparent)' };
+
+  componentDidMount() { this._icons(); }
+  componentDidUpdate() { this._icons(); }
+  _icons() { if (window.lucide) { try { window.lucide.createIcons(); } catch (e) {} } }
+
+  setField(k, v) { this.setState({ [k]: v }); }
+  toggleTheme() { this.setState(s => ({ mode: s.mode === 'dark' ? 'light' : 'dark' })); }
+  toggleRepo(id) { this.setState(s => ({ repos: s.repos.map(r => r.id === id ? { ...r, active: !r.active } : r) })); }
+  openSheet() { this.setState({ sheetOpen: true, gitUrl: '', dispName: '', error: '' }); }
+  closeSheet() { this.setState({ sheetOpen: false }); }
+
+  submitAdd() {
+    const url = (this.state.gitUrl || '').trim();
+    if (!url) { this.setState({ error: 'Git-URL ist erforderlich.' }); return; }
+    if (!/^(https?:\/\/)?(www\.)?(github|gitlab|bitbucket)\.[a-z.]+\/[^\/]+\/[^\/]+/i.test(url)) {
+      this.setState({ error: 'Repo nicht erreichbar oder kein Zugriff.' }); return;
+    }
+    const clean = url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const name = (this.state.dispName || '').trim() || clean.split('/').pop();
+    const id = 'r' + Date.now();
+    this.setState(s => ({ repos: [...s.repos, { id, name, url: clean, active: true }], sheetOpen: false, gitUrl: '', dispName: '', error: '' }));
+  }
+
+  askRemove(id) { this.setState({ confirmId: id }); }
+  cancelRemove() { this.setState({ confirmId: null }); }
+  doRemove() { this.setState(s => ({ repos: s.repos.filter(r => r.id !== s.confirmId), confirmId: null })); }
+
+  startDrag(id, e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    this.setState({ dragId: id });
+    const move = (ev) => this.onDragMove(ev);
+    const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); this.setState({ dragId: null }); };
+    document.addEventListener('pointermove', move, { passive: false });
+    document.addEventListener('pointerup', up);
+  }
+  onDragMove(ev) {
+    if (ev.cancelable) ev.preventDefault();
+    const list = this.listRef; if (!list) return;
+    const rows = [...list.querySelectorAll('[data-repo-row]')];
+    let target = rows.length - 1;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (ev.clientY < r.top + r.height / 2) { target = i; break; }
+    }
+    this.setState(s => {
+      const repos = [...s.repos];
+      const from = repos.findIndex(r => r.id === s.dragId);
+      if (from === -1 || from === target) return null;
+      const [it] = repos.splice(from, 1);
+      repos.splice(target, 0, it);
+      return { repos };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const base = { position: 'relative', overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)' };
+    const override = s.mode === this.nativeMode ? {} : (s.mode === 'dark' ? this.darkVars : this.lightVars);
+    const themeVars = { ...override, ...base };
+    const isDark = s.mode === 'dark';
+    const activeRepo = s.repos.find(r => r.active);
+    const workerText = activeRepo ? ('bearbeitet gerade ' + activeRepo.name + '…') : 'im Leerlauf — keine aktiven Repos';
+    const workerDotStyle = { width: '8px', height: '8px', borderRadius: '999px', flex: 'none', background: activeRepo ? 'var(--color-accent)' : 'color-mix(in srgb, var(--color-text) 35%, transparent)', animation: activeRepo ? 'wpulse 1.6s ease-in-out infinite' : 'none' };
+
+    const rows = s.repos.map((r, i) => {
+      const dragging = r.id === s.dragId;
+      const first = i === 0;
+      return {
+        id: r.id, name: r.name, url: r.url, pos: String(i + 1), ariaChecked: r.active ? 'true' : 'false',
+        rowStyle: {
+          display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3)',
+          background: 'var(--color-surface)', borderRadius: 'var(--radius-md)',
+          boxShadow: dragging ? 'var(--shadow-lg)' : 'var(--shadow-sm)',
+          opacity: r.active ? 1 : 0.5, transform: dragging ? 'scale(1.02)' : 'none',
+          position: 'relative', zIndex: dragging ? 5 : 1,
+          transition: 'box-shadow .15s ease, transform .12s ease',
+        },
+        badgeStyle: {
+          flex: 'none', width: '26px', height: '26px', display: 'grid', placeItems: 'center', borderRadius: '999px',
+          fontFamily: 'var(--font-heading)', fontWeight: 'var(--font-heading-weight)', fontSize: '13px',
+          background: first ? 'var(--color-accent)' : 'color-mix(in srgb, var(--color-text) 8%, transparent)',
+          color: first ? 'var(--color-bg)' : 'var(--color-text)',
+        },
+        trackStyle: {
+          flex: 'none', width: '46px', height: '28px', borderRadius: '999px', border: 'none', padding: '3px',
+          display: 'flex', cursor: 'pointer', justifyContent: r.active ? 'flex-end' : 'flex-start',
+          background: r.active ? 'var(--color-accent)' : 'color-mix(in srgb, var(--color-text) 22%, transparent)',
+          transition: 'background .15s ease, justify-content .15s ease',
+        },
+        knobStyle: { width: '22px', height: '22px', borderRadius: '999px', background: 'var(--color-bg)', boxShadow: '0 1px 2px rgba(0,0,0,.35)' },
+        toggle: () => this.toggleRepo(r.id),
+        remove: () => this.askRemove(r.id),
+        startDrag: (e) => this.startDrag(r.id, e),
+      };
+    });
+
+    const confirmRepo = s.repos.find(r => r.id === s.confirmId);
+    return {
+      themeVars, isDark, isLight: !isDark, workerText, workerDotStyle,
+      rows, hasRepos: s.repos.length > 0, hasNoRepos: s.repos.length === 0,
+      sheetOpen: s.sheetOpen, confirmOpen: !!s.confirmId, confirmName: confirmRepo ? confirmRepo.name : '',
+      gitUrl: s.gitUrl, dispName: s.dispName, error: s.error, hasError: !!s.error,
+      onGitUrl: (e) => this.setField('gitUrl', e.target.value),
+      onDispName: (e) => this.setField('dispName', e.target.value),
+      submitAdd: () => this.submitAdd(), openSheet: () => this.openSheet(), closeSheet: () => this.closeSheet(),
+      cancelRemove: () => this.cancelRemove(), doRemove: () => this.doRemove(), toggleTheme: () => this.toggleTheme(),
+      stop: (e) => e.stopPropagation(),
+      setListRef: (el) => { this.listRef = el; },
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="_ds/nocturne-b8cdb284-afff-4282-85c0-713869fc2d36/styles.css">
+  <script src="./icons.js?v=4"></script>
+  <style>
+    html, body { margin: 0; height: 100%; background: #0e0f18; }
+    #dc-root { min-height: 100%; display: grid; place-items: center; padding: 24px; box-sizing: border-box; }
+    @keyframes wpulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .3; transform: scale(.7); } }
+    @keyframes wprog { 0% { transform: translateX(-100%); } 100% { transform: translateX(320%); } }
+  </style>
+</helmet>
+<x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" dark="{{ isDark }}" hint-size="402px,874px">
+  <div style="{{ appStyle }}">
+
+    <div style="padding:2px 16px 6px;display:flex;align-items:center;justify-content:space-between;gap:var(--space-2)">
+      <div style="display:flex;align-items:center;gap:10px;min-width:0">
+        <div style="width:36px;height:36px;flex:none;border-radius:11px;display:grid;place-items:center;color:#fff;background:linear-gradient(140deg, var(--color-accent-400), var(--color-accent-700));box-shadow:0 4px 14px color-mix(in srgb, var(--color-accent) 45%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 30%, transparent)"><x-ic name="brand" size="20"></x-ic></div>
+        <div style="display:flex;flex-direction:column;min-width:0;line-height:1.02">
+          <span style="font-weight:700;font-size:18px;letter-spacing:-.03em">appbaua</span>
+          <span style="font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:color-mix(in srgb, var(--color-text) 46%, transparent)">Coding-Worker</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:var(--space-2);flex:none">
+        <button class="btn btn-icon btn-secondary" aria-label="Theme wechseln" onClick="{{ toggleTheme }}">
+          <sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}"><x-ic name="sun" size="19"></x-ic></sc-if>
+          <sc-if value="{{ isLight }}" hint-placeholder-val="{{ false }}"><x-ic name="moon" size="19"></x-ic></sc-if>
+        </button>
+        <sc-if value="{{ showRepos }}" hint-placeholder-val="{{ true }}">
+          <button class="btn btn-icon btn-primary" aria-label="Repo hinzufügen" onClick="{{ openSheet }}"><x-ic name="plus" size="20"></x-ic></button>
+        </sc-if>
+      </div>
+    </div>
+    <div style="padding:6px 20px 10px;min-width:0">
+      <div style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent-300);margin-bottom:2px">Modul</div>
+      <h2 style="margin:0;font-size:28px;letter-spacing:-.02em">{{ moduleTitle }}</h2>
+      <sc-if value="{{ showModuleSub }}" hint-placeholder-val="{{ true }}">
+        <div style="font-size:13px;color:color-mix(in srgb, var(--color-text) 55%, transparent);margin-top:3px">Der Worker arbeitet die Liste von oben nach unten ab.</div>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ showRepos }}" hint-placeholder-val="{{ true }}">
+      <div class="card elev-md" style="margin:0 20px 12px;gap:var(--space-2);background:linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)), var(--color-surface))">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--color-accent-300)">Worker</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--color-accent-300);border:1px solid var(--color-accent);padding:2px 9px;border-radius:999px">
+            <span style="{{ workerDotStyle }}"></span>{{ workerBadge }}
+          </span>
+        </div>
+        <sc-if value="{{ hasTask }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:nowrap;min-width:0;margin-top:1px">
+            <span style="flex:none;display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;color:var(--color-accent-300);border:1px solid var(--color-accent);padding:2px 8px;border-radius:999px"><x-ic name="{{ taskIcon }}" size="13"></x-ic>{{ taskLabel }}</span>
+            <span style="font-size:12px;color:color-mix(in srgb, var(--color-text) 60%, transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">{{ taskRef }} · {{ workerRepoName }}</span>
+          </div>
+          <div style="font-size:15px;line-height:1.3">{{ taskTitle }}</div>
+        </sc-if>
+        <sc-if value="{{ hasNoTask }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:15px;line-height:1.3;color:color-mix(in srgb, var(--color-text) 65%, transparent)">im Leerlauf — keine aktiven Repos</div>
+        </sc-if>
+        <div style="height:4px;border-radius:999px;overflow:hidden;background:color-mix(in srgb, var(--color-text) 12%, transparent);position:relative">
+          <div style="{{ workerBarStyle }}"></div>
+        </div>
+        <div style="display:flex;gap:var(--space-4);font-size:12px;color:color-mix(in srgb, var(--color-text) 60%, transparent);margin-top:2px">
+          <span><strong style="color:var(--color-text)">{{ countActive }}</strong> aktiv</span>
+          <span><strong style="color:var(--color-text)">{{ countInactive }}</strong> inaktiv</span>
+          <span><strong style="color:var(--color-text)">{{ countTotal }}</strong> gesamt</span>
+        </div>
+      </div>
+
+      <div style="flex:1;overflow-y:auto;padding:0 20px 14px">
+        <sc-if value="{{ hasRepos }}" hint-placeholder-val="{{ true }}">
+          <div style="font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:color-mix(in srgb, var(--color-text) 45%, transparent);margin:2px 0 var(--space-2)">Priorität · 1 = höchste</div>
+          <div ref="{{ setListRef }}" style="display:flex;flex-direction:column;gap:var(--space-2)">
+            <sc-for list="{{ rows }}" as="row" hint-placeholder-count="4">
+              <div data-repo-row data-id="{{ row.id }}" style="{{ row.rowStyle }}">
+                <div onPointerDown="{{ row.startDrag }}" aria-label="Ziehen zum Umsortieren" style="flex:none;display:grid;place-items:center;width:30px;height:46px;cursor:grab;touch-action:none;color:color-mix(in srgb, var(--color-text) 42%, transparent)">
+                  <x-ic name="grip" size="22"></x-ic>
+                </div>
+                <div style="{{ row.badgeStyle }}">{{ row.pos }}</div>
+                <div style="min-width:0;flex:1">
+                  <div style="font-weight:600;font-size:16px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.name }}</div>
+                  <div style="font-size:12px;color:color-mix(in srgb, var(--color-text) 52%, transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ row.url }}</div>
+                </div>
+                <button role="switch" aria-checked="{{ row.ariaChecked }}" aria-label="Aktiv/Inaktiv" onClick="{{ row.toggle }}" style="{{ row.trackStyle }}"><span style="{{ row.knobStyle }}"></span></button>
+                <button class="btn btn-icon btn-ghost" aria-label="Entfernen" onClick="{{ row.remove }}" style="flex:none"><x-ic name="trash" size="18"></x-ic></button>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ hasNoRepos }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:var(--space-3);padding:var(--space-8) var(--space-4);margin-top:var(--space-6)">
+            <div style="width:64px;height:64px;border-radius:999px;display:grid;place-items:center;color:var(--color-accent-300);border:1px solid var(--color-accent)"><x-ic name="folder" size="28"></x-ic></div>
+            <div>
+              <h4 style="margin:0 0 4px">Noch keine Repos</h4>
+              <p style="margin:0;font-size:14px;color:color-mix(in srgb, var(--color-text) 60%, transparent)">Füge dein erstes hinzu — der Worker legt damit los.</p>
+            </div>
+            <button class="btn btn-primary" onClick="{{ openSheet }}" style="margin-top:var(--space-2)"><x-ic name="plus" size="17"></x-ic> Repo hinzufügen</button>
+          </div>
+        </sc-if>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ showPlaceholder }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:var(--space-3);padding:var(--space-8)">
+        <div style="width:66px;height:66px;border-radius:999px;display:grid;place-items:center;color:var(--color-accent-300);border:1px solid var(--color-accent)"><x-ic name="{{ phIcon }}" size="30"></x-ic></div>
+        <h3 style="margin:0">{{ phTitle }}</h3>
+        <p style="margin:0;font-size:14px;max-width:240px;color:color-mix(in srgb, var(--color-text) 60%, transparent)">{{ phText }}</p>
+      </div>
+    </sc-if>
+
+    <div style="flex:none;position:relative;display:flex;justify-content:space-around;padding:10px 8px 30px;background:var(--color-bg)">
+      <div style="position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(to right, transparent, var(--color-divider) 48px, var(--color-divider) calc(100% - 48px), transparent)"></div>
+      <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="4">
+        <button aria-label="{{ tab.label }}" onClick="{{ tab.onClick }}" style="{{ tab.style }}">
+          <x-ic name="{{ tab.icon }}" size="23"></x-ic>
+          <span style="font-size:10px;letter-spacing:.01em">{{ tab.label }}</span>
+        </button>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{ sheetOpen }}" hint-placeholder-val="{{ false }}">
+      <div onClick="{{ closeSheet }}" style="position:absolute;inset:0;z-index:40;display:flex;align-items:flex-end;background:color-mix(in srgb, #000 55%, transparent)">
+        <div onClick="{{ stop }}" style="width:100%;background:var(--color-surface);border-radius:var(--radius-lg) var(--radius-lg) 0 0;padding:var(--space-4) var(--space-4) 34px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:var(--space-3)">
+          <div style="display:flex;align-items:center;justify-content:space-between">
+            <h4 style="margin:0">Repo hinzufügen</h4>
+            <button class="btn btn-icon btn-ghost" aria-label="Schließen" onClick="{{ closeSheet }}"><x-ic name="x" size="20"></x-ic></button>
+          </div>
+          <div class="field"><label>Git-URL *</label><input class="input" placeholder="github.com/kruianer/mein-repo" value="{{ gitUrl }}" onChange="{{ onGitUrl }}"></div>
+          <div class="field"><label>Anzeigename (optional)</label><input class="input" placeholder="mein-repo" value="{{ dispName }}" onChange="{{ onDispName }}"></div>
+          <sc-if value="{{ hasError }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;padding:9px 12px;border-radius:var(--radius-md);color:var(--color-accent-300);border:1px solid var(--color-accent);background:color-mix(in srgb, var(--color-accent) 14%, transparent)">
+              <x-ic name="warning" size="17"></x-ic><span>{{ error }}</span>
+            </div>
+          </sc-if>
+          <button class="btn btn-primary btn-block" onClick="{{ submitAdd }}"><x-ic name="plus" size="16"></x-ic> Hinzufügen</button>
+        </div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ confirmOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:var(--space-4);background:color-mix(in srgb, #000 55%, transparent)">
+        <div style="width:100%;max-width:320px;background:var(--color-surface);border-radius:var(--radius-lg);padding:var(--space-4);box-shadow:var(--shadow-lg);display:flex;flex-direction:column;gap:var(--space-3)">
+          <h4 style="margin:0">Repo entfernen?</h4>
+          <p style="margin:0;font-size:14px;color:color-mix(in srgb, var(--color-text) 75%, transparent)">Repo <strong>{{ confirmName }}</strong> wirklich entfernen? Das lässt sich nicht rückgängig machen.</p>
+          <div style="display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-2)">
+            <button class="btn btn-secondary" onClick="{{ cancelRemove }}">Abbrechen</button>
+            <button class="btn btn-primary" onClick="{{ doRemove }}"><x-ic name="trash" size="16"></x-ic> Entfernen</button>
+          </div>
+        </div>
+      </div>
+    </sc-if>
+  </div>
+</x-import>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  nativeMode = 'dark';
+  state = {
+    mode: 'dark',
+    tab: 'repos',
+    repos: [
+      { id: 'r1', name: 'appbaua', url: 'github.com/kruianer/appbaua', active: true },
+      { id: 'r2', name: 'datapipe', url: 'github.com/kruianer/datapipe', active: true },
+      { id: 'r3', name: 'webhook-relay', url: 'github.com/kruianer/webhook-relay', active: false },
+      { id: 'r4', name: 'auth-service', url: 'github.com/kruianer/auth-service', active: true },
+    ],
+    dragId: null, sheetOpen: false, confirmId: null,
+    gitUrl: '', dispName: '', error: '',
+  };
+
+  darkVars = { '--color-bg': 'var(--color-neutral-900)', '--color-surface': 'var(--color-neutral-800)', '--color-text': 'var(--color-neutral-100)', '--color-divider': 'color-mix(in srgb, var(--color-neutral-100) 16%, transparent)' };
+  lightVars = { '--color-bg': 'var(--color-neutral-100)', '--color-surface': 'var(--color-neutral-200)', '--color-text': 'var(--color-neutral-900)', '--color-divider': 'color-mix(in srgb, var(--color-neutral-900) 16%, transparent)' };
+
+  tasks = {
+    r1: { type: 'bug', ref: '#412', title: 'Login-Redirect schlägt bei SSO fehl' },
+    r2: { type: 'req', ref: 'REQ-27', title: 'CSV-Export für Reports hinzufügen' },
+    r3: { type: 'review', ref: 'PR #88', title: 'Rate-Limiting im Auth-Flow prüfen' },
+    r4: { type: 'review', ref: 'PR #91', title: 'Token-Refresh: Race-Condition beheben' },
+  };
+  typeMeta = {
+    bug: { label: 'Bug', icon: 'bug' },
+    req: { label: 'Requirement', icon: 'doc' },
+    review: { label: 'Code-Review', icon: 'review' },
+  };
+
+  tabMeta = {
+    aktiv: { icon: 'activity', title: 'Aktivität', text: 'Live-Aktivität des Workers — welche Datei gerade bearbeitet wird und der aktuelle Schritt. Bald verfügbar.' },
+    verlauf: { icon: 'clock', title: 'Verlauf', text: 'Abgeschlossene Läufe, Commits und Pull-Requests des Workers pro Repo. Bald verfügbar.' },
+    settings: { icon: 'settings', title: 'Einstellungen', text: 'Zugriff, Branch-Regeln und Auto-Merge-Verhalten des Workers konfigurieren. Bald verfügbar.' },
+  };
+
+  setField(k, v) { this.setState({ [k]: v }); }
+  setTab(t) { this.setState({ tab: t }); }
+  toggleTheme() { this.setState(s => ({ mode: s.mode === 'dark' ? 'light' : 'dark' })); }
+  toggleRepo(id) { this.setState(s => ({ repos: s.repos.map(r => r.id === id ? { ...r, active: !r.active } : r) })); }
+  openSheet() { this.setState({ sheetOpen: true, gitUrl: '', dispName: '', error: '' }); }
+  closeSheet() { this.setState({ sheetOpen: false }); }
+
+  submitAdd() {
+    const url = (this.state.gitUrl || '').trim();
+    if (!url) { this.setState({ error: 'Git-URL ist erforderlich.' }); return; }
+    if (!/^(https?:\/\/)?(www\.)?(github|gitlab|bitbucket)\.[a-z.]+\/[^\/]+\/[^\/]+/i.test(url)) {
+      this.setState({ error: 'Repo nicht erreichbar oder kein Zugriff.' }); return;
+    }
+    const clean = url.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const name = (this.state.dispName || '').trim() || clean.split('/').pop();
+    const id = 'r' + Date.now();
+    this.setState(s => ({ repos: [...s.repos, { id, name, url: clean, active: true }], sheetOpen: false, gitUrl: '', dispName: '', error: '' }));
+  }
+
+  askRemove(id) { this.setState({ confirmId: id }); }
+  cancelRemove() { this.setState({ confirmId: null }); }
+  doRemove() { this.setState(s => ({ repos: s.repos.filter(r => r.id !== s.confirmId), confirmId: null })); }
+
+  startDrag(id, e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.preventDefault();
+    this.setState({ dragId: id });
+    const move = (ev) => this.onDragMove(ev);
+    const up = () => { document.removeEventListener('pointermove', move); document.removeEventListener('pointerup', up); this.setState({ dragId: null }); };
+    document.addEventListener('pointermove', move, { passive: false });
+    document.addEventListener('pointerup', up);
+  }
+  onDragMove(ev) {
+    if (ev.cancelable) ev.preventDefault();
+    const list = this.listRef; if (!list) return;
+    const rows = [...list.querySelectorAll('[data-repo-row]')];
+    let target = rows.length - 1;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i].getBoundingClientRect();
+      if (ev.clientY < r.top + r.height / 2) { target = i; break; }
+    }
+    this.setState(s => {
+      const repos = [...s.repos];
+      const from = repos.findIndex(r => r.id === s.dragId);
+      if (from === -1 || from === target) return null;
+      const [it] = repos.splice(from, 1);
+      repos.splice(target, 0, it);
+      return { repos };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const base = { position: 'relative', height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--color-bg)', color: 'var(--color-text)', fontFamily: 'var(--font-body)', padding: '54px 0 0', boxSizing: 'border-box', overflow: 'hidden' };
+    const override = s.mode === this.nativeMode ? {} : (s.mode === 'dark' ? this.darkVars : this.lightVars);
+    const appStyle = { ...override, ...base };
+    const isDark = s.mode === 'dark';
+    const activeRepo = s.repos.find(r => r.active);
+    const task = activeRepo ? (this.tasks[activeRepo.id] || { type: 'req', ref: '—', title: 'Repo-Struktur wird analysiert' }) : null;
+    const tMeta = task ? this.typeMeta[task.type] : null;
+    const workerDotStyle = { width: '7px', height: '7px', borderRadius: '999px', flex: 'none', background: activeRepo ? 'var(--color-accent)' : 'color-mix(in srgb, var(--color-text) 35%, transparent)', animation: activeRepo ? 'wpulse 1.6s ease-in-out infinite' : 'none' };
+    const workerBarStyle = { position: 'absolute', top: 0, bottom: 0, width: '40%', borderRadius: '999px', background: 'var(--color-accent)', animation: activeRepo ? 'wprog 1.8s ease-in-out infinite' : 'none', opacity: activeRepo ? 1 : 0 };
+
+    const rows = s.repos.map((r, i) => {
+      const dragging = r.id === s.dragId;
+      const first = i === 0;
+      return {
+        id: r.id, name: r.name, url: r.url, pos: String(i + 1), ariaChecked: r.active ? 'true' : 'false',
+        rowStyle: {
+          display: 'flex', alignItems: 'center', gap: 'var(--space-3)', padding: 'var(--space-3)',
+          background: 'var(--color-surface)', borderRadius: 'var(--radius-md)',
+          boxShadow: dragging ? 'var(--shadow-lg)' : 'var(--shadow-sm)',
+          opacity: r.active ? 1 : 0.5, transform: dragging ? 'scale(1.02)' : 'none',
+          position: 'relative', zIndex: dragging ? 5 : 1,
+          transition: 'box-shadow .15s ease, transform .12s ease',
+        },
+        badgeStyle: {
+          flex: 'none', width: '26px', height: '26px', display: 'grid', placeItems: 'center', borderRadius: '999px',
+          fontWeight: 600, fontSize: '13px',
+          background: first ? 'var(--color-accent)' : 'color-mix(in srgb, var(--color-text) 10%, transparent)',
+          color: first ? 'var(--color-bg)' : 'var(--color-text)',
+        },
+        trackStyle: {
+          flex: 'none', width: '46px', height: '28px', borderRadius: '999px', border: 'none', padding: '3px',
+          display: 'flex', cursor: 'pointer', justifyContent: r.active ? 'flex-end' : 'flex-start',
+          background: r.active ? 'var(--color-accent)' : 'color-mix(in srgb, var(--color-text) 22%, transparent)',
+          transition: 'background .15s ease',
+        },
+        knobStyle: { width: '22px', height: '22px', borderRadius: '999px', background: 'var(--color-bg)', boxShadow: '0 1px 2px rgba(0,0,0,.4)' },
+        toggle: () => this.toggleRepo(r.id),
+        remove: () => this.askRemove(r.id),
+        startDrag: (e) => this.startDrag(r.id, e),
+      };
+    });
+
+    const tabs = [
+      { key: 'repos', label: 'Repos', icon: 'gitbranch' },
+      { key: 'aktiv', label: 'Aktivität', icon: 'activity' },
+      { key: 'verlauf', label: 'Verlauf', icon: 'clock' },
+      { key: 'settings', label: 'Einstellungen', icon: 'settings' },
+    ].map(t => ({
+      key: t.key, label: t.label, icon: t.icon,
+      onClick: () => this.setTab(t.key),
+      style: {
+        flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+        background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0',
+        color: s.tab === t.key ? 'var(--color-accent)' : 'color-mix(in srgb, var(--color-text) 48%, transparent)',
+      },
+    }));
+
+    const ph = this.tabMeta[s.tab] || {};
+    const moduleTitle = s.tab === 'repos' ? 'Repo-Verwaltung' : (ph.title || '');
+    const confirmRepo = s.repos.find(r => r.id === s.confirmId);
+    return {
+      appStyle, isDark, isLight: !isDark,
+      moduleTitle, showModuleSub: s.tab === 'repos',
+      showRepos: s.tab === 'repos', showPlaceholder: s.tab !== 'repos',
+      phIcon: ph.icon || 'activity', phTitle: ph.title || '', phText: ph.text || '',
+      hasTask: !!task, hasNoTask: !task,
+      taskLabel: tMeta ? tMeta.label : '', taskIcon: tMeta ? tMeta.icon : 'doc',
+      taskRef: task ? task.ref : '', taskTitle: task ? task.title : '',
+      workerRepoName: activeRepo ? activeRepo.name : '',
+      workerDotStyle, workerBarStyle, workerBadge: activeRepo ? 'aktiv' : 'Leerlauf',
+      countActive: String(s.repos.filter(r => r.active).length), countInactive: String(s.repos.filter(r => !r.active).length), countTotal: String(s.repos.length),
+      rows, hasRepos: s.repos.length > 0, hasNoRepos: s.repos.length === 0, tabs,
+      sheetOpen: s.sheetOpen, confirmOpen: !!s.confirmId, confirmName: confirmRepo ? confirmRepo.name : '',
+      gitUrl: s.gitUrl, dispName: s.dispName, error: s.error, hasError: !!s.error,
+      onGitUrl: (e) => this.setField('gitUrl', e.target.value),
+      onDispName: (e) => this.setField('dispName', e.target.value),
+      submitAdd: () => this.submitAdd(), openSheet: () => this.openSheet(), closeSheet: () => this.closeSheet(),
+      cancelRemove: () => this.cancelRemove(), doRemove: () => this.doRemove(), toggleTheme: () => this.toggleTheme(),
+      stop: (e) => e.stopPropagation(), setListRef: (el) => { this.listRef = el; },
+    };
+  }
+}
+</script>
+</body>
+</html>
