@@ -15,20 +15,21 @@ import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
 import { WorkerDashboard } from "./WorkerDashboard";
 
-type Tab = "aktiv" | "repos" | "verlauf" | "settings";
+type Tab = "aktiv" | "verlauf" | "repos" | "settings";
 
 // Aktivität is the start view and the first nav entry (req-005).
+// Order: Aktivität, Verlauf, Repos, Tasks.
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "aktiv", label: "Aktivität", icon: "activity" },
-  { key: "repos", label: "Repos", icon: "gitbranch" },
   { key: "verlauf", label: "Verlauf", icon: "clock" },
-  { key: "settings", label: "Einstellungen", icon: "settings" },
+  { key: "repos", label: "Repos", icon: "gitbranch" },
+  { key: "settings", label: "Tasks", icon: "settings" },
 ];
 
 const MODULE_TITLE: Record<Tab, string> = {
   aktiv: "Aktivität",
-  repos: "Repo-Verwaltung",
   verlauf: "Verlauf",
+  repos: "Repo-Verwaltung",
   settings: "Task-Steuerung",
 };
 
@@ -176,7 +177,7 @@ export function AppShell({
 
   const appStyle: CSSProperties = {
     position: "relative",
-    minHeight: "100dvh",
+    height: "100dvh", // fixed viewport height: header/footer stay put, middle scrolls
     maxWidth: 460,
     margin: "0 auto",
     display: "flex",
@@ -192,6 +193,7 @@ export function AppShell({
       {/* App bar */}
       <div
         style={{
+          flexShrink: 0,
           padding: "12px 16px 6px",
           display: "flex",
           alignItems: "center",
@@ -274,7 +276,7 @@ export function AppShell({
       </div>
 
       {/* Module title */}
-      <div style={{ padding: "6px 20px 10px", minWidth: 0 }}>
+      <div style={{ flexShrink: 0, padding: "6px 20px 10px", minWidth: 0 }}>
         <div
           style={{
             fontSize: 10,
