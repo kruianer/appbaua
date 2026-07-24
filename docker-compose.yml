@@ -44,6 +44,16 @@ services:
       PGDATABASE: ${POSTGRES_DB}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       NODE_ENV: production
+      # System-Kacheln (req-009): wo die Host-Werte im Container liegen.
+      HOST_PROC: /host/proc
+      HOST_DISK: /host/root
+    volumes:
+      # Read-only Blick auf den Host für die System-Kacheln (req-009) — kein
+      # Docker-Socket. Im Host-/proc stehen ALLE Prozesse des Rechners, also
+      # auch die des Worker-Containers; daraus kommt die "CPU-Last des
+      # Workers". /host/root dient nur dem freien Speicherplatz (statfs).
+      - /proc:/host/proc:ro
+      - /:/host/root:ro
     ports:
       - "${APP_PORT}:3000"
 

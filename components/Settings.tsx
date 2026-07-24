@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "./Icon";
+import { SystemMonitor } from "./SystemMonitor";
 
-// Einstellungsseite (req-007). Currently holds exactly one action — deleting the
-// whole run log — plus a placeholder hint for what may follow.
+// Einstellungsseite (req-007): der Zustand des Mini-PCs (req-009) und das
+// Löschen des ganzen Verlauf-Logs, dazu ein Platzhalter für das, was folgt.
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
@@ -61,13 +62,15 @@ export function Settings() {
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
+      <SystemMonitor />
+
       <div
         style={{
           fontSize: 10,
           letterSpacing: ".12em",
           textTransform: "uppercase",
           color: muted(45),
-          margin: "2px 0 var(--space-2)",
+          margin: "var(--space-4) 0 var(--space-2)",
         }}
       >
         Verlauf-Log löschen
