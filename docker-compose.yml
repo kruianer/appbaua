@@ -1,0 +1,51 @@
+# Runs the app + PostgreSQL on the Beelink Mini-PC.
+#
+# One compose file per environment via the project name and an env file:
+#   dev :  docker compose -p appbaua-dev  --env-file deploy/dev.env  up -d --build
+#   prod:  docker compose -p appbaua-prod --env-file deploy/prod.env up -d --build
+#
+# The env file (NOT committed) provides:
+#   APP_PORT        host port the app listens on (e.g. 3001 dev, 3002 prod)
+#   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+#   GITHUB_TOKEN    PAT for the private-repo reachability check
+# DATABASE_URL is assembled from the POSTGRES_* vars below.
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Discrete PG* fields instead of a URL: a password with URL-unsafe
+      # chars (+ / =) would break connection-string parsing.
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      NODE_ENV: production
+    ports:
+      - "${APP_PORT}:3000"
+
+volumes:
+  db-data:

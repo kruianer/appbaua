@@ -12,21 +12,26 @@ Diese Datei ist verbindlich für den autonomen Worker. Befolge sie exakt.
 - Sprache: TypeScript auf Node.
 - Framework: Next.js (App Router) — fullstack, ein Deploy-Target.
 - UI: React (via Next.js).
-- Datenbank: PostgreSQL.
+- Datenbank: PostgreSQL (via `pg`). Ausgewählt über `DATABASE_URL`; ohne
+  gesetzte URL fällt die App auf einen lokalen JSON-Store (`.data/`)
+  zurück, damit sie und die Tests ohne DB-Server laufen.
+- Deployment: Docker (Dockerfile + docker-compose.yml), auf dem Beelink
+  Mini-PC via GitHub Actions (self-hosted Runner). Einrichtung:
+  [deploy-setup.md](deploy-setup.md).
 
 ## Commands
 
 Der Worker führt diese aus; halte sie copy-paste-fähig und aktuell.
-(Das Repo hat noch keine package.json — dies sind die Template-Defaults;
-beim Aufsetzen des Projekts gegen die tatsächlichen npm-Scripts prüfen.)
+(Abgeglichen mit der package.json seit dem Aufsetzen des Next.js-Projekts.)
 
 - Install: `npm install`
 - Build:   `npm run build`
-- Test:    `npm test` (Vitest)
-- E2E:     `npx playwright test`
-- Lint:    `npm run lint` (ESLint)
-- Format:  `npx prettier --write .`
-- Types:   `npx tsc --noEmit`
+- Test:    `npm test` (Vitest, headless `vitest run`)
+- E2E:     `npx playwright test` (noch nicht eingerichtet — folgt mit dem
+  ersten UI-Flow, der E2E braucht)
+- Lint:    `npm run lint` (ESLint via `next lint`)
+- Format:  Prettier noch nicht eingerichtet; Formatierung folgt bei Bedarf
+- Types:   `npm run typecheck` (`tsc --noEmit`)
 
 ## Testing
 

@@ -1,0 +1,67 @@
+name: deploy
+
+# Push auf dev  -> Deploy der dev-Umgebung  (vorerst nur im WLAN: :8090)
+# Push auf main -> Deploy der prod-Umgebung  (kommt mit Cloudflare-Tunnel)
+# Laeuft auf dem self-hosted Runner mit Label "appbaua" (Beelink Mini-PC),
+# damit die anderen Runner des Hosts nicht getroffen werden.
+# Siehe delivery/devops.md und delivery/deploy-setup.md.
+
+on:
+  push:
+    branches: [dev, main]
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: [self-hosted, appbaua]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: [self-hosted, appbaua]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select environment
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "project=appbaua-prod" >> "$GITHUB_OUTPUT"
+            echo "envfile=$HOME/appbaua-env/prod.env" >> "$GITHUB_OUTPUT"
+          else
+            echo "project=appbaua-dev" >> "$GITHUB_OUTPUT"
+            echo "envfile=$HOME/appbaua-env/dev.env" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check env file exists
+        id: check
+        run: |
+          if [ -f "${{ steps.env.outputs.envfile }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::${{ steps.env.outputs.envfile }} fehlt — Deploy dieser Umgebung wird uebersprungen (noch nicht eingerichtet)."
+          fi
+
+      - name: Build & start containers
+        if: steps.check.outputs.ready == 'true'
+        run: |
+          docker compose \
+            -p "${{ steps.env.outputs.project }}" \
+            --env-file "${{ steps.env.outputs.envfile }}" \
+            up -d --build
+
+      - name: Prune old images
+        if: steps.check.outputs.ready == 'true'
+        run: docker image prune -f
