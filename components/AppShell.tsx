@@ -12,6 +12,7 @@ import type { Repo } from "@/lib/repos";
 import type { TaskType } from "@/lib/task-types";
 import { Icon, type IconName } from "./Icon";
 import { TaskControl } from "./TaskControl";
+import { RunLog } from "./RunLog";
 
 type Tab = "repos" | "aktiv" | "verlauf" | "settings";
 
@@ -23,18 +24,13 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
 ];
 
 const PLACEHOLDER: Record<
-  "aktiv" | "verlauf",
+  "aktiv",
   { icon: IconName; title: string; text: string }
 > = {
   aktiv: {
     icon: "activity",
     title: "Aktivität",
     text: "Live-Aktivität des Workers — welche Datei gerade bearbeitet wird und der aktuelle Schritt. Bald verfügbar.",
-  },
-  verlauf: {
-    icon: "clock",
-    title: "Verlauf",
-    text: "Abgeschlossene Läufe, Commits und Pull-Requests des Workers pro Repo. Bald verfügbar.",
   },
 };
 
@@ -603,6 +599,8 @@ export function AppShell({
           initialTaskTypes={initialTaskTypes}
           initialWorkerEnabled={initialWorkerEnabled}
         />
+      ) : tab === "verlauf" ? (
+        <RunLog />
       ) : (
         <div
           style={{

@@ -47,5 +47,23 @@ services:
     ports:
       - "${APP_PORT}:3000"
 
+  # Simulated execution loop (req-004). Runs independently of the web app and
+  # logs into the same Postgres.
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      NODE_ENV: production
+
 volumes:
   db-data:
