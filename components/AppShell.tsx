@@ -13,6 +13,7 @@ import type { TaskType } from "@/lib/task-types";
 import { Icon, type IconName } from "./Icon";
 import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
+import { WorkerDashboard } from "./WorkerDashboard";
 
 type Tab = "repos" | "aktiv" | "verlauf" | "settings";
 
@@ -70,8 +71,6 @@ export function AppShell({
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  const active = repos.filter((r) => r.active).length;
-  const inactive = repos.length - active;
   const confirmRepo = repos.find((r) => r.id === confirmId) ?? null;
 
   const openSheet = useCallback(() => {
@@ -314,87 +313,8 @@ export function AppShell({
 
       {tab === "repos" ? (
         <>
-          {/* Worker status card (idle — worker not running for appbaua itself) */}
-          <div
-            className="card elev-md"
-            style={{
-              margin: "0 20px 12px",
-              gap: "var(--space-2)",
-              background:
-                "linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)), var(--color-surface))",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 10,
-                  letterSpacing: ".14em",
-                  textTransform: "uppercase",
-                  color: "var(--color-accent-300)",
-                }}
-              >
-                Worker
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 11,
-                  color: "var(--color-accent-300)",
-                  border: "1px solid var(--color-accent)",
-                  padding: "2px 9px",
-                  borderRadius: 999,
-                }}
-              >
-                <span
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: 999,
-                    flex: "none",
-                    background: muted(35),
-                  }}
-                />
-                Leerlauf
-              </span>
-            </div>
-            <div style={{ fontSize: 15, lineHeight: 1.3, color: muted(65) }}>
-              im Leerlauf — keine aktiven Repos
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: "var(--space-4)",
-                fontSize: 12,
-                color: muted(60),
-                marginTop: 2,
-              }}
-            >
-              <span>
-                <strong style={{ color: "var(--color-text)" }}>{active}</strong>{" "}
-                aktiv
-              </span>
-              <span>
-                <strong style={{ color: "var(--color-text)" }}>
-                  {inactive}
-                </strong>{" "}
-                inaktiv
-              </span>
-              <span>
-                <strong style={{ color: "var(--color-text)" }}>
-                  {repos.length}
-                </strong>{" "}
-                gesamt
-              </span>
-            </div>
-          </div>
+          {/* Live worker status + dashboard (req-005) */}
+          <WorkerDashboard />
 
           {/* List / empty state */}
           <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>

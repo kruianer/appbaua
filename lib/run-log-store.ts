@@ -12,11 +12,17 @@ import {
 // tests. Retention (> LOG_MAX_AGE_DAYS old OR > LOG_MAX_ROWS, oldest first) is
 // applied on every append.
 
+export type TodayMetrics = { done: number; errors: number };
+
 export interface RunLogStore {
   append(entry: NewRunLogEntry): Promise<RunLogEntry>;
   /** Newest first, paginated. */
   list(offset: number, limit: number): Promise<RunLogEntry[]>;
   count(): Promise<number>;
+  /** Completed steps (success+error) with startedAt >= sinceIso, and how many failed. */
+  metricsSince(sinceIso: string): Promise<TodayMetrics>;
+  /** The most recent 'error' entry, or null. */
+  lastError(): Promise<RunLogEntry | null>;
 }
 
 /** Drop entries older than the cutoff, then keep only the newest maxRows. */
@@ -72,7 +78,38 @@ export function createFileRunLogStore(): RunLogStore {
     async count() {
       return (await readAll()).length;
     },
+    async metricsSince(sinceIso) {
+      const all = await readAll();
+      return computeMetrics(all, sinceIso);
+    },
+    async lastError() {
+      const all = await readAll();
+      return findLastError(all);
+    },
   };
+}
+
+function computeMetrics(
+  entries: RunLogEntry[],
+  sinceIso: string,
+): { done: number; errors: number } {
+  const since = new Date(sinceIso).getTime();
+  const completed = entries.filter(
+    (e) =>
+      (e.status === "success" || e.status === "error") &&
+      new Date(e.startedAt).getTime() >= since,
+  );
+  return {
+    done: completed.length,
+    errors: completed.filter((e) => e.status === "error").length,
+  };
+}
+
+function findLastError(entries: RunLogEntry[]): RunLogEntry | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].status === "error") return entries[i];
+  }
+  return null;
 }
 
 export function createMemoryRunLogStore(
@@ -92,6 +129,12 @@ export function createMemoryRunLogStore(
     },
     async count() {
       return entries.length;
+    },
+    async metricsSince(sinceIso) {
+      return computeMetrics(entries, sinceIso);
+    },
+    async lastError() {
+      return findLastError(entries);
     },
   };
 }

@@ -21,6 +21,9 @@ function deps(over: Partial<LoopDeps> = {}): LoopDeps {
     sleep: async () => {}, // instant, no real 15s
     now: () => WED_18,
     shouldFail: () => false,
+    setRunningStep: async () => {},
+    clearRunningStep: async () => {},
+    setPauseUntil: async () => {},
     ...over,
   };
 }

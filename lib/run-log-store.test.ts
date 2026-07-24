@@ -50,4 +50,37 @@ describe("memory run-log store", () => {
     const page1 = await store.list(2, 2);
     expect(page1.map((e) => e.message)).toEqual(["m2", "m1"]);
   });
+
+  it("metricsSince counts completed steps and errors after a cutoff", async () => {
+    const store = createMemoryRunLogStore();
+    const mk = (h: number, status: "success" | "error" | "idle") => ({
+      startedAt: new Date(2026, 6, 24, h, 0).toISOString(),
+      endedAt: new Date(2026, 6, 24, h, 0).toISOString(),
+      repo: "appbaua",
+      taskType: "Bugs",
+      status,
+      message: "",
+    });
+    await store.append(mk(8, "success")); // before cutoff
+    await store.append(mk(11, "success"));
+    await store.append(mk(12, "error"));
+    await store.append(mk(13, "idle")); // idle not counted
+    const since = new Date(2026, 6, 24, 10, 0).toISOString();
+    expect(await store.metricsSince(since)).toEqual({ done: 2, errors: 1 });
+  });
+
+  it("lastError returns the most recent error or null", async () => {
+    const store = createMemoryRunLogStore();
+    expect(await store.lastError()).toBeNull();
+    await store.append({
+      startedAt: new Date(2026, 6, 24, 11).toISOString(),
+      endedAt: new Date(2026, 6, 24, 11).toISOString(),
+      repo: "appbaua",
+      taskType: "Bugs",
+      status: "error",
+      message: "boom",
+    });
+    const e = await store.lastError();
+    expect(e?.message).toBe("boom");
+  });
 });
