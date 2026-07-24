@@ -3,112 +3,123 @@
 Diese Anleitung beschreibt die **einmalige** Einrichtung auf dem Beelink
 EQR5 (Ubuntu), damit `git push` automatisch deployt. Die Repo-Seite
 (Dockerfile, docker-compose.yml, GitHub-Actions-Workflow) ist bereits im
-Repo — hier geht es um die Maschinen-Seite, die nur du erledigen kannst.
+Repo — hier geht es um die Maschinen-Seite.
 
-Zusammenhang: siehe [devops.md](devops.md). Push auf `dev` deployt
-dev.appbaua.com, Merge auf `main` deployt app.appbaua.com. Auslöser ist
-der Workflow `.github/workflows/deploy.yml` auf dem self-hosted Runner.
+Zusammenhang: siehe [devops.md](devops.md). Push auf `dev` deployt die
+dev-Umgebung, Merge auf `main` die prod-Umgebung. Auslöser ist der
+Workflow `.github/workflows/deploy.yml` auf dem self-hosted Runner mit
+Label **`appbaua`**.
 
-## 1. Docker installieren
+Ausgangslage (Stand Einrichtung): Docker + Compose, node und git sind auf
+dem Host schon vorhanden. Es laufen bereits andere Projekte (cellarvoice,
+livinggardentwin, …) — appbaua bekommt deshalb einen **eigenen Runner
+(Label `appbaua`)**, **eigene Ports** und **eigene Env-Dateien**, ohne
+Bestehendes anzufassen.
 
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER   # danach neu einloggen
-docker compose version          # prüfen: v2.x
-```
+## Phasen
 
-## 2. Self-hosted GitHub Runner registrieren
+- **Phase 1 (jetzt): nur im WLAN.** Die App ist unter
+  `http://192.168.2.200:8090` (dev) erreichbar. Kein HTTPS, kein DNS.
+- **Phase 2 (später): Cloudflare Tunnel.** dev.appbaua.com /
+  app.appbaua.com über den bestehenden `cloudflared`-Tunnel (wie
+  cellarvoice). HTTPS ist dann Pflicht (Kamera/Mikrofon auf iOS, siehe
+  [stack.md](stack.md)).
+
+## 1. Runner für appbaua registrieren
 
 Auf GitHub: Repo → Settings → Actions → Runners → **New self-hosted
-runner** → Linux. GitHub zeigt Befehle mit einem **Registrierungs-Token**
-(nur du bekommst den). Auf dem Mini-PC:
+runner** → Linux. GitHub zeigt einen **Registrierungs-Token**.
+
+Auf dem Beelink (eigener Ordner, damit die anderen Runner unberührt
+bleiben):
 
 ```bash
-mkdir -p ~/actions-runner && cd ~/actions-runner
-# die von GitHub angezeigten curl/config.sh-Befehle ausführen ...
-./config.sh --url https://github.com/kruianer/appbaua --token <TOKEN>
-sudo ./svc.sh install     # als Dienst, läuft dauerhaft
+mkdir -p ~/actions-runner-appbaua && cd ~/actions-runner-appbaua
+tar xzf ~/actions-runner/actions-runner-linux-x64-2.334.0.tar.gz
+./config.sh --url https://github.com/kruianer/appbaua \
+  --token <REGISTRIERUNGS-TOKEN> \
+  --name beelink-appbaua \
+  --labels appbaua \
+  --unattended
+```
+
+Als Dienst installieren und starten (**braucht sudo → du**):
+
+```bash
+sudo ./svc.sh install
 sudo ./svc.sh start
 ```
 
-Der Runner muss `docker` ausführen dürfen (Schritt 1, Gruppe `docker`).
+## 2. Env-Datei mit Secrets anlegen (NICHT im Repo)
 
-## 3. Environment-Dateien anlegen (Secrets, NICHT im Repo)
-
-Der Workflow erwartet die Env-Dateien unter `/etc/appbaua/`. Anlegen:
+Der Workflow liest die Env-Datei aus `~/appbaua-env/`.
 
 ```bash
-sudo mkdir -p /etc/appbaua
-sudo nano /etc/appbaua/dev.env
+mkdir -p ~/appbaua-env
+nano ~/appbaua-env/dev.env
 ```
 
-Inhalt `dev.env` (Werte anpassen, starke Passwörter wählen):
+Inhalt `dev.env` (Werte anpassen, starkes DB-Passwort wählen):
 
 ```
-APP_PORT=3001
+APP_PORT=8090
 POSTGRES_USER=appbaua
 POSTGRES_PASSWORD=<starkes-passwort-dev>
 POSTGRES_DB=appbaua_dev
 GITHUB_TOKEN=<fine-grained-PAT-fuer-repo-erreichbarkeit>
 ```
 
-Analog `prod.env` mit `APP_PORT=3002`, eigener DB und eigenem Passwort.
 Rechte einschränken:
 
 ```bash
-sudo chmod 600 /etc/appbaua/*.env
+chmod 600 ~/appbaua-env/dev.env
 ```
 
 > Hinweis: `GITHUB_TOKEN` hier ist der PAT für den Repo-Erreichbarkeits-
 > test der App (req-001) — NICHT der Runner-Registrierungs-Token.
 
-## 4. Reverse-Proxy + HTTPS (Caddy empfohlen)
+Für prod später analog `~/appbaua-env/prod.env` mit eigenem Port
+(z.B. 8091), eigener DB und eigenem Passwort.
 
-HTTPS ist Pflicht (siehe [stack.md](stack.md): Kamera/Mikrofon auf iOS
-brauchen einen secure context). Caddy holt Let's-Encrypt-Zertifikate
-automatisch.
+## 3. Erster Deploy
 
-```bash
-sudo apt install -y caddy
-sudo nano /etc/caddy/Caddyfile
-```
-
-```
-dev.appbaua.com {
-    reverse_proxy localhost:3001
-}
-app.appbaua.com {
-    reverse_proxy localhost:3002
-}
-```
+Sobald Runner (Phase 1) läuft und `dev.env` existiert, löst der nächste
+**Push auf `dev`** den Workflow aus: Test-Gate → Build → Container-Start.
+Man kann ihn auch manuell in GitHub (Actions → deploy → Run) anstoßen,
+oder auf dem Host direkt testen:
 
 ```bash
-sudo systemctl reload caddy
-```
-
-## 5. DNS
-
-Beim Domain-Anbieter A-Records (oder AAAA) setzen, die auf die
-öffentliche IP des Mini-PCs zeigen:
-
-- `dev.appbaua.com`  → <IP des Mini-PCs>
-- `app.appbaua.com`  → <IP des Mini-PCs>
-
-Router/Firewall: Ports 80 und 443 auf den Mini-PC weiterleiten (Caddy
-braucht 80 für die Zertifikats-Challenge, 443 für HTTPS).
-
-## 6. Erststart / Test
-
-Nach Schritt 1–5 einmal manuell testen (ersetzt später der Workflow):
-
-```bash
-cd ~/appbaua   # geklontes Repo, oder der Runner-Workspace
-docker compose -p appbaua-dev --env-file /etc/appbaua/dev.env up -d --build
+cd ~/actions-runner-appbaua/_work/appbaua/appbaua   # Runner-Workspace nach 1. Lauf
+docker compose -p appbaua-dev --env-file ~/appbaua-env/dev.env up -d --build
 docker compose -p appbaua-dev logs -f app
 ```
 
-Dann https://dev.appbaua.com öffnen. Klappt das, löst ab jetzt jeder
-Push auf `dev` den Deploy automatisch aus.
+Dann `http://192.168.2.200:8090` öffnen.
+
+## 4. Cloudflare Tunnel (Phase 2, später)
+
+appbaua als Ingress-Einträge in den bestehenden Tunnel aufnehmen
+(analog `app.cellarvoice.com` → `localhost:3002`):
+
+```yaml
+# ~/.cloudflared/config.yml  (Ausschnitt)
+ingress:
+  - hostname: dev.appbaua.com
+    service: http://localhost:8090
+  - hostname: app.appbaua.com
+    service: http://localhost:8091
+  # ... bestehende Einträge ...
+  - service: http_status:404
+```
+
+DNS-Route je Hostname (einmalig):
+
+```bash
+cloudflared tunnel route dns <tunnel-name> dev.appbaua.com
+cloudflared tunnel route dns <tunnel-name> app.appbaua.com
+```
+
+Danach Tunnel neu laden. HTTPS liefert Cloudflare automatisch.
 
 ## Was der Worker NIE tut
 

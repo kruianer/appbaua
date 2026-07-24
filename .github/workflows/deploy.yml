@@ -1,9 +1,10 @@
 name: deploy
 
-# Push auf dev  -> Deploy der dev-Umgebung  (https://dev.appbaua.com)
-# Push auf main -> Deploy der prod-Umgebung (https://app.appbaua.com)
-# Läuft auf dem self-hosted Runner (Beelink Mini-PC). Siehe delivery/devops.md
-# und delivery/deploy-setup.md.
+# Push auf dev  -> Deploy der dev-Umgebung  (vorerst nur im WLAN: :8090)
+# Push auf main -> Deploy der prod-Umgebung  (kommt mit Cloudflare-Tunnel)
+# Laeuft auf dem self-hosted Runner mit Label "appbaua" (Beelink Mini-PC),
+# damit die anderen Runner des Hosts nicht getroffen werden.
+# Siehe delivery/devops.md und delivery/deploy-setup.md.
 
 on:
   push:
@@ -15,7 +16,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: self-hosted
+    runs-on: [self-hosted, appbaua]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,7 +29,7 @@ jobs:
 
   deploy:
     needs: test
-    runs-on: self-hosted
+    runs-on: [self-hosted, appbaua]
     steps:
       - uses: actions/checkout@v4
 
@@ -37,10 +38,10 @@ jobs:
         run: |
           if [ "${{ github.ref_name }}" = "main" ]; then
             echo "project=appbaua-prod" >> "$GITHUB_OUTPUT"
-            echo "envfile=/etc/appbaua/prod.env" >> "$GITHUB_OUTPUT"
+            echo "envfile=$HOME/appbaua-env/prod.env" >> "$GITHUB_OUTPUT"
           else
             echo "project=appbaua-dev" >> "$GITHUB_OUTPUT"
-            echo "envfile=/etc/appbaua/dev.env" >> "$GITHUB_OUTPUT"
+            echo "envfile=$HOME/appbaua-env/dev.env" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build & start containers
