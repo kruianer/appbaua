@@ -1,30 +1,36 @@
+import type { Repo } from "./repos";
+import type { TaskType } from "./task-types";
+import type { RunLogEntry } from "./run-log";
 import { listRepos } from "./repo-service";
 import { listTaskTypes } from "./task-service";
 import { getWorkerState } from "./worker-state";
 import { getRunLogStore } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
+import { executeStep, type StepDecision } from "./execute-step";
 import {
   clearRunningStep,
   setPauseUntil,
   setRunningStep,
 } from "./worker-status";
 
-// The simulated worker loop (req-004). Runs server-side, independent of any
-// browser. Each step waits STEP_MS and logs success/error; ~1 in ERROR_EVERY
-// steps is a simulated error. An empty run logs one "idle" row and waits
-// EMPTY_PAUSE_MS. It also writes its live status (running step / pause window,
-// req-005) so the start page can show what it is doing right now. Deps (sleep,
-// now, shouldFail, and the status mutators) are injectable for tests.
+// The worker loop. Runs server-side, independent of any browser. Each step
+// executes real work via Claude Code (req-006, executeStep): skip / success /
+// error. An empty run logs one "idle" row and waits EMPTY_PAUSE_MS. It also
+// writes its live status (running step / pause window, req-005) so the start
+// page can show what it is doing right now. Deps (runStep, now, status
+// mutators, sleep) are injectable for tests.
 
-export const STEP_MS = 15_000;
 export const EMPTY_PAUSE_MS = 5 * 60_000;
-export const ERROR_EVERY = 10;
 
 export type LoopDeps = {
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
-  /** Given the global step counter, decide if this step is a simulated error. */
-  shouldFail: (stepIndex: number) => boolean;
+  /** Execute one real step (req-006). Returns skip/success/error. */
+  runStep: (
+    repo: Repo,
+    taskType: TaskType,
+    recentLog: RunLogEntry[],
+  ) => Promise<StepDecision>;
   setRunningStep: (repo: string, taskType: string, startedAt: string) => Promise<void>;
   clearRunningStep: () => Promise<void>;
   setPauseUntil: (iso: string | null) => Promise<void>;
@@ -33,7 +39,8 @@ export type LoopDeps = {
 const defaultDeps: LoopDeps = {
   sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
   now: () => new Date(),
-  shouldFail: (stepIndex) => stepIndex % ERROR_EVERY === ERROR_EVERY - 1,
+  runStep: (repo, taskType, recentLog) =>
+    executeStep(repo, taskType, recentLog),
   setRunningStep,
   clearRunningStep,
   setPauseUntil,
@@ -92,21 +99,35 @@ export async function runOnce(
 
     const startedAt = deps.now().toISOString();
     await deps.setRunningStep(step.repo.name, step.taskType.label, startedAt);
-    await deps.sleep(STEP_MS);
+    stepCounter.n += 1;
+
+    // A step must never crash the whole loop or leave the status stuck on
+    // "running": any thrown error becomes a logged "error" entry, and the
+    // running step is always cleared afterwards.
+    let decision: StepDecision;
+    try {
+      const recent = await log.list(0, 500);
+      decision = await deps.runStep(step.repo, step.taskType, recent);
+    } catch (err) {
+      decision = { kind: "error", message: `Schritt abgebrochen: ${String(err)}` };
+    } finally {
+      await deps.clearRunningStep();
+    }
     const endedAt = deps.now().toISOString();
 
-    const failed = deps.shouldFail(stepCounter.n);
-    stepCounter.n += 1;
+    if (decision.kind === "skip") {
+      // Nothing to do for this repo x type (e.g. empty ready/, or already ran
+      // today): no log entry, does not count as work done.
+      continue;
+    }
 
     await log.append({
       startedAt,
       endedAt,
       repo: step.repo.name,
       taskType: step.taskType.label,
-      status: failed ? "error" : "success",
-      message: failed
-        ? "Simuliert: Schritt fehlgeschlagen"
-        : "Simuliert: 15s Pause, Erfolg",
+      status: decision.kind === "success" ? "success" : "error",
+      message: decision.message,
     });
     done += 1;
   }
@@ -119,7 +140,20 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
   const stepCounter = { n: 0 };
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const done = await runOnce(stepCounter, deps);
+    let done = 0;
+    try {
+      done = await runOnce(stepCounter, deps);
+    } catch (err) {
+      // A whole pass failed unexpectedly: never let the loop die. Clear any
+      // stuck running status and pause before trying again.
+      // eslint-disable-next-line no-console
+      console.error("[worker] pass failed:", err);
+      try {
+        await deps.clearRunningStep();
+      } catch {
+        /* ignore */
+      }
+    }
     if (done === 0) {
       // Record the pause window so the start page can show "Pause bis HH:MM".
       const until = new Date(deps.now().getTime() + EMPTY_PAUSE_MS).toISOString();

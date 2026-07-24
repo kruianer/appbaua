@@ -1,10 +1,16 @@
-# Worker process (req-004): runs the simulated execution loop via tsx.
-# Needs the TS source + node_modules at runtime, so no standalone build.
+# Worker process (req-004/006): runs the execution loop via tsx and invokes
+# Claude Code headless to do real work in cloned target repos.
 
 FROM node:22-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+# Where the worker clones target repos (must be writable by the worker user).
+ENV WORKER_WORKDIR=/work
+
+# git for cloning/committing/pushing; the Claude Code CLI for real execution.
+RUN apk add --no-cache git openssh \
+  && npm install -g @anthropic-ai/claude-code
 
 # Install ALL deps (tsx is a runtime dep; the loop imports lib/*.ts directly).
 COPY package.json package-lock.json ./
@@ -16,7 +22,11 @@ COPY lib ./lib
 COPY worker ./worker
 
 RUN addgroup --system --gid 1001 nodejs \
-  && adduser --system --uid 1001 worker
+  && adduser --system --uid 1001 worker \
+  && mkdir -p /work /claude-home \
+  && chown -R worker:nodejs /work /claude-home
+# Claude Code auth lives here (mounted volume); no API key.
+ENV HOME=/claude-home
 USER worker
 
 CMD ["npm", "run", "worker"]
