@@ -44,7 +44,18 @@ jobs:
             echo "envfile=$HOME/appbaua-env/dev.env" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check env file exists
+        id: check
+        run: |
+          if [ -f "${{ steps.env.outputs.envfile }}" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::${{ steps.env.outputs.envfile }} fehlt — Deploy dieser Umgebung wird uebersprungen (noch nicht eingerichtet)."
+          fi
+
       - name: Build & start containers
+        if: steps.check.outputs.ready == 'true'
         run: |
           docker compose \
             -p "${{ steps.env.outputs.project }}" \
@@ -52,4 +63,5 @@ jobs:
             up -d --build
 
       - name: Prune old images
+        if: steps.check.outputs.ready == 'true'
         run: docker image prune -f
