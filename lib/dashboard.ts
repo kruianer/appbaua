@@ -14,6 +14,10 @@ export type DashboardData = {
   // running:
   currentRepo: string | null;
   currentType: string | null;
+  /** .md the running step works on; null for recurring types (req-008). */
+  currentMd: string | null;
+  /** Live Claude output tail of the running step; null unless running (req-008). */
+  currentOutput: string | null;
   stepStartedAt: string | null;
   // pause:
   pauseUntil: string | null;
@@ -58,10 +62,17 @@ export function buildDashboard(input: {
   now: Date;
 }): DashboardData {
   const { enabled, status, repos, taskTypes, today, lastError, now } = input;
+  const phase = derivePhase(enabled, status, now);
+  // The md name and the live output belong to the running step only: once it is
+  // over, the Aktivität tab must not show them any more (req-008) — even if a
+  // late write left something behind in the status row.
+  const running = phase === "running";
   return {
-    phase: derivePhase(enabled, status, now),
+    phase,
     currentRepo: status.currentRepo,
     currentType: status.currentType,
+    currentMd: running ? status.currentMd : null,
+    currentOutput: running ? status.currentOutput : null,
     stepStartedAt: status.stepStartedAt,
     pauseUntil: status.pauseUntil,
     today,

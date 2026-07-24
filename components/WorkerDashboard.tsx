@@ -8,6 +8,9 @@ const muted = (pct: number) =>
 
 const POLL_MS = 5000;
 
+/** Shown instead of a filename for types that are not file-driven (req-008). */
+const RECURRING_LABEL = "wiederkehrende Aufgabe";
+
 function hhmm(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
@@ -66,6 +69,14 @@ export function WorkerDashboard() {
 
   const phase = data?.phase ?? "idle";
   const meta = PHASE_META[phase];
+
+  // Second line while a step runs: the .md being worked on, or the placeholder
+  // for recurring types that have no file (req-008).
+  const mdLine =
+    phase === "running" ? (data?.currentMd ?? RECURRING_LABEL) : null;
+  // Live Claude output — only while the step runs; afterwards the result is in
+  // the Verlauf log (req-004).
+  const liveOutput = phase === "running" ? (data?.currentOutput ?? "") : "";
 
   let statusLine = "…";
   if (data) {
@@ -135,6 +146,39 @@ export function WorkerDashboard() {
           </span>
         </div>
         <div style={{ fontSize: 15, lineHeight: 1.3 }}>{statusLine}</div>
+        {mdLine && (
+          <div
+            style={{
+              fontSize: 13,
+              lineHeight: 1.3,
+              color: muted(60),
+              wordBreak: "break-word",
+            }}
+          >
+            {mdLine}
+          </div>
+        )}
+        {liveOutput && (
+          <pre
+            aria-label="Live-Ausgabe"
+            style={{
+              margin: "var(--space-2) 0 0",
+              maxHeight: 220,
+              overflow: "auto",
+              padding: "var(--space-2)",
+              borderRadius: "var(--radius-md)",
+              background: "color-mix(in srgb, var(--color-text) 8%, transparent)",
+              color: muted(72),
+              fontFamily: "var(--font-mono, ui-monospace, monospace)",
+              fontSize: 11,
+              lineHeight: 1.4,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
+            }}
+          >
+            {liveOutput}
+          </pre>
+        )}
       </div>
 
       {/* Dashboard tiles */}

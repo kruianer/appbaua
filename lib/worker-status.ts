@@ -8,6 +8,17 @@ import path from "node:path";
 export type WorkerStatus = {
   currentRepo: string | null;
   currentType: string | null;
+  /**
+   * Filename of the .md the running step is working on (req-008), e.g.
+   * "req-042-beispiel.md". Null for recurring types, which have no file.
+   */
+  currentMd: string | null;
+  /**
+   * Live tail of the Claude-Code output of the running step (req-008): the
+   * last ~50 lines, rewritten at most about once per second. Null when no step
+   * is running — the finished result lives in the run log (req-004).
+   */
+  currentOutput: string | null;
   stepStartedAt: string | null; // ISO
   pauseUntil: string | null; // ISO
 };
@@ -15,6 +26,8 @@ export type WorkerStatus = {
 export const EMPTY_STATUS: WorkerStatus = {
   currentRepo: null,
   currentType: null,
+  currentMd: null,
+  currentOutput: null,
   stepStartedAt: null,
   pauseUntil: null,
 };
@@ -89,6 +102,8 @@ export async function setRunningStep(
   await getWorkerStatusStore().set({
     currentRepo: repo,
     currentType: taskType,
+    currentMd: null, // filled in once the step picked its file (req-008)
+    currentOutput: null,
     stepStartedAt: startedAt,
     pauseUntil: null,
   });
@@ -96,14 +111,41 @@ export async function setRunningStep(
 
 export async function clearRunningStep(): Promise<void> {
   const s = await getWorkerStatusStore().get();
-  await getWorkerStatusStore().set({ ...s, currentRepo: null, currentType: null, stepStartedAt: null });
+  await getWorkerStatusStore().set({
+    ...s,
+    currentRepo: null,
+    currentType: null,
+    currentMd: null,
+    currentOutput: null,
+    stepStartedAt: null,
+  });
 }
 
 export async function setPauseUntil(iso: string | null): Promise<void> {
   await getWorkerStatusStore().set({
-    currentRepo: null,
-    currentType: null,
-    stepStartedAt: null,
+    ...EMPTY_STATUS,
     pauseUntil: iso,
   });
+}
+
+/**
+ * Both mutators below only write while a step is actually running. The live
+ * output arrives fire-and-forget from the Claude process, so a late write must
+ * never resurrect the display of an already-finished step (req-008).
+ */
+async function patchRunning(patch: Partial<WorkerStatus>): Promise<void> {
+  const store = getWorkerStatusStore();
+  const s = await store.get();
+  if (!s.currentRepo && !s.currentType) return;
+  await store.set({ ...s, ...patch });
+}
+
+/** Name of the .md the running step works on, or null for recurring types. */
+export async function setCurrentMd(md: string | null): Promise<void> {
+  await patchRunning({ currentMd: md });
+}
+
+/** Latest tail of the running step's Claude output. */
+export async function setCurrentOutput(text: string | null): Promise<void> {
+  await patchRunning({ currentOutput: text });
 }
