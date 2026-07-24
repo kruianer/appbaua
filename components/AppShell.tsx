@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { Repo } from "@/lib/repos";
 import type { TaskType } from "@/lib/task-types";
+import type { GithubRepo } from "@/lib/github-repos";
 import { Icon, type IconName } from "./Icon";
 import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
@@ -55,6 +56,8 @@ export function AppShell({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [ghRepos, setGhRepos] = useState<GithubRepo[]>([]);
+  const [ghLoading, setGhLoading] = useState(false);
 
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -69,6 +72,13 @@ export function AppShell({
     setDispName("");
     setError("");
     setSheetOpen(true);
+    // Load the account's repos for the dropdown (best-effort).
+    setGhLoading(true);
+    fetch("/api/github-repos")
+      .then((r) => r.json())
+      .then((d) => setGhRepos(d.repos ?? []))
+      .catch(() => setGhRepos([]))
+      .finally(() => setGhLoading(false));
   }, []);
 
   const submitAdd = useCallback(async () => {
@@ -613,7 +623,36 @@ export function AppShell({
               </button>
             </div>
             <div className="field">
-              <label htmlFor="giturl">Git-URL *</label>
+              <label htmlFor="ghselect">
+                Aus deinen GitHub-Repos wählen
+              </label>
+              <select
+                id="ghselect"
+                className="input"
+                value=""
+                disabled={ghLoading || ghRepos.length === 0}
+                onChange={(e) => {
+                  if (e.target.value) setGitUrl(e.target.value);
+                }}
+              >
+                <option value="">
+                  {ghLoading
+                    ? "lädt…"
+                    : ghRepos.length === 0
+                      ? "keine Repos gefunden (Token?)"
+                      : "— Repo wählen —"}
+                </option>
+                {ghRepos
+                  .filter((g) => !repos.some((r) => r.url === g.url))
+                  .map((g) => (
+                    <option key={g.url} value={g.url}>
+                      {g.fullName}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="giturl">…oder Git-URL eingeben *</label>
               <input
                 id="giturl"
                 className="input"
