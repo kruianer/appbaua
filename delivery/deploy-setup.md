@@ -95,6 +95,27 @@ Rechte einschränken:
 chmod 600 ~/appbaua-env/dev.env
 ```
 
+### System-Kacheln: Host-Einblick ohne Docker-Socket (req-009)
+
+Die Einstellungsseite zeigt Speicherplatz, CPU-Last, RAM und die CPU-Last des
+Workers. Dafür bekommt der **App-Container** in `docker-compose.yml` zwei
+read-only Mounts — nichts davon muss auf dem Host eingerichtet werden, der
+Deploy bringt sie mit:
+
+| Mount               | wofür                                              |
+|---------------------|----------------------------------------------------|
+| `/proc:/host/proc:ro` | CPU-Last, RAM und die Prozesse des Worker-Containers |
+| `/:/host/root:ro`     | freier Speicherplatz des Datenträgers (nur `statfs`) |
+
+Im Host-`/proc` stehen **alle** Prozesse des Rechners, auch die aus anderen
+Containern. Damit findet die App die Worker-Schleife und den während eines
+Schritts laufenden Claude-Prozess — **ohne** Docker-Socket. Erkannt werden sie
+an ihrer Kommandozeile; ändert sich die einmal, lässt sich das Muster über
+`WORKER_PROCESS_MATCH` (kommagetrennt) in der Env-Datei überschreiben.
+
+Fehlt ein Mount, zeigt die betreffende Kachel `n/v` — die übrigen laufen
+weiter.
+
 > Hinweis: `GITHUB_TOKEN` hier ist der PAT für den Repo-Erreichbarkeits-
 > test der App (req-001) — NICHT der Runner-Registrierungs-Token.
 

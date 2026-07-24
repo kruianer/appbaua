@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DashboardData } from "@/lib/dashboard";
+import { Tile } from "./Tile";
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
@@ -211,37 +212,6 @@ export function WorkerDashboard() {
           sub={data?.lastError ? "" : "Kein Fehler bisher"}
         />
       </div>
-    </div>
-  );
-}
-
-function Tile({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-}) {
-  return (
-    <div className="card elev-sm" style={{ gap: 2, padding: "var(--space-3)" }}>
-      <div
-        style={{
-          fontSize: 10,
-          letterSpacing: ".12em",
-          textTransform: "uppercase",
-          color: muted(45),
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.1 }}>
-        {value}
-      </div>
-      {sub && (
-        <div style={{ fontSize: 11, color: muted(55) }}>{sub}</div>
-      )}
     </div>
   );
 }

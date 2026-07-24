@@ -28,10 +28,23 @@ function logEntry(): RunLogEntry {
 }
 
 let entries: RunLogEntry[];
+/** Abrufe der System-Kacheln — sie dürfen nur laufen, solange der Tab offen ist. */
+let systemCalls: number;
 
 function jsonResponse(data: unknown) {
   return { ok: true, json: async () => data };
 }
+
+const systemMetrics = {
+  disk: { freeBytes: 312_000_000_000, totalBytes: 500_000_000_000 },
+  cpu: { percent: 37 },
+  workerCpu: { percent: 4 },
+  memory: {
+    usedBytes: 12_288_000_000,
+    freeBytes: 4_096_000_000,
+    totalBytes: 16_384_000_000,
+  },
+};
 
 const dashboard = {
   phase: "idle",
@@ -48,7 +61,12 @@ const dashboard = {
 
 beforeEach(() => {
   entries = [logEntry()];
+  systemCalls = 0;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url.startsWith("/api/system-metrics")) {
+      systemCalls += 1;
+      return jsonResponse(systemMetrics);
+    }
     if (url.startsWith("/api/worker-status")) return jsonResponse(dashboard);
     if (url.startsWith("/api/run-log")) {
       if (init?.method === "DELETE") {
@@ -126,5 +144,39 @@ describe("AppShell navigation (req-007)", () => {
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Tasks" }));
     expect(screen.getByText("Requirements")).toBeInTheDocument();
+  });
+});
+
+describe("Einstellungen — System-Kacheln (req-009)", () => {
+  it("AC: der Bereich System zeigt vier Kacheln mit den Host-Werten", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+
+    expect(await screen.findByText("System")).toBeInTheDocument();
+    expect(screen.getByText("Freier Speicherplatz")).toBeInTheDocument();
+    expect(screen.getByText("CPU-Last gesamt")).toBeInTheDocument();
+    expect(screen.getByText("CPU-Last des Workers")).toBeInTheDocument();
+    expect(screen.getByText("RAM")).toBeInTheDocument();
+    expect(await screen.findByText("312 GB frei")).toBeInTheDocument();
+    expect(screen.getByText("37 %")).toBeInTheDocument();
+  });
+
+  it("AC: wechsle ich den Tab, werden keine System-Werte mehr abgefragt", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+    expect(await screen.findByText("37 %")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Aktivität" }));
+    expect(screen.queryByText("CPU-Last gesamt")).not.toBeInTheDocument();
+
+    const afterLeaving = systemCalls;
+    // Länger als ein Takt (1s) warten: ein weiterer Abruf müsste hier auffallen.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    expect(systemCalls).toBe(afterLeaving);
   });
 });
