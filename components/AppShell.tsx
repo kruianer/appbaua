@@ -51,9 +51,11 @@ const muted = (pct: number) =>
 export function AppShell({
   initialRepos,
   initialTaskTypes,
+  initialWorkerEnabled,
 }: {
   initialRepos: Repo[];
   initialTaskTypes: TaskType[];
+  initialWorkerEnabled: boolean;
 }) {
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
   const [tab, setTab] = useState<Tab>("repos");
@@ -597,7 +599,10 @@ export function AppShell({
           </div>
         </>
       ) : tab === "settings" ? (
-        <TaskControl initialTaskTypes={initialTaskTypes} />
+        <TaskControl
+          initialTaskTypes={initialTaskTypes}
+          initialWorkerEnabled={initialWorkerEnabled}
+        />
       ) : (
         <div
           style={{

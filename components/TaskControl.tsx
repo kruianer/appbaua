@@ -13,6 +13,7 @@ import {
   type Weekday,
   WEEKDAYS,
   WEEKDAY_LABELS,
+  prefillDay,
   runsAlways,
 } from "@/lib/task-types";
 import { Icon } from "./Icon";
@@ -32,14 +33,28 @@ const DAY_SHORT: Record<Weekday, string> = {
 
 export function TaskControl({
   initialTaskTypes,
+  initialWorkerEnabled,
 }: {
   initialTaskTypes: TaskType[];
+  initialWorkerEnabled: boolean;
 }) {
   const [types, setTypes] = useState<TaskType[]>(initialTaskTypes);
+  const [workerEnabled, setWorkerEnabled] = useState(initialWorkerEnabled);
   const [dragId, setDragId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [dayErrors, setDayErrors] = useState<Record<string, string>>({});
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleWorker = useCallback(async () => {
+    const next = !workerEnabled;
+    setWorkerEnabled(next); // optimistic
+    const res = await fetch("/api/worker-state", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: next }),
+    });
+    if (res.ok) setWorkerEnabled((await res.json()).state.enabled);
+  }, [workerEnabled]);
 
   const persistOrder = useCallback(async (ordered: TaskType[]) => {
     await fetch("/api/task-types/reorder", {
@@ -54,6 +69,16 @@ export function TaskControl({
       prev.map((t) => (t.id === id ? { ...t, active: !t.active } : t)),
     );
     const res = await fetch(`/api/task-types/${id}`, { method: "PATCH" });
+    if (res.ok) setTypes((await res.json()).types);
+  }, []);
+
+  const toggleAlways = useCallback(async (id: string) => {
+    setTypes((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, always: !t.always } : t)),
+    );
+    const res = await fetch(`/api/task-types/${id}/always`, {
+      method: "PATCH",
+    });
     if (res.ok) setTypes((await res.json()).types);
   }, []);
 
@@ -130,6 +155,68 @@ export function TaskControl({
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
+      {/* Global worker main switch (req-003) */}
+      <div
+        className="card elev-md"
+        style={{
+          margin: "2px 0 12px",
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "var(--space-3)",
+          background: workerEnabled
+            ? "linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)), var(--color-surface))"
+            : "var(--color-surface)",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              fontSize: 10,
+              letterSpacing: ".14em",
+              textTransform: "uppercase",
+              color: "var(--color-accent-300)",
+            }}
+          >
+            Worker
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 600 }}>
+            {workerEnabled ? "läuft nach den Einstellungen" : "gestoppt"}
+          </div>
+        </div>
+        <button
+          role="switch"
+          aria-checked={workerEnabled}
+          aria-label="Worker an/aus"
+          onClick={toggleWorker}
+          style={{
+            flex: "none",
+            width: 52,
+            height: 30,
+            borderRadius: 999,
+            border: "none",
+            padding: 3,
+            display: "flex",
+            cursor: "pointer",
+            justifyContent: workerEnabled ? "flex-end" : "flex-start",
+            background: workerEnabled
+              ? "var(--color-accent)"
+              : "color-mix(in srgb, var(--color-text) 22%, transparent)",
+            transition: "background .15s ease",
+          }}
+        >
+          <span
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 999,
+              background: "var(--color-bg)",
+              boxShadow: "0 1px 2px rgba(0,0,0,.4)",
+            }}
+          />
+        </button>
+      </div>
+
       <div
         style={{
           fontSize: 10,
@@ -273,7 +360,7 @@ export function TaskControl({
                 </button>
               </div>
 
-              {/* expanded 7-day schedule */}
+              {/* expanded: immer-switch + (unless always) the 7-day schedule */}
               {open && (
                 <div
                   style={{
@@ -284,99 +371,122 @@ export function TaskControl({
                     borderTop: `1px solid ${muted(12)}`,
                   }}
                 >
-                  {WEEKDAYS.map((day) => {
-                    const ds = t.schedule[day];
-                    const key = `${t.id}:${day}`;
-                    const err = dayErrors[key];
-                    return (
-                      <div
-                        key={day}
-                        style={{
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 4,
-                        }}
-                      >
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={t.always}
+                      aria-label={`${t.label} immer`}
+                      onChange={() => toggleAlways(t.id)}
+                    />
+                    <span>
+                      immer{" "}
+                      <span style={{ color: muted(50) }}>
+                        (rund um die Uhr, keine Wochentage)
+                      </span>
+                    </span>
+                  </label>
+
+                  {!t.always &&
+                    WEEKDAYS.map((day) => {
+                      const ds = t.schedule[day];
+                      const key = `${t.id}:${day}`;
+                      const err = dayErrors[key];
+                      return (
                         <div
+                          key={day}
                           style={{
                             display: "flex",
-                            alignItems: "center",
-                            gap: "var(--space-2)",
+                            flexDirection: "column",
+                            gap: 4,
                           }}
                         >
-                          <label
+                          <div
                             style={{
                               display: "flex",
                               alignItems: "center",
-                              gap: 6,
-                              width: 92,
-                              flex: "none",
-                              fontSize: 13,
+                              gap: "var(--space-2)",
                             }}
                           >
+                            <label
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 6,
+                                width: 92,
+                                flex: "none",
+                                fontSize: 13,
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={ds.enabled}
+                                aria-label={WEEKDAY_LABELS[day]}
+                                onChange={(e) =>
+                                  saveDay(
+                                    t.id,
+                                    day,
+                                    prefillDay({
+                                      ...ds,
+                                      enabled: e.target.checked,
+                                    }),
+                                  )
+                                }
+                              />
+                              {DAY_SHORT[day]}
+                            </label>
                             <input
-                              type="checkbox"
-                              checked={ds.enabled}
-                              aria-label={WEEKDAY_LABELS[day]}
+                              type="time"
+                              className="input"
+                              aria-label={`${WEEKDAY_LABELS[day]} von`}
+                              value={ds.start ?? ""}
+                              disabled={!ds.enabled}
                               onChange={(e) =>
                                 saveDay(t.id, day, {
                                   ...ds,
-                                  enabled: e.target.checked,
+                                  start: e.target.value || null,
                                 })
                               }
+                              style={{ flex: 1, minWidth: 0 }}
                             />
-                            {DAY_SHORT[day]}
-                          </label>
-                          <input
-                            type="time"
-                            className="input"
-                            aria-label={`${WEEKDAY_LABELS[day]} von`}
-                            value={ds.start ?? ""}
-                            disabled={!ds.enabled}
-                            onChange={(e) =>
-                              saveDay(t.id, day, {
-                                ...ds,
-                                start: e.target.value || null,
-                              })
-                            }
-                            style={{ flex: 1, minWidth: 0 }}
-                          />
-                          <span style={{ color: muted(50) }}>–</span>
-                          <input
-                            type="time"
-                            className="input"
-                            aria-label={`${WEEKDAY_LABELS[day]} bis`}
-                            value={ds.end ?? ""}
-                            disabled={!ds.enabled}
-                            onChange={(e) =>
-                              saveDay(t.id, day, {
-                                ...ds,
-                                end: e.target.value || null,
-                              })
-                            }
-                            style={{ flex: 1, minWidth: 0 }}
-                          />
+                            <span style={{ color: muted(50) }}>–</span>
+                            <input
+                              type="time"
+                              className="input"
+                              aria-label={`${WEEKDAY_LABELS[day]} bis`}
+                              value={ds.end ?? ""}
+                              disabled={!ds.enabled}
+                              onChange={(e) =>
+                                saveDay(t.id, day, {
+                                  ...ds,
+                                  end: e.target.value || null,
+                                })
+                              }
+                              style={{ flex: 1, minWidth: 0 }}
+                            />
+                          </div>
+                          {err && (
+                            <div
+                              role="alert"
+                              style={{
+                                fontSize: 12,
+                                fontWeight: 600,
+                                color: "var(--color-accent-300)",
+                              }}
+                            >
+                              {err}
+                            </div>
+                          )}
                         </div>
-                        {ds.enabled && !ds.start && !ds.end && (
-                          <div style={{ fontSize: 11, color: muted(50) }}>
-                            ganztägig (00:00–23:59)
-                          </div>
-                        )}
-                        {err && (
-                          <div
-                            role="alert"
-                            style={{
-                              fontSize: 12,
-                              fontWeight: 600,
-                              color: "var(--color-accent-300)",
-                            }}
-                          >
-                            {err}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -397,5 +507,5 @@ function scheduleSummary(t: TaskType): string {
     if (ds.start && ds.end) parts.push(`${DAY_SHORT[day]} ${ds.start}–${ds.end}`);
     else parts.push(`${DAY_SHORT[day]} ganztägig`);
   }
-  return parts.length ? parts.join(" · ") : "läuft immer";
+  return parts.length ? parts.join(" · ") : "keine Zeiten gesetzt";
 }

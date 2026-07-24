@@ -23,10 +23,15 @@ weder anlegen noch löschen, nur einstellen. Pro Typ kann ich:
 - die Priorität per Drag & Drop festlegen — Position 1 = höchste
   Priorität,
 - den Typ aktiv/inaktiv schalten (inaktiv = läuft nie, unabhängig von
-  den gesetzten Zeiten),
+  den gesetzten Zeiten; ändert die Zeitvorgaben NICHT — kurzfristiger
+  An/Aus),
+- einen Schalter "immer" setzen: ist er an, läuft der Typ rund um die
+  Uhr und die Wochentags-Ansicht ist ausgeblendet; ist er aus, erscheint
+  die Wochentags-Ansicht mit den gespeicherten Werten,
 - pro Wochentag (Montag bis Sonntag) einzeln festlegen, ob und in
   welchem Uhrzeit-Fenster (von–bis, Format HH:MM) der Typ an diesem Tag
-  laufen darf.
+  laufen darf. Beim Anhaken eines Tages werden leere Zeitfelder
+  vorbelegt: leeres "von" mit 00:00, leeres "bis" mit 23:59.
 
 Die Einstellungen gelten global für den ganzen Worker (nicht pro Repo).
 Jede Änderung wird sofort automatisch gespeichert und ist sofort
@@ -57,16 +62,20 @@ wirksam.
   anhake und als Fenster 17:00–19:00 eintrage, then ist für Code-Review
   am Mittwoch das Fenster 17:00–19:00 gespeichert (sichtbar auch nach
   Neuladen).
-- [ ] Given ich hake bei "Ideen" Montag an, aber trage kein Uhrzeit-
-  Fenster ein, when ich die Ansicht verlasse, then gilt Montag als
-  ganztägig (00:00–23:59) für "Ideen".
+- [ ] Given ich hake bei "Ideen" Montag an, während beide Zeitfelder
+  leer sind, when der Tag angehakt wird, then werden die Felder auf
+  00:00 (von) und 23:59 (bis) vorbelegt.
 - [ ] Given ich trage für "Bugs" am Dienstag das Fenster 19:00–17:00
   ein (Ende vor Anfang), when ich das Feld verlasse, then sehe ich den
   Hinweis "Endzeit muss nach der Startzeit liegen" und das ungültige
   Fenster wird NICHT gespeichert.
-- [ ] Given der Typ "Requirements" ist aktiv und hat keine Wochentage
-  gewählt, when ich die Einstellungen betrachte, then ist erkennbar,
-  dass "Requirements" jederzeit (immer) laufen darf.
+- [ ] Given der Typ "Requirements" hat den Schalter "immer" aus und
+  keinen Wochentag gewählt, when ich "immer" einschalte, then ist die
+  Wochentags-Ansicht ausgeblendet und der Typ läuft rund um die Uhr.
+- [ ] Given der Typ "Requirements" hat "immer" an mit gespeicherten
+  Wochentagen darunter, when ich "immer" wieder ausschalte, then
+  erscheint die Wochentags-Ansicht mit genau den vorher gespeicherten
+  Werten.
 - [ ] Given ich betrachte die Task-Steuerung, when die Seite angezeigt
   wird, then gibt es KEINE Möglichkeit, einen neuen Task-Typ anzulegen
   oder einen bestehenden zu löschen.

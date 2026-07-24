@@ -4,6 +4,7 @@ import {
   type TaskType,
   type Weekday,
   isValidWindow,
+  prefillDay,
 } from "./task-types";
 
 // Application service for req-002. Routes stay thin and call these; tests
@@ -40,6 +41,15 @@ export async function toggleTaskType(id: string): Promise<TaskType[]> {
   return getTaskStore().replace(next);
 }
 
+/** Toggle the "immer" flag. Weekday schedule is kept untouched underneath. */
+export async function toggleAlways(id: string): Promise<TaskType[]> {
+  const types = await getTaskStore().list();
+  const next = types.map((t) =>
+    t.id === id ? { ...t, always: !t.always } : t,
+  );
+  return getTaskStore().replace(next);
+}
+
 export type SetDayResult =
   | { ok: true; types: TaskType[] }
   | { ok: false; error: "invalid-window" | "not-found" };
@@ -53,10 +63,17 @@ export async function setDaySchedule(
   day: Weekday,
   value: DaySchedule,
 ): Promise<SetDayResult> {
-  const start = value.start && value.start.length > 0 ? value.start : null;
-  const end = value.end && value.end.length > 0 ? value.end : null;
+  const normalized: DaySchedule = {
+    enabled: value.enabled,
+    start: value.start && value.start.length > 0 ? value.start : null,
+    end: value.end && value.end.length > 0 ? value.end : null,
+  };
 
-  if (!isValidWindow(start, end)) {
+  // When the day is enabled, fill empty sides (00:00 / 23:59) so a freshly
+  // ticked day gets a full-day window instead of an empty one.
+  const dayValue = prefillDay(normalized);
+
+  if (!isValidWindow(dayValue.start, dayValue.end)) {
     return { ok: false, error: "invalid-window" };
   }
 
@@ -66,13 +83,7 @@ export async function setDaySchedule(
 
   const next = types.map((t) =>
     t.id === id
-      ? {
-          ...t,
-          schedule: {
-            ...t.schedule,
-            [day]: { enabled: value.enabled, start, end },
-          },
-        }
+      ? { ...t, schedule: { ...t.schedule, [day]: dayValue } }
       : t,
   );
   const saved = await getTaskStore().replace(next);

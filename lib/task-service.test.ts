@@ -4,6 +4,7 @@ import {
   listTaskTypes,
   reorderTaskTypes,
   setDaySchedule,
+  toggleAlways,
   toggleTaskType,
 } from "./task-service";
 import { runsAlways } from "./task-types";
@@ -73,7 +74,7 @@ describe("req-002 acceptance criteria", () => {
     });
   });
 
-  it("AC: a day enabled without a window counts as all day", async () => {
+  it("AC: enabling a day with empty fields prefills 00:00–23:59", async () => {
     await setDaySchedule("ideen", "mon", {
       enabled: true,
       start: null,
@@ -82,8 +83,8 @@ describe("req-002 acceptance criteria", () => {
     const ideen = (await listTaskTypes()).find((t) => t.id === "ideen")!;
     expect(ideen.schedule.mon).toEqual({
       enabled: true,
-      start: null,
-      end: null,
+      start: "00:00",
+      end: "23:59",
     });
   });
 
@@ -98,17 +99,40 @@ describe("req-002 acceptance criteria", () => {
     expect(bug.schedule.tue.enabled).toBe(false); // unchanged
   });
 
-  it("AC: an active type with no weekdays runs always", async () => {
+  it("AC: a type defaults to always-on (runs always)", async () => {
     const req = (await listTaskTypes()).find((t) => t.id === "requirement")!;
+    expect(req.always).toBe(true);
     expect(runsAlways(req)).toBe(true);
   });
 
-  it("only-one-side window is rejected", async () => {
+  it("AC: toggling 'immer' off keeps the underlying schedule", async () => {
+    await setDaySchedule("requirement", "wed", {
+      enabled: true,
+      start: "17:00",
+      end: "19:00",
+    });
+    const off = await toggleAlways("requirement");
+    const req = off.find((t) => t.id === "requirement")!;
+    expect(req.always).toBe(false); // weekday view would now show
+    expect(req.schedule.wed).toEqual({
+      enabled: true,
+      start: "17:00",
+      end: "19:00",
+    }); // schedule preserved underneath
+  });
+
+  it("only-one-side window gets the empty side prefilled (09:00–23:59)", async () => {
     const res = await setDaySchedule("bug", "mon", {
       enabled: true,
       start: "09:00",
       end: null,
     });
-    expect(res).toEqual({ ok: false, error: "invalid-window" });
+    expect(res.ok).toBe(true);
+    const bug = (await listTaskTypes()).find((t) => t.id === "bug")!;
+    expect(bug.schedule.mon).toEqual({
+      enabled: true,
+      start: "09:00",
+      end: "23:59",
+    });
   });
 });

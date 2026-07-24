@@ -39,6 +39,8 @@ export type TaskType = {
   id: string; // stable slug, e.g. "bug"
   label: string; // display name, e.g. "Bugs"
   active: boolean;
+  /** When true, the type runs around the clock and the weekday view hides. */
+  always: boolean;
   schedule: Schedule;
 };
 
@@ -63,6 +65,7 @@ export function defaultTaskTypes(): TaskType[] {
     id: t.id,
     label: t.label,
     active: true,
+    always: true, // default: runs anytime until the user restricts it
     schedule: emptySchedule(),
   }));
 }
@@ -92,10 +95,20 @@ export function isValidWindow(start: string | null, end: string | null): boolean
   return e > s;
 }
 
-/**
- * True when an active type has no weekday enabled at all — meaning it may run
- * anytime ("immer").
- */
+/** True when an active type runs around the clock (the "immer" flag). */
 export function runsAlways(t: TaskType): boolean {
-  return t.active && !WEEKDAYS.some((d) => t.schedule[d].enabled);
+  return t.active && t.always;
+}
+
+/**
+ * Fill empty sides of a window when a day is enabled: empty start -> "00:00",
+ * empty end -> "23:59". A day that is disabled is returned unchanged.
+ */
+export function prefillDay(day: DaySchedule): DaySchedule {
+  if (!day.enabled) return day;
+  return {
+    enabled: true,
+    start: day.start && day.start.length > 0 ? day.start : "00:00",
+    end: day.end && day.end.length > 0 ? day.end : "23:59",
+  };
 }

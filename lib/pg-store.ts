@@ -5,6 +5,7 @@ import type { Repo } from "./repos";
 import type { RepoStore } from "./store";
 import { type TaskType, defaultTaskTypes } from "./task-types";
 import type { TaskTypeStore } from "./task-store";
+import type { WorkerState, WorkerStateStore } from "./worker-state";
 
 // PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
 // is set (see store.ts). "position" holds the priority order (0 = highest);
@@ -106,9 +107,10 @@ export function createPgTaskStore(): TaskTypeStore {
         id: string;
         label: string;
         active: boolean;
+        always: boolean;
         schedule: TaskType["schedule"];
       }>(
-        "SELECT id, label, active, schedule FROM task_types ORDER BY position ASC",
+        "SELECT id, label, active, always, schedule FROM task_types ORDER BY position ASC",
       );
       if (res.rows.length === 0) {
         const seeded = defaultTaskTypes();
@@ -119,6 +121,7 @@ export function createPgTaskStore(): TaskTypeStore {
         id: r.id,
         label: r.label,
         active: r.active,
+        always: r.always,
         schedule: r.schedule,
       }));
     },
@@ -132,8 +135,8 @@ export function createPgTaskStore(): TaskTypeStore {
         for (let i = 0; i < types.length; i++) {
           const t = types[i];
           await client.query(
-            "INSERT INTO task_types (id, label, active, schedule, position) VALUES ($1, $2, $3, $4, $5)",
-            [t.id, t.label, t.active, JSON.stringify(t.schedule), i],
+            "INSERT INTO task_types (id, label, active, always, schedule, position) VALUES ($1, $2, $3, $4, $5, $6)",
+            [t.id, t.label, t.active, t.always, JSON.stringify(t.schedule), i],
           );
         }
         await client.query("COMMIT");
@@ -144,6 +147,28 @@ export function createPgTaskStore(): TaskTypeStore {
         client.release();
       }
       return types;
+    },
+  };
+}
+
+export function createPgWorkerStore(): WorkerStateStore {
+  return {
+    async get(): Promise<WorkerState> {
+      await ensureSchema();
+      const res = await getPool().query<{ enabled: boolean }>(
+        "SELECT enabled FROM worker_state WHERE id = 'worker'",
+      );
+      if (res.rows.length === 0) return { enabled: true }; // default on
+      return { enabled: res.rows[0].enabled };
+    },
+    async set(state: WorkerState): Promise<WorkerState> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO worker_state (id, enabled) VALUES ('worker', $1)
+         ON CONFLICT (id) DO UPDATE SET enabled = EXCLUDED.enabled`,
+        [state.enabled],
+      );
+      return state;
     },
   };
 }

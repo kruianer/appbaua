@@ -4,6 +4,7 @@ import {
   defaultTaskTypes,
   isValidTime,
   isValidWindow,
+  prefillDay,
   runsAlways,
   toMinutes,
 } from "./task-types";
@@ -18,9 +19,10 @@ describe("defaultTaskTypes", () => {
       "Ideen",
     ]);
   });
-  it("all start active with an empty schedule", () => {
+  it("all start active, always-on, with an empty schedule", () => {
     for (const t of defaultTaskTypes()) {
       expect(t.active).toBe(true);
+      expect(t.always).toBe(true);
       expect(Object.values(t.schedule).every((d) => !d.enabled)).toBe(true);
     }
   });
@@ -72,12 +74,38 @@ describe("isValidWindow", () => {
 });
 
 describe("runsAlways", () => {
-  it("active type with no enabled days runs always", () => {
+  it("active type with the always flag runs always", () => {
     const [t] = defaultTaskTypes();
+    expect(t.always).toBe(true);
     expect(runsAlways(t)).toBe(true);
   });
-  it("inactive type does not 'run always'", () => {
-    const t = { ...defaultTaskTypes()[0], active: false };
+  it("always off = does not run always", () => {
+    const t = { ...defaultTaskTypes()[0], always: false };
     expect(runsAlways(t)).toBe(false);
+  });
+  it("inactive type does not 'run always' even with always on", () => {
+    const t = { ...defaultTaskTypes()[0], active: false, always: true };
+    expect(runsAlways(t)).toBe(false);
+  });
+});
+
+describe("prefillDay", () => {
+  it("fills empty sides on an enabled day (00:00 / 23:59)", () => {
+    expect(prefillDay({ enabled: true, start: null, end: null })).toEqual({
+      enabled: true,
+      start: "00:00",
+      end: "23:59",
+    });
+  });
+  it("fills only the empty side", () => {
+    expect(prefillDay({ enabled: true, start: "09:00", end: null })).toEqual({
+      enabled: true,
+      start: "09:00",
+      end: "23:59",
+    });
+  });
+  it("leaves a disabled day untouched", () => {
+    const d = { enabled: false, start: null, end: null };
+    expect(prefillDay(d)).toEqual(d);
   });
 });
