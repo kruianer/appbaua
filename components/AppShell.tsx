@@ -14,17 +14,21 @@ import type { GithubRepo } from "@/lib/github-repos";
 import { Icon, type IconName } from "./Icon";
 import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
+import { Settings } from "./Settings";
 import { WorkerDashboard } from "./WorkerDashboard";
 
-type Tab = "aktiv" | "verlauf" | "repos" | "settings";
+type Tab = "aktiv" | "verlauf" | "repos" | "settings" | "einstellungen";
 
 // Aktivität is the start view and the first nav entry (req-005).
-// Order: Aktivität, Verlauf, Repos, Tasks.
+// Order: Aktivität, Verlauf, Repos, Tasks, Einstellungen (req-007).
+// The "settings" key is the Tasks tab (historical); "einstellungen" is the
+// Einstellungsseite and owns the cog icon, so Tasks shows a list icon.
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "aktiv", label: "Aktivität", icon: "activity" },
   { key: "verlauf", label: "Verlauf", icon: "clock" },
   { key: "repos", label: "Repos", icon: "gitbranch" },
-  { key: "settings", label: "Tasks", icon: "settings" },
+  { key: "settings", label: "Tasks", icon: "list" },
+  { key: "einstellungen", label: "Einstellungen", icon: "settings" },
 ];
 
 const MODULE_TITLE: Record<Tab, string> = {
@@ -32,6 +36,7 @@ const MODULE_TITLE: Record<Tab, string> = {
   verlauf: "Verlauf",
   repos: "Repo-Verwaltung",
   settings: "Task-Steuerung",
+  einstellungen: "Einstellungen",
 };
 
 const muted = (pct: number) =>
@@ -316,6 +321,11 @@ export function AppShell({
             Priorität und Zeiten je Task-Typ — gilt für alle Repos.
           </div>
         )}
+        {tab === "einstellungen" && (
+          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+            Wartung und Optionen der App.
+          </div>
+        )}
       </div>
 
       {tab === "aktiv" ? (
@@ -525,12 +535,15 @@ export function AppShell({
           initialTaskTypes={initialTaskTypes}
           initialWorkerEnabled={initialWorkerEnabled}
         />
+      ) : tab === "einstellungen" ? (
+        <Settings />
       ) : (
         <RunLog />
       )}
 
       {/* Bottom tab bar */}
-      <div
+      <nav
+        aria-label="Hauptnavigation"
         style={{
           flex: "none",
           position: "relative",
@@ -571,12 +584,18 @@ export function AppShell({
             }}
           >
             <Icon name={t.icon} size={23} />
-            <span style={{ fontSize: 10, letterSpacing: ".01em" }}>
+            <span
+              style={{
+                fontSize: 10,
+                letterSpacing: ".01em",
+                whiteSpace: "nowrap",
+              }}
+            >
               {t.label}
             </span>
           </button>
         ))}
-      </div>
+      </nav>
 
       {/* Add sheet */}
       {sheetOpen && (

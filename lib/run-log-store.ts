@@ -23,6 +23,12 @@ export interface RunLogStore {
   metricsSince(sinceIso: string): Promise<TodayMetrics>;
   /** The most recent 'error' entry, or null. */
   lastError(): Promise<RunLogEntry | null>;
+  /**
+   * Delete every log entry (req-007, manual "Verlauf-Log löschen"). Touches
+   * only the log — repos, task types and worker status stay as they are, and
+   * the automatic retention above is unaffected.
+   */
+  clear(): Promise<void>;
 }
 
 /** Drop entries older than the cutoff, then keep only the newest maxRows. */
@@ -86,6 +92,9 @@ export function createFileRunLogStore(): RunLogStore {
       const all = await readAll();
       return findLastError(all);
     },
+    async clear() {
+      await writeAll([]);
+    },
   };
 }
 
@@ -135,6 +144,10 @@ export function createMemoryRunLogStore(
     },
     async lastError() {
       return findLastError(entries);
+    },
+    async clear() {
+      // Only the entries go; `seq` keeps counting so ids stay unique.
+      entries = [];
     },
   };
 }

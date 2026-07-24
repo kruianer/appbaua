@@ -273,6 +273,11 @@ export function createPgRunLogStore(): RunLogStore {
       );
       return res.rows.length ? toEntry(res.rows[0]) : null;
     },
+    async clear(): Promise<void> {
+      await ensureSchema();
+      // Only run_log — repos, task_types, worker_state and worker_status stay.
+      await getPool().query("DELETE FROM run_log");
+    },
   };
 }
 

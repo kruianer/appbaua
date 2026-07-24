@@ -13,3 +13,10 @@ export async function GET(request: Request) {
   const hasMore = (page + 1) * LOG_PAGE_SIZE < total;
   return NextResponse.json({ entries, total, page, hasMore });
 }
+
+// Manual "Verlauf-Log löschen" (req-007): wipes the whole log and nothing else.
+// Allowed at any time, also while the worker is running.
+export async function DELETE() {
+  await getRunLogStore().clear();
+  return NextResponse.json({ total: 0 });
+}
