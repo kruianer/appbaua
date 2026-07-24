@@ -53,3 +53,15 @@ CREATE TABLE IF NOT EXISTS run_log (
 );
 
 CREATE INDEX IF NOT EXISTS run_log_started_idx ON run_log (started_at DESC);
+
+-- Live worker status (req-005). Single row keyed "worker". Holds the currently
+-- running step (repo/task_type/started_at) while it runs, and pause_until while
+-- the worker is in its 5-minute empty pause. All null = idle.
+
+CREATE TABLE IF NOT EXISTS worker_status (
+  id              TEXT PRIMARY KEY,
+  current_repo    TEXT,
+  current_type    TEXT,
+  step_started_at TIMESTAMPTZ,
+  pause_until     TIMESTAMPTZ
+);

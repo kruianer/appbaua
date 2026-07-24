@@ -14,6 +14,11 @@ import {
   LOG_MAX_ROWS,
 } from "./run-log";
 import type { RunLogStore } from "./run-log-store";
+import {
+  type WorkerStatus,
+  type WorkerStatusStore,
+  EMPTY_STATUS,
+} from "./worker-status";
 
 // PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
 // is set (see store.ts). "position" holds the priority order (0 = highest);
@@ -245,6 +250,73 @@ export function createPgRunLogStore(): RunLogStore {
         "SELECT COUNT(*)::text AS c FROM run_log",
       );
       return Number(res.rows[0].c);
+    },
+    async metricsSince(sinceIso: string) {
+      await ensureSchema();
+      const res = await getPool().query<{ done: string; errors: string }>(
+        `SELECT
+           COUNT(*) FILTER (WHERE status IN ('success','error'))::text AS done,
+           COUNT(*) FILTER (WHERE status = 'error')::text AS errors
+         FROM run_log WHERE started_at >= $1`,
+        [sinceIso],
+      );
+      return {
+        done: Number(res.rows[0].done),
+        errors: Number(res.rows[0].errors),
+      };
+    },
+    async lastError(): Promise<RunLogEntry | null> {
+      await ensureSchema();
+      const res = await getPool().query<Row>(
+        `SELECT id, started_at, ended_at, repo, task_type, status, message
+         FROM run_log WHERE status = 'error' ORDER BY id DESC LIMIT 1`,
+      );
+      return res.rows.length ? toEntry(res.rows[0]) : null;
+    },
+  };
+}
+
+export function createPgWorkerStatusStore(): WorkerStatusStore {
+  const iso = (d: Date | null): string | null =>
+    d ? new Date(d).toISOString() : null;
+  return {
+    async get(): Promise<WorkerStatus> {
+      await ensureSchema();
+      const res = await getPool().query<{
+        current_repo: string | null;
+        current_type: string | null;
+        step_started_at: Date | null;
+        pause_until: Date | null;
+      }>(
+        "SELECT current_repo, current_type, step_started_at, pause_until FROM worker_status WHERE id = 'worker'",
+      );
+      if (res.rows.length === 0) return { ...EMPTY_STATUS };
+      const r = res.rows[0];
+      return {
+        currentRepo: r.current_repo,
+        currentType: r.current_type,
+        stepStartedAt: iso(r.step_started_at),
+        pauseUntil: iso(r.pause_until),
+      };
+    },
+    async set(status: WorkerStatus): Promise<WorkerStatus> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until)
+         VALUES ('worker', $1, $2, $3, $4)
+         ON CONFLICT (id) DO UPDATE SET
+           current_repo = EXCLUDED.current_repo,
+           current_type = EXCLUDED.current_type,
+           step_started_at = EXCLUDED.step_started_at,
+           pause_until = EXCLUDED.pause_until`,
+        [
+          status.currentRepo,
+          status.currentType,
+          status.stepStartedAt,
+          status.pauseUntil,
+        ],
+      );
+      return status;
     },
   };
 }

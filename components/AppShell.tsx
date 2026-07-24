@@ -10,34 +10,27 @@ import {
 } from "react";
 import type { Repo } from "@/lib/repos";
 import type { TaskType } from "@/lib/task-types";
+import type { GithubRepo } from "@/lib/github-repos";
 import { Icon, type IconName } from "./Icon";
 import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
+import { WorkerDashboard } from "./WorkerDashboard";
 
-type Tab = "repos" | "aktiv" | "verlauf" | "settings";
+type Tab = "aktiv" | "verlauf" | "repos" | "settings";
 
+// Aktivität is the start view and the first nav entry (req-005).
+// Order: Aktivität, Verlauf, Repos, Tasks.
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
-  { key: "repos", label: "Repos", icon: "gitbranch" },
   { key: "aktiv", label: "Aktivität", icon: "activity" },
   { key: "verlauf", label: "Verlauf", icon: "clock" },
-  { key: "settings", label: "Einstellungen", icon: "settings" },
+  { key: "repos", label: "Repos", icon: "gitbranch" },
+  { key: "settings", label: "Tasks", icon: "settings" },
 ];
 
-const PLACEHOLDER: Record<
-  "aktiv",
-  { icon: IconName; title: string; text: string }
-> = {
-  aktiv: {
-    icon: "activity",
-    title: "Aktivität",
-    text: "Live-Aktivität des Workers — welche Datei gerade bearbeitet wird und der aktuelle Schritt. Bald verfügbar.",
-  },
-};
-
 const MODULE_TITLE: Record<Tab, string> = {
-  repos: "Repo-Verwaltung",
   aktiv: "Aktivität",
   verlauf: "Verlauf",
+  repos: "Repo-Verwaltung",
   settings: "Task-Steuerung",
 };
 
@@ -54,7 +47,7 @@ export function AppShell({
   initialWorkerEnabled: boolean;
 }) {
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
-  const [tab, setTab] = useState<Tab>("repos");
+  const [tab, setTab] = useState<Tab>("aktiv");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -63,6 +56,8 @@ export function AppShell({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  const [ghRepos, setGhRepos] = useState<GithubRepo[]>([]);
+  const [ghLoading, setGhLoading] = useState(false);
 
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -70,8 +65,6 @@ export function AppShell({
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
-  const active = repos.filter((r) => r.active).length;
-  const inactive = repos.length - active;
   const confirmRepo = repos.find((r) => r.id === confirmId) ?? null;
 
   const openSheet = useCallback(() => {
@@ -79,6 +72,13 @@ export function AppShell({
     setDispName("");
     setError("");
     setSheetOpen(true);
+    // Load the account's repos for the dropdown (best-effort).
+    setGhLoading(true);
+    fetch("/api/github-repos")
+      .then((r) => r.json())
+      .then((d) => setGhRepos(d.repos ?? []))
+      .catch(() => setGhRepos([]))
+      .finally(() => setGhLoading(false));
   }, []);
 
   const submitAdd = useCallback(async () => {
@@ -187,7 +187,7 @@ export function AppShell({
 
   const appStyle: CSSProperties = {
     position: "relative",
-    minHeight: "100dvh",
+    height: "100dvh", // fixed viewport height: header/footer stay put, middle scrolls
     maxWidth: 460,
     margin: "0 auto",
     display: "flex",
@@ -203,6 +203,7 @@ export function AppShell({
       {/* App bar */}
       <div
         style={{
+          flexShrink: 0,
           padding: "12px 16px 6px",
           display: "flex",
           alignItems: "center",
@@ -285,7 +286,7 @@ export function AppShell({
       </div>
 
       {/* Module title */}
-      <div style={{ padding: "6px 20px 10px", minWidth: 0 }}>
+      <div style={{ flexShrink: 0, padding: "6px 20px 10px", minWidth: 0 }}>
         <div
           style={{
             fontSize: 10,
@@ -300,6 +301,11 @@ export function AppShell({
         <h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.02em" }}>
           {MODULE_TITLE[tab]}
         </h2>
+        {tab === "aktiv" && (
+          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+            Was der Worker gerade tut.
+          </div>
+        )}
         {tab === "repos" && (
           <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
             Der Worker arbeitet die Liste von oben nach unten ab.
@@ -312,91 +318,11 @@ export function AppShell({
         )}
       </div>
 
-      {tab === "repos" ? (
+      {tab === "aktiv" ? (
+        <WorkerDashboard />
+      ) : tab === "repos" ? (
         <>
-          {/* Worker status card (idle — worker not running for appbaua itself) */}
-          <div
-            className="card elev-md"
-            style={{
-              margin: "0 20px 12px",
-              gap: "var(--space-2)",
-              background:
-                "linear-gradient(180deg, color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)), var(--color-surface))",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-              }}
-            >
-              <span
-                style={{
-                  fontSize: 10,
-                  letterSpacing: ".14em",
-                  textTransform: "uppercase",
-                  color: "var(--color-accent-300)",
-                }}
-              >
-                Worker
-              </span>
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  fontSize: 11,
-                  color: "var(--color-accent-300)",
-                  border: "1px solid var(--color-accent)",
-                  padding: "2px 9px",
-                  borderRadius: 999,
-                }}
-              >
-                <span
-                  style={{
-                    width: 7,
-                    height: 7,
-                    borderRadius: 999,
-                    flex: "none",
-                    background: muted(35),
-                  }}
-                />
-                Leerlauf
-              </span>
-            </div>
-            <div style={{ fontSize: 15, lineHeight: 1.3, color: muted(65) }}>
-              im Leerlauf — keine aktiven Repos
-            </div>
-            <div
-              style={{
-                display: "flex",
-                gap: "var(--space-4)",
-                fontSize: 12,
-                color: muted(60),
-                marginTop: 2,
-              }}
-            >
-              <span>
-                <strong style={{ color: "var(--color-text)" }}>{active}</strong>{" "}
-                aktiv
-              </span>
-              <span>
-                <strong style={{ color: "var(--color-text)" }}>
-                  {inactive}
-                </strong>{" "}
-                inaktiv
-              </span>
-              <span>
-                <strong style={{ color: "var(--color-text)" }}>
-                  {repos.length}
-                </strong>{" "}
-                gesamt
-              </span>
-            </div>
-          </div>
-
-          {/* List / empty state */}
+          {/* List / empty state (Repo-Verwaltung only, no dashboard) */}
           <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
             {repos.length > 0 ? (
               <>
@@ -599,39 +525,8 @@ export function AppShell({
           initialTaskTypes={initialTaskTypes}
           initialWorkerEnabled={initialWorkerEnabled}
         />
-      ) : tab === "verlauf" ? (
-        <RunLog />
       ) : (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-            gap: "var(--space-3)",
-            padding: "var(--space-8)",
-          }}
-        >
-          <div
-            style={{
-              width: 66,
-              height: 66,
-              borderRadius: 999,
-              display: "grid",
-              placeItems: "center",
-              color: "var(--color-accent-300)",
-              border: "1px solid var(--color-accent)",
-            }}
-          >
-            <Icon name={PLACEHOLDER[tab].icon} size={30} />
-          </div>
-          <h3 style={{ margin: 0 }}>{PLACEHOLDER[tab].title}</h3>
-          <p style={{ margin: 0, fontSize: 14, maxWidth: 240, color: muted(60) }}>
-            {PLACEHOLDER[tab].text}
-          </p>
-        </div>
+        <RunLog />
       )}
 
       {/* Bottom tab bar */}
@@ -728,7 +623,36 @@ export function AppShell({
               </button>
             </div>
             <div className="field">
-              <label htmlFor="giturl">Git-URL *</label>
+              <label htmlFor="ghselect">
+                Aus deinen GitHub-Repos wählen
+              </label>
+              <select
+                id="ghselect"
+                className="input"
+                value=""
+                disabled={ghLoading || ghRepos.length === 0}
+                onChange={(e) => {
+                  if (e.target.value) setGitUrl(e.target.value);
+                }}
+              >
+                <option value="">
+                  {ghLoading
+                    ? "lädt…"
+                    : ghRepos.length === 0
+                      ? "keine Repos gefunden (Token?)"
+                      : "— Repo wählen —"}
+                </option>
+                {ghRepos
+                  .filter((g) => !repos.some((r) => r.url === g.url))
+                  .map((g) => (
+                    <option key={g.url} value={g.url}>
+                      {g.fullName}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="giturl">…oder Git-URL eingeben *</label>
               <input
                 id="giturl"
                 className="input"

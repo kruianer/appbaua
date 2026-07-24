@@ -19,7 +19,9 @@ Eine Seite in der Webapp zeigt eine sortierbare Liste der Repos, die der
 Worker bearbeiten soll. Jeder Eintrag zeigt einen Anzeigenamen und die
 Git-URL. Ich kann:
 
-- ein Repo hinzufügen (Git-URL als Pflichtangabe, Anzeigename optional),
+- ein Repo hinzufügen: entweder aus einer Auswahlliste der über den
+  hinterlegten GitHub-Token erreichbaren Repos wählen ODER eine Git-URL
+  von Hand eingeben (Anzeigename optional),
 - die Reihenfolge per Drag & Drop ändern — Position 1 = höchste
   Priorität,
 - ein Repo aktiv/inaktiv schalten (inaktiv bleibt an seiner Position,
@@ -65,6 +67,12 @@ mit ausgeliefert.
   ohne Anzeigename ein und das Repo ist erreichbar, when ich es
   hinzufüge, then erscheint ein neuer Listeneintrag mit dem Anzeigenamen
   "appbaua".
+- [ ] Given ich öffne das Hinzufügen-Formular, when es angezeigt wird,
+  then sehe ich eine Auswahlliste der über den GitHub-Token erreichbaren
+  Repos UND ein Feld für die manuelle Git-URL-Eingabe.
+- [ ] Given ich wähle das Repo "kruianer/appbaua" aus der Auswahlliste,
+  when ich es hinzufüge, then erscheint es als neuer Listeneintrag, ohne
+  dass ich eine URL eintippen musste.
 - [ ] Given ich gebe eine Git-URL ein, auf die der hinterlegte Token
   keinen Zugriff hat, when ich sie hinzufügen will, then wird das Repo
   NICHT hinzugefügt und ich sehe die Meldung "Repo nicht erreichbar oder
