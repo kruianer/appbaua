@@ -37,3 +37,19 @@ CREATE TABLE IF NOT EXISTS worker_state (
   id      TEXT PRIMARY KEY,
   enabled BOOLEAN NOT NULL DEFAULT TRUE
 );
+
+-- Worker run log (req-004). One row per executed step or "nichts zu tun".
+-- status: 'success' | 'error' | 'idle'. repo/task_type null for idle rows.
+-- Retention (>1 year OR >1M rows, oldest first) is enforced on write.
+
+CREATE TABLE IF NOT EXISTS run_log (
+  id         BIGSERIAL PRIMARY KEY,
+  started_at TIMESTAMPTZ NOT NULL,
+  ended_at   TIMESTAMPTZ NOT NULL,
+  repo       TEXT,
+  task_type  TEXT,
+  status     TEXT NOT NULL,
+  message    TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS run_log_started_idx ON run_log (started_at DESC);

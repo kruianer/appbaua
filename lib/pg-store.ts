@@ -6,6 +6,14 @@ import type { RepoStore } from "./store";
 import { type TaskType, defaultTaskTypes } from "./task-types";
 import type { TaskTypeStore } from "./task-store";
 import type { WorkerState, WorkerStateStore } from "./worker-state";
+import {
+  type NewRunLogEntry,
+  type RunLogEntry,
+  type RunStatus,
+  LOG_MAX_AGE_DAYS,
+  LOG_MAX_ROWS,
+} from "./run-log";
+import type { RunLogStore } from "./run-log-store";
 
 // PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
 // is set (see store.ts). "position" holds the priority order (0 = highest);
@@ -169,6 +177,74 @@ export function createPgWorkerStore(): WorkerStateStore {
         [state.enabled],
       );
       return state;
+    },
+  };
+}
+
+export function createPgRunLogStore(): RunLogStore {
+  type Row = {
+    id: string;
+    started_at: Date;
+    ended_at: Date;
+    repo: string | null;
+    task_type: string | null;
+    status: string;
+    message: string;
+  };
+  const toEntry = (r: Row): RunLogEntry => ({
+    id: Number(r.id),
+    startedAt: new Date(r.started_at).toISOString(),
+    endedAt: new Date(r.ended_at).toISOString(),
+    repo: r.repo,
+    taskType: r.task_type,
+    status: r.status as RunStatus,
+    message: r.message,
+  });
+
+  return {
+    async append(entry: NewRunLogEntry): Promise<RunLogEntry> {
+      await ensureSchema();
+      const res = await getPool().query<Row>(
+        `INSERT INTO run_log (started_at, ended_at, repo, task_type, status, message)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         RETURNING id, started_at, ended_at, repo, task_type, status, message`,
+        [
+          entry.startedAt,
+          entry.endedAt,
+          entry.repo,
+          entry.taskType,
+          entry.status,
+          entry.message,
+        ],
+      );
+      // Retention: drop rows older than the age cutoff, then any beyond max rows.
+      await getPool().query(
+        `DELETE FROM run_log WHERE started_at < now() - ($1 || ' days')::interval`,
+        [LOG_MAX_AGE_DAYS],
+      );
+      await getPool().query(
+        `DELETE FROM run_log WHERE id IN (
+           SELECT id FROM run_log ORDER BY id DESC OFFSET $1
+         )`,
+        [LOG_MAX_ROWS],
+      );
+      return toEntry(res.rows[0]);
+    },
+    async list(offset: number, limit: number): Promise<RunLogEntry[]> {
+      await ensureSchema();
+      const res = await getPool().query<Row>(
+        `SELECT id, started_at, ended_at, repo, task_type, status, message
+         FROM run_log ORDER BY id DESC OFFSET $1 LIMIT $2`,
+        [offset, limit],
+      );
+      return res.rows.map(toEntry);
+    },
+    async count(): Promise<number> {
+      await ensureSchema();
+      const res = await getPool().query<{ c: string }>(
+        "SELECT COUNT(*)::text AS c FROM run_log",
+      );
+      return Number(res.rows[0].c);
     },
   };
 }

@@ -26,4 +26,8 @@ ergänzt.
 
 - **Worker-Steuerung** — Konfiguration und Kontrolle des autonomen
   Workers: welche Repos er bearbeitet, in welcher Reihenfolge, aktiv/
-  inaktiv. (req-001)
+  inaktiv, Task-Typen mit Zeiten, Hauptschalter. (req-001, req-002,
+  req-003)
+- **Worker-Ausführung** — Laufzeitverhalten des Workers: das Durchgehen
+  von Repos × Task-Typen, Protokollierung der Schritte und deren Anzeige.
+  (req-004)
