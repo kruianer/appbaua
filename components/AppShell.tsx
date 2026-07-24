@@ -9,7 +9,9 @@ import {
   useState,
 } from "react";
 import type { Repo } from "@/lib/repos";
+import type { TaskType } from "@/lib/task-types";
 import { Icon, type IconName } from "./Icon";
+import { TaskControl } from "./TaskControl";
 
 type Tab = "repos" | "aktiv" | "verlauf" | "settings";
 
@@ -21,7 +23,7 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
 ];
 
 const PLACEHOLDER: Record<
-  Exclude<Tab, "repos">,
+  "aktiv" | "verlauf",
   { icon: IconName; title: string; text: string }
 > = {
   aktiv: {
@@ -34,17 +36,25 @@ const PLACEHOLDER: Record<
     title: "Verlauf",
     text: "Abgeschlossene Läufe, Commits und Pull-Requests des Workers pro Repo. Bald verfügbar.",
   },
-  settings: {
-    icon: "settings",
-    title: "Einstellungen",
-    text: "Zugriff, Branch-Regeln und Auto-Merge-Verhalten des Workers konfigurieren. Bald verfügbar.",
-  },
+};
+
+const MODULE_TITLE: Record<Tab, string> = {
+  repos: "Repo-Verwaltung",
+  aktiv: "Aktivität",
+  verlauf: "Verlauf",
+  settings: "Task-Steuerung",
 };
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
 
-export function AppShell({ initialRepos }: { initialRepos: Repo[] }) {
+export function AppShell({
+  initialRepos,
+  initialTaskTypes,
+}: {
+  initialRepos: Repo[];
+  initialTaskTypes: TaskType[];
+}) {
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
   const [tab, setTab] = useState<Tab>("repos");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -290,11 +300,16 @@ export function AppShell({ initialRepos }: { initialRepos: Repo[] }) {
           Modul
         </div>
         <h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.02em" }}>
-          {tab === "repos" ? "Repo-Verwaltung" : PLACEHOLDER[tab].title}
+          {MODULE_TITLE[tab]}
         </h2>
         {tab === "repos" && (
           <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
             Der Worker arbeitet die Liste von oben nach unten ab.
+          </div>
+        )}
+        {tab === "settings" && (
+          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+            Priorität und Zeiten je Task-Typ — gilt für alle Repos.
           </div>
         )}
       </div>
@@ -581,6 +596,8 @@ export function AppShell({ initialRepos }: { initialRepos: Repo[] }) {
             )}
           </div>
         </>
+      ) : tab === "settings" ? (
+        <TaskControl initialTaskTypes={initialTaskTypes} />
       ) : (
         <div
           style={{

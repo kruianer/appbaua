@@ -3,6 +3,8 @@ import path from "node:path";
 import { type PoolConfig, Pool } from "pg";
 import type { Repo } from "./repos";
 import type { RepoStore } from "./store";
+import { type TaskType, defaultTaskTypes } from "./task-types";
+import type { TaskTypeStore } from "./task-store";
 
 // PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
 // is set (see store.ts). "position" holds the priority order (0 = highest);
@@ -92,6 +94,56 @@ export function createPgStore(): RepoStore {
         client.release();
       }
       return repos;
+    },
+  };
+}
+
+export function createPgTaskStore(): TaskTypeStore {
+  return {
+    async list(): Promise<TaskType[]> {
+      await ensureSchema();
+      const res = await getPool().query<{
+        id: string;
+        label: string;
+        active: boolean;
+        schedule: TaskType["schedule"];
+      }>(
+        "SELECT id, label, active, schedule FROM task_types ORDER BY position ASC",
+      );
+      if (res.rows.length === 0) {
+        const seeded = defaultTaskTypes();
+        await this.replace(seeded);
+        return seeded;
+      }
+      return res.rows.map((r) => ({
+        id: r.id,
+        label: r.label,
+        active: r.active,
+        schedule: r.schedule,
+      }));
+    },
+
+    async replace(types: TaskType[]): Promise<TaskType[]> {
+      await ensureSchema();
+      const client = await getPool().connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("DELETE FROM task_types");
+        for (let i = 0; i < types.length; i++) {
+          const t = types[i];
+          await client.query(
+            "INSERT INTO task_types (id, label, active, schedule, position) VALUES ($1, $2, $3, $4, $5)",
+            [t.id, t.label, t.active, JSON.stringify(t.schedule), i],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+      return types;
     },
   };
 }

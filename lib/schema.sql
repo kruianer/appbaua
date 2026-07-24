@@ -11,3 +11,17 @@ CREATE TABLE IF NOT EXISTS repos (
 );
 
 CREATE INDEX IF NOT EXISTS repos_position_idx ON repos (position);
+
+-- Task types (req-002). Predefined types, seeded on first use; the user only
+-- edits priority (position), active and the per-weekday schedule (JSONB:
+-- { mon: {enabled, start, end}, ... }). New types are added via code/seed.
+
+CREATE TABLE IF NOT EXISTS task_types (
+  id       TEXT PRIMARY KEY,
+  label    TEXT NOT NULL,
+  active   BOOLEAN NOT NULL DEFAULT TRUE,
+  schedule JSONB NOT NULL DEFAULT '{}'::jsonb,
+  position INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS task_types_position_idx ON task_types (position);
