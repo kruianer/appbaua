@@ -13,7 +13,17 @@ export type RunResult = { ok: boolean; code: number; stdout: string; stderr: str
 export function run(
   cmd: string,
   args: string[],
-  opts: { cwd?: string; timeoutMs?: number; env?: NodeJS.ProcessEnv } = {},
+  opts: {
+    cwd?: string;
+    timeoutMs?: number;
+    env?: NodeJS.ProcessEnv;
+    /**
+     * Called with every stdout/stderr chunk as it arrives (req-008), so a
+     * caller can publish a live tail while the process is still running. The
+     * full output is still returned at the end.
+     */
+    onData?: (chunk: string) => void;
+  } = {},
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
@@ -29,8 +39,25 @@ export function run(
           child.kill("SIGKILL");
         }, opts.timeoutMs)
       : null;
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
+    const emit = (chunk: string) => {
+      if (!opts.onData) return;
+      // A broken listener must never take the process down.
+      try {
+        opts.onData(chunk);
+      } catch {
+        /* ignore */
+      }
+    };
+    child.stdout.on("data", (d) => {
+      const s = d.toString();
+      stdout += s;
+      emit(s);
+    });
+    child.stderr.on("data", (d) => {
+      const s = d.toString();
+      stderr += s;
+      emit(s);
+    });
     child.on("close", (code) => {
       if (timer) clearTimeout(timer);
       resolve({

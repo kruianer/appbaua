@@ -7,7 +7,10 @@ import type { RunLogEntry } from "./run-log";
 export type TaskKind = "file" | "recurring";
 
 export type TaskTypeSource = {
-  /** ready/done/failed base under the repo, e.g. "delivery/requirements". */
+  /**
+   * ready/in-progress/done/failed base under the repo, e.g.
+   * "delivery/requirements".
+   */
   base: string | null;
   kind: TaskKind;
 };
@@ -28,6 +31,10 @@ export function sourceFor(taskId: string): TaskTypeSource {
 
 export function readyDir(base: string): string {
   return `${base}/ready`;
+}
+/** Where a .md lives while it is actually being worked on (req-008). */
+export function inProgressDir(base: string): string {
+  return `${base}/in-progress`;
 }
 export function doneDir(base: string): string {
   return `${base}/done`;

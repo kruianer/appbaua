@@ -273,6 +273,11 @@ export function createPgRunLogStore(): RunLogStore {
       );
       return res.rows.length ? toEntry(res.rows[0]) : null;
     },
+    async clear(): Promise<void> {
+      await ensureSchema();
+      // Only run_log — repos, task_types, worker_state and worker_status stay.
+      await getPool().query("DELETE FROM run_log");
+    },
   };
 }
 
@@ -287,14 +292,20 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         current_type: string | null;
         step_started_at: Date | null;
         pause_until: Date | null;
+        current_md: string | null;
+        current_output: string | null;
       }>(
-        "SELECT current_repo, current_type, step_started_at, pause_until FROM worker_status WHERE id = 'worker'",
+        `SELECT current_repo, current_type, step_started_at, pause_until,
+                current_md, current_output
+         FROM worker_status WHERE id = 'worker'`,
       );
       if (res.rows.length === 0) return { ...EMPTY_STATUS };
       const r = res.rows[0];
       return {
         currentRepo: r.current_repo,
         currentType: r.current_type,
+        currentMd: r.current_md,
+        currentOutput: r.current_output,
         stepStartedAt: iso(r.step_started_at),
         pauseUntil: iso(r.pause_until),
       };
@@ -302,18 +313,22 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
     async set(status: WorkerStatus): Promise<WorkerStatus> {
       await ensureSchema();
       await getPool().query(
-        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until)
-         VALUES ('worker', $1, $2, $3, $4)
+        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until, current_md, current_output)
+         VALUES ('worker', $1, $2, $3, $4, $5, $6)
          ON CONFLICT (id) DO UPDATE SET
            current_repo = EXCLUDED.current_repo,
            current_type = EXCLUDED.current_type,
            step_started_at = EXCLUDED.step_started_at,
-           pause_until = EXCLUDED.pause_until`,
+           pause_until = EXCLUDED.pause_until,
+           current_md = EXCLUDED.current_md,
+           current_output = EXCLUDED.current_output`,
         [
           status.currentRepo,
           status.currentType,
           status.stepStartedAt,
           status.pauseUntil,
+          status.currentMd,
+          status.currentOutput,
         ],
       );
       return status;

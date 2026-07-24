@@ -14,23 +14,17 @@ const repos: Repo[] = [
 ];
 
 describe("derivePhase", () => {
+  const step: WorkerStatus = {
+    ...EMPTY_STATUS,
+    currentRepo: "appbaua",
+    currentType: "Bugs",
+    stepStartedAt: now.toISOString(),
+  };
   it("stopped when disabled (even if a step is set)", () => {
-    const s: WorkerStatus = {
-      currentRepo: "appbaua",
-      currentType: "Bugs",
-      stepStartedAt: now.toISOString(),
-      pauseUntil: null,
-    };
-    expect(derivePhase(false, s, now)).toBe("stopped");
+    expect(derivePhase(false, step, now)).toBe("stopped");
   });
   it("running when a step is set and enabled", () => {
-    const s: WorkerStatus = {
-      currentRepo: "appbaua",
-      currentType: "Bugs",
-      stepStartedAt: now.toISOString(),
-      pauseUntil: null,
-    };
-    expect(derivePhase(true, s, now)).toBe("running");
+    expect(derivePhase(true, step, now)).toBe("running");
   });
   it("pause when pauseUntil is in the future", () => {
     const s: WorkerStatus = {
@@ -100,6 +94,57 @@ describe("buildDashboard tiles", () => {
       at: err.endedAt,
       message: "Simuliert: Schritt fehlgeschlagen",
     });
+  });
+});
+
+describe("buildDashboard — running step details (req-008)", () => {
+  const base = {
+    enabled: true,
+    repos,
+    taskTypes: defaultTaskTypes(),
+    today: { done: 0, errors: 0 },
+    lastError: null as RunLogEntry | null,
+    now,
+  };
+  const running: WorkerStatus = {
+    currentRepo: "appbaua",
+    currentType: "Requirements",
+    currentMd: "req-042-beispiel.md",
+    currentOutput: "Zeile 1\nZeile 2",
+    stepStartedAt: now.toISOString(),
+    pauseUntil: null,
+  };
+
+  it("passes the .md name and the live output through while running", () => {
+    const d = buildDashboard({ ...base, status: running });
+    expect(d.phase).toBe("running");
+    expect(d.currentMd).toBe("req-042-beispiel.md");
+    expect(d.currentOutput).toBe("Zeile 1\nZeile 2");
+  });
+
+  it("a recurring step has no .md name", () => {
+    const d = buildDashboard({
+      ...base,
+      status: { ...running, currentType: "Code-Review", currentMd: null },
+    });
+    expect(d.currentMd).toBeNull();
+  });
+
+  it("AC: nothing running -> no .md name and no live output", () => {
+    // Leftovers in the status row must not survive the end of the step.
+    const d = buildDashboard({
+      ...base,
+      status: { ...running, currentRepo: null, currentType: null },
+    });
+    expect(d.phase).toBe("idle");
+    expect(d.currentMd).toBeNull();
+    expect(d.currentOutput).toBeNull();
+  });
+
+  it("stopped worker shows no live output either", () => {
+    const d = buildDashboard({ ...base, enabled: false, status: running });
+    expect(d.phase).toBe("stopped");
+    expect(d.currentOutput).toBeNull();
   });
 });
 

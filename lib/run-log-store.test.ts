@@ -69,6 +69,50 @@ describe("memory run-log store", () => {
     expect(await store.metricsSince(since)).toEqual({ done: 2, errors: 1 });
   });
 
+  it("clear removes every entry (req-007)", async () => {
+    const store = createMemoryRunLogStore();
+    for (let i = 0; i < 5; i++) {
+      await store.append({
+        startedAt: new Date(2026, 6, 24, 12, i).toISOString(),
+        endedAt: new Date(2026, 6, 24, 12, i).toISOString(),
+        repo: "appbaua",
+        taskType: "Bugs",
+        status: i === 0 ? "error" : "success",
+        message: `m${i}`,
+      });
+    }
+    expect(await store.count()).toBe(5);
+
+    await store.clear();
+
+    expect(await store.count()).toBe(0);
+    expect(await store.list(0, 50)).toEqual([]);
+    expect(await store.lastError()).toBeNull();
+  });
+
+  it("stays usable after clear — new entries are logged again", async () => {
+    const store = createMemoryRunLogStore();
+    await store.append({
+      startedAt: new Date(2026, 6, 24, 12, 0).toISOString(),
+      endedAt: new Date(2026, 6, 24, 12, 0).toISOString(),
+      repo: "appbaua",
+      taskType: "Bugs",
+      status: "success",
+      message: "alt",
+    });
+    await store.clear();
+    await store.append({
+      startedAt: new Date(2026, 6, 24, 12, 5).toISOString(),
+      endedAt: new Date(2026, 6, 24, 12, 5).toISOString(),
+      repo: "appbaua",
+      taskType: "Bugs",
+      status: "success",
+      message: "neu",
+    });
+    expect(await store.count()).toBe(1);
+    expect((await store.list(0, 10)).map((e) => e.message)).toEqual(["neu"]);
+  });
+
   it("lastError returns the most recent error or null", async () => {
     const store = createMemoryRunLogStore();
     expect(await store.lastError()).toBeNull();

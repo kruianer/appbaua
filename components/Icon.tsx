@@ -20,6 +20,9 @@ export const ICONS = {
   settings:
     '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/>',
+  // Tasks tab (req-007 moved the cog to the new Einstellungen tab).
+  list: '<path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><path d="M4 6h.01"/><path d="M4 12h.01"/><path d="M4 18h.01"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   brand: '<path d="M6.5 8l4 4-4 4"/><path d="M12.5 17h6"/>',
 } as const;
 

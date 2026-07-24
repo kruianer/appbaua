@@ -63,5 +63,14 @@ CREATE TABLE IF NOT EXISTS worker_status (
   current_repo    TEXT,
   current_type    TEXT,
   step_started_at TIMESTAMPTZ,
-  pause_until     TIMESTAMPTZ
+  pause_until     TIMESTAMPTZ,
+  current_md      TEXT,
+  current_output  TEXT
 );
+
+-- Added with req-008 (worker observability); keep existing deployments in step.
+-- current_md: filename of the .md the running step works on (null = recurring
+-- task). current_output: live tail (~50 lines) of the Claude-Code output of the
+-- running step, cleared when the step ends.
+ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_md TEXT;
+ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_output TEXT;
