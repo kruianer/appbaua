@@ -52,10 +52,24 @@ export function createMemoryStore(initial: Repo[] = []): RepoStore {
   };
 }
 
-// The active store. Defaults to the file store; tests swap in a memory store.
-let active: RepoStore = createFileStore();
+// Default store selection:
+//  - DATABASE_URL set  -> PostgreSQL (production / deployed environments)
+//  - otherwise         -> local JSON file (.data/) for zero-infra dev
+// pg is imported lazily so tests and non-DB runs never load the driver.
+function createDefaultStore(): RepoStore {
+  if (process.env.DATABASE_URL) {
+    const { createPgStore } =
+      require("./pg-store") as typeof import("./pg-store");
+    return createPgStore();
+  }
+  return createFileStore();
+}
+
+// The active store. Lazily built on first use; tests swap in a memory store.
+let active: RepoStore | null = null;
 
 export function getStore(): RepoStore {
+  if (!active) active = createDefaultStore();
   return active;
 }
 

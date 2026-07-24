@@ -1,0 +1,54 @@
+name: deploy
+
+# Push auf dev  -> Deploy der dev-Umgebung  (https://dev.appbaua.com)
+# Push auf main -> Deploy der prod-Umgebung (https://app.appbaua.com)
+# Läuft auf dem self-hosted Runner (Beelink Mini-PC). Siehe delivery/devops.md
+# und delivery/deploy-setup.md.
+
+on:
+  push:
+    branches: [dev, main]
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+
+  deploy:
+    needs: test
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select environment
+        id: env
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "project=appbaua-prod" >> "$GITHUB_OUTPUT"
+            echo "envfile=/etc/appbaua/prod.env" >> "$GITHUB_OUTPUT"
+          else
+            echo "project=appbaua-dev" >> "$GITHUB_OUTPUT"
+            echo "envfile=/etc/appbaua/dev.env" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build & start containers
+        run: |
+          docker compose \
+            -p "${{ steps.env.outputs.project }}" \
+            --env-file "${{ steps.env.outputs.envfile }}" \
+            up -d --build
+
+      - name: Prune old images
+        run: docker image prune -f

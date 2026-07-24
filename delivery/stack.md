@@ -12,7 +12,12 @@ Diese Datei ist verbindlich für den autonomen Worker. Befolge sie exakt.
 - Sprache: TypeScript auf Node.
 - Framework: Next.js (App Router) — fullstack, ein Deploy-Target.
 - UI: React (via Next.js).
-- Datenbank: PostgreSQL.
+- Datenbank: PostgreSQL (via `pg`). Ausgewählt über `DATABASE_URL`; ohne
+  gesetzte URL fällt die App auf einen lokalen JSON-Store (`.data/`)
+  zurück, damit sie und die Tests ohne DB-Server laufen.
+- Deployment: Docker (Dockerfile + docker-compose.yml), auf dem Beelink
+  Mini-PC via GitHub Actions (self-hosted Runner). Einrichtung:
+  [deploy-setup.md](deploy-setup.md).
 
 ## Commands
 
