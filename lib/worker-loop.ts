@@ -99,12 +99,21 @@ export async function runOnce(
 
     const startedAt = deps.now().toISOString();
     await deps.setRunningStep(step.repo.name, step.taskType.label, startedAt);
-
-    // Recent log for the "ran today" check inside recurring steps.
-    const recent = await log.list(0, 500);
-    const decision = await deps.runStep(step.repo, step.taskType, recent);
-    const endedAt = deps.now().toISOString();
     stepCounter.n += 1;
+
+    // A step must never crash the whole loop or leave the status stuck on
+    // "running": any thrown error becomes a logged "error" entry, and the
+    // running step is always cleared afterwards.
+    let decision: StepDecision;
+    try {
+      const recent = await log.list(0, 500);
+      decision = await deps.runStep(step.repo, step.taskType, recent);
+    } catch (err) {
+      decision = { kind: "error", message: `Schritt abgebrochen: ${String(err)}` };
+    } finally {
+      await deps.clearRunningStep();
+    }
+    const endedAt = deps.now().toISOString();
 
     if (decision.kind === "skip") {
       // Nothing to do for this repo x type (e.g. empty ready/, or already ran
@@ -131,7 +140,20 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
   const stepCounter = { n: 0 };
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const done = await runOnce(stepCounter, deps);
+    let done = 0;
+    try {
+      done = await runOnce(stepCounter, deps);
+    } catch (err) {
+      // A whole pass failed unexpectedly: never let the loop die. Clear any
+      // stuck running status and pause before trying again.
+      // eslint-disable-next-line no-console
+      console.error("[worker] pass failed:", err);
+      try {
+        await deps.clearRunningStep();
+      } catch {
+        /* ignore */
+      }
+    }
     if (done === 0) {
       // Record the pause window so the start page can show "Pause bis HH:MM".
       const until = new Date(deps.now().getTime() + EMPTY_PAUSE_MS).toISOString();

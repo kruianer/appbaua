@@ -107,6 +107,27 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     ]);
   });
 
+  it("a throwing step is logged as 'error' and the loop continues", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const runStep = async (repo: Repo): Promise<StepDecision> => {
+      if (repo.name === "appbaua") throw new Error("boom");
+      return { kind: "success", message: "ok" };
+    };
+    let cleared = 0;
+    const done = await runOnce(
+      { n: 0 },
+      deps({ runStep, clearRunningStep: async () => void cleared++ }),
+    );
+    expect(done).toBe(2); // appbaua (error) + worker (success) both logged
+    const rows = [...(await logStore.list(0, 10))].reverse();
+    expect(rows.map((r) => `${r.repo}:${r.status}`)).toEqual([
+      "appbaua:error",
+      "worker:success",
+    ]);
+    expect(rows[0].message).toContain("boom");
+    expect(cleared).toBeGreaterThan(0); // running status cleared even on throw
+  });
+
   it("AC: a repo deactivated mid-run is skipped (live re-check)", async () => {
     setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
     setStore(createMemoryStore([repos[0], { ...repos[1], active: false }]));
