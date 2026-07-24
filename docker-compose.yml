@@ -35,7 +35,13 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      # Discrete PG* fields instead of a URL: a password with URL-unsafe
+      # chars (+ / =) would break connection-string parsing.
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
       GITHUB_TOKEN: ${GITHUB_TOKEN}
       NODE_ENV: production
     ports:

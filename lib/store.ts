@@ -57,7 +57,7 @@ export function createMemoryStore(initial: Repo[] = []): RepoStore {
 //  - otherwise         -> local JSON file (.data/) for zero-infra dev
 // pg is imported lazily so tests and non-DB runs never load the driver.
 function createDefaultStore(): RepoStore {
-  if (process.env.DATABASE_URL) {
+  if (process.env.DATABASE_URL || process.env.PGHOST) {
     const { createPgStore } =
       require("./pg-store") as typeof import("./pg-store");
     return createPgStore();

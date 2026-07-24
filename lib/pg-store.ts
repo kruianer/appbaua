@@ -1,20 +1,41 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { Pool } from "pg";
+import { type PoolConfig, Pool } from "pg";
 import type { Repo } from "./repos";
 import type { RepoStore } from "./store";
 
-// PostgreSQL-backed store. Selected automatically when DATABASE_URL is set
-// (see store.ts). "position" holds the priority order (0 = highest); list()
-// returns rows sorted by it, replace() rewrites the whole ordered set in a
-// transaction so the array index becomes the new position.
+// PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
+// is set (see store.ts). "position" holds the priority order (0 = highest);
+// list() returns rows sorted by it, replace() rewrites the whole ordered set
+// in a transaction so the array index becomes the new position.
 
 let pool: Pool | null = null;
 let schemaReady: Promise<void> | null = null;
 
+/**
+ * Build the pg pool config from env. Prefers discrete PG* fields over a
+ * connection string: a password with URL-unsafe chars (+ / =) breaks
+ * connectionString parsing ("Invalid URL"), but is fine as a plain field.
+ * Exported for testing.
+ */
+export function poolConfigFromEnv(
+  env: Record<string, string | undefined> = process.env,
+): PoolConfig {
+  if (env.PGHOST || env.PGUSER) {
+    return {
+      host: env.PGHOST,
+      port: env.PGPORT ? Number(env.PGPORT) : undefined,
+      user: env.PGUSER,
+      password: env.PGPASSWORD,
+      database: env.PGDATABASE,
+    };
+  }
+  return { connectionString: env.DATABASE_URL };
+}
+
 function getPool(): Pool {
   if (!pool) {
-    pool = new Pool({ connectionString: process.env.DATABASE_URL });
+    pool = new Pool(poolConfigFromEnv());
   }
   return pool;
 }
