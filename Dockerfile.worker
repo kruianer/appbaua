@@ -23,7 +23,10 @@ COPY worker ./worker
 
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 worker \
-  && mkdir -p /work && chown -R worker:nodejs /work
+  && mkdir -p /work /claude-home \
+  && chown -R worker:nodejs /work /claude-home
+# Claude Code auth lives here (mounted volume); no API key.
+ENV HOME=/claude-home
 USER worker
 
 CMD ["npm", "run", "worker"]

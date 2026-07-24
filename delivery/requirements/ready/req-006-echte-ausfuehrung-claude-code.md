@@ -81,10 +81,11 @@ der Loop wie gehabt weiter von vorne.
 
 # Constraints
 
-- Claude Code wird headless über die Claude-Code-CLI aufgerufen. Die CLI
-  muss im Worker-Container verfügbar und gültig authentifiziert sein
-  (API-Key/Login). Einrichtung am Mini-PC erfolgt separat (wie beim
-  GitHub-Token). <TODO: CLI + Auth im Worker-Container bereitstellen.>
+- Claude Code wird headless über die Claude-Code-CLI aufgerufen und nutzt
+  das Anthropic-**Abo** des Nutzers (interaktiver `claude login`, im
+  Worker-Container per Volume persistiert) — NICHT einen API-Key, damit
+  keine Nutzungskosten entstehen. Coden läuft immer mit dem Opus-Modell.
+  Der einmalige Login am Mini-PC erfolgt separat (siehe deploy-setup.md).
 - Der GitHub-Token muss für die Ziel-Repos Schreibrechte haben
   (Contents: write), damit der Worker auf `dev` pushen kann.
 - Claude Code läuft vollautonom und rückfragefrei (non-interaktiv /

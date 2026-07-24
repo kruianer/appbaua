@@ -65,9 +65,14 @@ services:
       PGDATABASE: ${POSTGRES_DB}
       # Token with write access to target repos (clone + push to dev).
       GITHUB_TOKEN: ${GITHUB_TOKEN}
-      # Auth for the Claude Code CLI (real execution, req-006).
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      # Claude Code authenticates via the user's Anthropic subscription (NOT an
+      # API key -> no usage costs). Login lives in HOME=/claude-home, persisted
+      # in the claude-home volume; do `claude login` once inside the container.
+      HOME: /claude-home
       NODE_ENV: production
+    volumes:
+      - claude-home:/claude-home
 
 volumes:
   db-data:
+  claude-home:

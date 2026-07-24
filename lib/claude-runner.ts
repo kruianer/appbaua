@@ -1,11 +1,14 @@
 import { run, type RunResult } from "./workspace";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
-// CLI runs non-interactively with permissions skipped so it never asks. A run
-// is capped at CLAUDE_TIMEOUT_MS; on timeout or a missing CLI it returns a
+// CLI runs non-interactively with permissions skipped so it never asks. Auth is
+// the user's Anthropic subscription (via `claude login`, mounted into the
+// container) — NOT an API key, so no usage costs. Coding always uses Opus. A
+// run is capped at CLAUDE_TIMEOUT_MS; on timeout or a missing CLI it returns a
 // clean failure (never throws), so the worker logs "Fehler" and moves on.
 
 export const CLAUDE_TIMEOUT_MS = 60 * 60_000; // 60 minutes
+export const CLAUDE_MODEL = "opus";
 
 export type ClaudeOutcome = {
   ok: boolean;
@@ -48,7 +51,7 @@ export async function runClaude(
   try {
     res = await runImpl(
       "claude",
-      ["-p", prompt, "--dangerously-skip-permissions"],
+      ["-p", prompt, "--model", CLAUDE_MODEL, "--dangerously-skip-permissions"],
       { cwd: dir, timeoutMs },
     );
   } catch (err) {

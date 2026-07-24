@@ -69,9 +69,25 @@ POSTGRES_DB=appbaua_dev
 # PAT mit SCHREIBrechten (Contents: write) auf die Ziel-Repos — der Worker
 # klont und pusht auf deren dev-Branch (req-006), nicht nur Erreichbarkeit.
 GITHUB_TOKEN=<fine-grained-PAT-mit-write>
-# API-Key fuer die Claude-Code-CLI im Worker (echte Ausfuehrung, req-006).
-ANTHROPIC_API_KEY=<anthropic-api-key>
 ```
+
+> KEIN `ANTHROPIC_API_KEY`. Claude Code im Worker nutzt das Anthropic-**Abo**
+> (kein API-Key → keine Nutzungskosten). Coden laeuft immer mit Opus.
+
+### Claude-Code-Login im Worker (einmalig, req-006)
+
+Der Worker-Container haelt die Claude-Anmeldung im Volume `claude-home`
+(HOME=/claude-home). Einmal interaktiv einloggen:
+
+```bash
+# Container muss laufen:
+docker compose -p appbaua-dev --env-file ~/appbaua-env/dev.env up -d
+# interaktiv im Worker einloggen (folgt dem OAuth-/Abo-Flow):
+docker compose -p appbaua-dev exec worker claude login
+```
+
+Der Login bleibt im Volume erhalten (auch ueber Redeploys). Ein API-Key
+wird NICHT gesetzt.
 
 Rechte einschränken:
 
