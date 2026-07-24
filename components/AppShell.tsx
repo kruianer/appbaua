@@ -15,29 +15,19 @@ import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
 import { WorkerDashboard } from "./WorkerDashboard";
 
-type Tab = "repos" | "aktiv" | "verlauf" | "settings";
+type Tab = "aktiv" | "repos" | "verlauf" | "settings";
 
+// Aktivität is the start view and the first nav entry (req-005).
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
-  { key: "repos", label: "Repos", icon: "gitbranch" },
   { key: "aktiv", label: "Aktivität", icon: "activity" },
+  { key: "repos", label: "Repos", icon: "gitbranch" },
   { key: "verlauf", label: "Verlauf", icon: "clock" },
   { key: "settings", label: "Einstellungen", icon: "settings" },
 ];
 
-const PLACEHOLDER: Record<
-  "aktiv",
-  { icon: IconName; title: string; text: string }
-> = {
-  aktiv: {
-    icon: "activity",
-    title: "Aktivität",
-    text: "Live-Aktivität des Workers — welche Datei gerade bearbeitet wird und der aktuelle Schritt. Bald verfügbar.",
-  },
-};
-
 const MODULE_TITLE: Record<Tab, string> = {
-  repos: "Repo-Verwaltung",
   aktiv: "Aktivität",
+  repos: "Repo-Verwaltung",
   verlauf: "Verlauf",
   settings: "Task-Steuerung",
 };
@@ -55,7 +45,7 @@ export function AppShell({
   initialWorkerEnabled: boolean;
 }) {
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
-  const [tab, setTab] = useState<Tab>("repos");
+  const [tab, setTab] = useState<Tab>("aktiv");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -299,6 +289,11 @@ export function AppShell({
         <h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.02em" }}>
           {MODULE_TITLE[tab]}
         </h2>
+        {tab === "aktiv" && (
+          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+            Was der Worker gerade tut.
+          </div>
+        )}
         {tab === "repos" && (
           <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
             Der Worker arbeitet die Liste von oben nach unten ab.
@@ -311,12 +306,11 @@ export function AppShell({
         )}
       </div>
 
-      {tab === "repos" ? (
+      {tab === "aktiv" ? (
+        <WorkerDashboard />
+      ) : tab === "repos" ? (
         <>
-          {/* Live worker status + dashboard (req-005) */}
-          <WorkerDashboard />
-
-          {/* List / empty state */}
+          {/* List / empty state (Repo-Verwaltung only, no dashboard) */}
           <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
             {repos.length > 0 ? (
               <>
@@ -519,39 +513,8 @@ export function AppShell({
           initialTaskTypes={initialTaskTypes}
           initialWorkerEnabled={initialWorkerEnabled}
         />
-      ) : tab === "verlauf" ? (
-        <RunLog />
       ) : (
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            textAlign: "center",
-            gap: "var(--space-3)",
-            padding: "var(--space-8)",
-          }}
-        >
-          <div
-            style={{
-              width: 66,
-              height: 66,
-              borderRadius: 999,
-              display: "grid",
-              placeItems: "center",
-              color: "var(--color-accent-300)",
-              border: "1px solid var(--color-accent)",
-            }}
-          >
-            <Icon name={PLACEHOLDER[tab].icon} size={30} />
-          </div>
-          <h3 style={{ margin: 0 }}>{PLACEHOLDER[tab].title}</h3>
-          <p style={{ margin: 0, fontSize: 14, maxWidth: 240, color: muted(60) }}>
-            {PLACEHOLDER[tab].text}
-          </p>
-        </div>
+        <RunLog />
       )}
 
       {/* Bottom tab bar */}

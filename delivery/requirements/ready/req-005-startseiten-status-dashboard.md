@@ -10,14 +10,17 @@ changes: req-004
 
 # Goal (Why)
 
-Ich will auf der Startseite auf einen Blick sehen, was der Worker gerade
-tut und wie es ihm insgesamt geht, ohne in den Verlauf wechseln zu
+Ich will als Startansicht auf einen Blick sehen, was der Worker gerade
+tut und wie es ihm insgesamt geht, ohne in einen anderen Tab wechseln zu
 müssen — damit ich den laufenden Betrieb sofort erfasse.
 
 # Function (What)
 
-Oben im Repos-Tab (die Seite, die beim Öffnen erscheint) steht prominent
-eine Worker-Status-Anzeige plus ein kleines Dashboard aus vier Kacheln.
+Der Tab "Aktivität" ist die Startansicht (erster Tab in der unteren
+Navigation, wird beim Öffnen der App angezeigt). Er zeigt prominent eine
+Worker-Status-Anzeige plus ein kleines Dashboard aus vier Kacheln. Der
+Repos-Tab enthält ausschließlich die Repo-Verwaltung (kein Dashboard
+mehr).
 
 Status-Anzeige (genau ein Zustand, da seriell nur ein Schritt aktiv sein
 kann):
@@ -41,6 +44,9 @@ aus ist); nur die Status-Anzeige sagt dann "gestoppt". Die Anzeige
 aktualisiert sich automatisch etwa alle 5 Sekunden ohne Neuladen. Die
 Historie bleibt im Verlauf-Tab (req-004); hier wird nichts dupliziert.
 
+Tab-Reihenfolge in der unteren Navigation: Aktivität (erster, Start),
+Repos, Verlauf, Einstellungen.
+
 Erweiterung an req-004: Der Worker hält seinen aktuell laufenden Schritt
 (Task-Typ, Repo, Startzeit) und den Endzeitpunkt der 5-Minuten-Pause
 fest, solange sie andauern, und räumt den laufenden Schritt nach dessen
@@ -50,7 +56,7 @@ zeigen.
 # GUI
 
 - Kein eigenes Mockup. Die Status-Karte greift die im Nocturne-Design
-  bereits vorgesehene Worker-Karte oben im Repos-Tab auf; Kacheln im
+  vorgesehene Worker-Karte auf, jetzt im Aktivität-Tab; Kacheln im
   gleichen Stil (Nocturne, konsistent zu req-001/002).
 - Zielgerät: primär Smartphone (Hochformat), responsive — analog req-001.
 
@@ -60,21 +66,26 @@ zeigen.
   when ich die Startseite betrachte, then sehe ich oben "Bugs × appbaua"
   mit einer hochzählenden Dauer, und die Dauer erhöht sich sichtbar ohne
   Neuladen.
-- [ ] Given der Worker ist in der 5-Minuten-Pause bis 14:35, when ich die
-  Startseite betrachte, then zeigt die Status-Anzeige "Pause bis 14:35".
-- [ ] Given der Hauptschalter steht auf "aus", when ich die Startseite
+- [ ] Given der Worker ist in der 5-Minuten-Pause bis 14:35, when ich den
+  Aktivität-Tab betrachte, then zeigt die Status-Anzeige "Pause bis 14:35".
+- [ ] Given der Hauptschalter steht auf "aus", when ich den Aktivität-Tab
   betrachte, then zeigt die Status-Anzeige "gestoppt".
 - [ ] Given heute wurden 3 Schritte erledigt, davon 1 Fehler, when ich
   die Startseite betrachte, then zeigt die Kachel "Heute" 3 erledigt und
   1 Fehler.
-- [ ] Given es sind 2 von 5 Repos aktiv, when ich die Startseite
+- [ ] Given es sind 2 von 5 Repos aktiv, when ich den Aktivität-Tab
   betrachte, then zeigt die Kachel "Aktive Repos" 2 von 5.
-- [ ] Given es gab noch nie einen Fehler-Schritt, when ich die Startseite
+- [ ] Given es gab noch nie einen Fehler-Schritt, when ich den Aktivität-Tab
   betrachte, then zeigt die Kachel "Letzter Fehler" den Text "Kein
   Fehler bisher".
-- [ ] Given der Hauptschalter steht auf "aus", when ich die Startseite
+- [ ] Given der Hauptschalter steht auf "aus", when ich den Aktivität-Tab
   betrachte, then zeigen die Kacheln weiterhin die konfigurierten Zahlen
   (aktive Repos, fällige Typen) und NICHT 0.
+- [ ] Given ich öffne die App frisch, when sie lädt, then ist der
+  Aktivität-Tab aktiv (Startansicht) und steht als erster Eintrag in der
+  unteren Navigation.
+- [ ] Given ich wechsle zum Repos-Tab, when er angezeigt wird, then sehe
+  ich NUR die Repo-Verwaltung und KEIN Worker-Status-Dashboard.
 
 # Constraints
 

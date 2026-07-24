@@ -82,7 +82,7 @@ export function WorkerDashboard() {
   }
 
   return (
-    <div style={{ margin: "0 20px 12px" }}>
+    <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
       {/* Status card */}
       <div
         className="card elev-md"
