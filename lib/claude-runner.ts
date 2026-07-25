@@ -23,7 +23,15 @@ export const LIVE_THROTTLE_MS = 1000;
 
 export type ClaudeOutcome = {
   ok: boolean;
+  /** Short message for the run log (req-004): the tail of the final answer. */
   summary: string;
+  /**
+   * Claude's complete, untruncated final answer (req-010). For a recurring
+   * analysis task this IS the report, which the worker files in the target
+   * repo; the run log keeps `summary` only. Empty for a failed run — nothing
+   * gets filed then.
+   */
+  report: string;
 };
 
 /** The last `n` lines of `text` (fewer if there are not that many). */
@@ -92,11 +100,17 @@ export function fileTaskPrompt(mdRelPath: string): string {
   ].join(" ");
 }
 
-/** The prompt for a recurring task (code-review, doku, ...). */
+/**
+ * The prompt for a recurring task (code-review, doku, ...). Its final answer is
+ * filed as a report in the repo (req-010), so the prompt asks for the whole
+ * report there instead of a summary.
+ */
 export function recurringPrompt(kindLabel: string): string {
   return [
     `Führe eine ${kindLabel} für dieses Repo durch, autonom und ohne Rückfragen.`,
     `Halte dich an die CLAUDE.md und die Konventionen dieses Repos.`,
+    `Gib deinen vollständigen Bericht als finale Antwort in Markdown aus —`,
+    `er wird als Datei im Repo abgelegt.`,
     `Committe/pushe NICHT selbst.`,
   ].join(" ");
 }
@@ -149,19 +163,25 @@ export async function runClaude(
       { cwd: dir, timeoutMs, onData, stdin: "ignore" },
     );
   } catch (err) {
-    return { ok: false, summary: `Claude-Aufruf fehlgeschlagen: ${String(err)}` };
+    return {
+      ok: false,
+      summary: `Claude-Aufruf fehlgeschlagen: ${String(err)}`,
+      report: "",
+    };
   }
 
   if (res.code === 127) {
-    return { ok: false, summary: "Claude-Code-CLI nicht verfügbar" };
+    return { ok: false, summary: "Claude-Code-CLI nicht verfügbar", report: "" };
   }
   if (res.code === 124) {
-    return { ok: false, summary: "Claude-Lauf: Timeout (60 min)" };
+    return { ok: false, summary: "Claude-Lauf: Timeout (60 min)", report: "" };
   }
   if (!res.ok) {
     const tail = (res.stderr.trim() || finalResultText(res.stdout)).slice(-300);
-    return { ok: false, summary: `Claude-Lauf fehlgeschlagen: ${tail}` };
+    return { ok: false, summary: `Claude-Lauf fehlgeschlagen: ${tail}`, report: "" };
   }
-  const tail = finalResultText(res.stdout).slice(-300);
-  return { ok: true, summary: tail || "Claude-Lauf erfolgreich" };
+  // The full answer becomes the report file (req-010); the log keeps its tail.
+  const full = finalResultText(res.stdout);
+  const tail = full.slice(-300);
+  return { ok: true, summary: tail || "Claude-Lauf erfolgreich", report: full };
 }

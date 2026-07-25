@@ -153,6 +153,31 @@ export async function commitAndPush(
   return { pushed: true, detail: "auf dev gepusht" };
 }
 
+/**
+ * Short SHA of the current HEAD, or null when it cannot be read. Used to say
+ * which state of the repo a filed report describes (req-010); a missing SHA
+ * must never fail the step, so this never throws.
+ */
+export async function headCommit(dir: string): Promise<string | null> {
+  const res = await run("git", ["rev-parse", "--short", "HEAD"], { cwd: dir });
+  const sha = res.stdout.trim();
+  return res.ok && sha ? sha : null;
+}
+
+/**
+ * Write a file inside the repo working copy, creating its folder if needed
+ * (req-010). The next commitAndPush picks it up like any other change.
+ */
+export async function writeRepoFile(
+  dir: string,
+  relPath: string,
+  content: string,
+): Promise<void> {
+  const target = path.join(dir, relPath);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, content, "utf8");
+}
+
 /** Move a file from ready/ to done|failed/ inside the repo working copy. */
 export async function moveMd(
   dir: string,

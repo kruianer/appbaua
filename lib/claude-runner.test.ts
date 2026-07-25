@@ -3,6 +3,7 @@ import {
   createActivityStream,
   createLiveTail,
   lastLines,
+  recurringPrompt,
   runClaude,
   LIVE_TAIL_LINES,
 } from "./claude-runner";
@@ -102,6 +103,15 @@ describe("runClaude live output", () => {
 // bug-001: the Aktivität tab used to show nothing but the CLI's stdin warning
 // for minutes, because print mode writes to stdout only at the very end. The
 // run now asks for the structured event stream and closes stdin.
+
+describe("recurringPrompt (req-010)", () => {
+  it("names the task and asks for the complete report as the final answer", () => {
+    const p = recurringPrompt("Code-Review");
+    expect(p).toContain("Code-Review");
+    expect(p).toContain("vollständigen Bericht");
+    expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+});
 
 describe("createActivityStream (bug-001)", () => {
   it("holds back an incomplete line until the rest arrives", () => {
@@ -235,6 +245,37 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     });
     const out = await runClaude("/repo", "prompt", { runImpl });
     expect(out.summary).toBe("Claude-Lauf fehlgeschlagen: claude: boom");
+  });
+
+  // req-010: the report that gets filed in the repo is Claude's final answer,
+  // so it must be the whole report — and the log must keep only its tail.
+  it("AC: a successful run reports the FULL answer next to the short summary", async () => {
+    const long = `${"x".repeat(1000)}\nFazit: Tests gruen.`;
+    const stdout = `${JSON.stringify({
+      type: "result",
+      subtype: "success",
+      result: long,
+    })}\n`;
+    const runImpl: typeof run = async () => ({
+      ok: true,
+      code: 0,
+      stdout,
+      stderr: "",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.report).toBe(long);
+    expect(out.summary.length).toBeLessThanOrEqual(300);
+    expect(out.summary).not.toBe(out.report);
+  });
+
+  it("a failed run carries no report — nothing gets filed", async () => {
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: 1,
+      stdout: STDOUT,
+      stderr: "claude: boom\n",
+    });
+    expect((await runClaude("/repo", "prompt", { runImpl })).report).toBe("");
   });
 
   it("a failed run without stderr falls back to the streamed result", async () => {

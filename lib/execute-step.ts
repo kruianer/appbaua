@@ -12,15 +12,18 @@ import {
 } from "./task-source";
 import {
   commitAndPush,
+  headCommit,
   listReady,
   moveMd,
   prepareRepo,
+  writeRepoFile,
 } from "./workspace";
 import {
   fileTaskPrompt,
   recurringPrompt,
   runClaude,
 } from "./claude-runner";
+import { reportContent, reportPath } from "./review-report";
 import { setCurrentMd, setCurrentOutput } from "./worker-status";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
@@ -32,6 +35,11 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // ready/ -> in-progress/ -> done|failed/, publishes the filename and the live
 // Claude output to the worker status, and puts back .md files a crashed run
 // left behind in in-progress/.
+//
+// req-010 makes the result of a recurring analysis task durable: such a step
+// produces a report instead of code, so the full report is written to
+// delivery/reviews/ in the target repo and pushed like any other change. The
+// run log keeps only its short message.
 
 export type StepDecision =
   | { kind: "skip" }
@@ -44,6 +52,10 @@ export type ExecuteDeps = {
   runClaude: typeof runClaude;
   commitAndPush: typeof commitAndPush;
   moveMd: typeof moveMd;
+  /** Which commit a filed report describes (req-010). */
+  headCommit: typeof headCommit;
+  /** Write the report file into the repo working copy (req-010). */
+  writeRepoFile: typeof writeRepoFile;
   /** Publish the .md this step works on (req-008). */
   setCurrentMd: typeof setCurrentMd;
   /** Publish the live Claude output tail of this step (req-008). */
@@ -58,6 +70,8 @@ const defaultDeps = (): ExecuteDeps => ({
   runClaude,
   commitAndPush,
   moveMd,
+  headCommit,
+  writeRepoFile,
   setCurrentMd,
   setCurrentOutput,
   now: () => new Date(),
@@ -154,15 +168,57 @@ export async function executeStep(
     }
   }
 
+  // A recurring analysis task changes no work item of its own — its result IS
+  // the report. File it so it outlives the container session (req-010).
+  const reportRel =
+    src.kind === "recurring" && outcome.report.trim()
+      ? await fileReport(d, dir, repo, taskType, outcome.report)
+      : null;
+
   const commitMsg = mdName
     ? `worker: ${mdName} abgearbeitet`
     : `worker: ${taskType.label} durchgeführt`;
   const push = await d.commitAndPush(dir, commitMsg);
 
+  // The log stays a short message; it only names the file so the full report
+  // remains findable from the Verlauf (req-010).
+  const note = reportRel ? ` (Bericht: ${reportRel})` : "";
   return {
     kind: "success",
-    message: `${outcome.summary} — ${push.detail}`,
+    message: `${outcome.summary} — ${push.detail}${note}`,
   };
+}
+
+/**
+ * Write Claude's full report into delivery/reviews/ of the working copy and
+ * return its repo-relative path (req-010). Best effort: a report that cannot be
+ * written must not turn a successful review into a failed step — the analysis
+ * itself did happen, and the log message then simply names no file.
+ */
+async function fileReport(
+  d: ExecuteDeps,
+  dir: string,
+  repo: Repo,
+  taskType: TaskType,
+  report: string,
+): Promise<string | null> {
+  try {
+    const ref = {
+      taskId: taskType.id,
+      repoName: repo.name,
+      commit: await d.headCommit(dir),
+      now: d.now(),
+    };
+    const rel = reportPath(ref);
+    await d.writeRepoFile(
+      dir,
+      rel,
+      reportContent({ ...ref, taskLabel: taskType.label, report }),
+    );
+    return rel;
+  } catch {
+    return null;
+  }
 }
 
 /**

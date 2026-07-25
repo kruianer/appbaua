@@ -22,15 +22,22 @@ function folders(contents: { ready?: string[]; inProgress?: string[] } = {}) {
   });
 }
 
+/** Typed fake for the report writer (req-010), so mock.calls stays inspectable. */
+function writerFake() {
+  return vi.fn(async (_dir: string, _rel: string, _content: string) => {});
+}
+
 function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
   return {
     token: "tok",
     now: () => now,
     prepareRepo: vi.fn(async () => "/work/appbaua"),
     listReady: folders(),
-    runClaude: vi.fn(async () => ({ ok: true, summary: "done" })),
+    runClaude: vi.fn(async () => ({ ok: true, summary: "done", report: "" })),
     commitAndPush: vi.fn(async () => ({ pushed: true, detail: "auf dev gepusht" })),
     moveMd: vi.fn(async () => {}),
+    headCommit: vi.fn(async (_dir: string) => "282a765"),
+    writeRepoFile: writerFake(),
     setCurrentMd: vi.fn(async (_md: string | null) => {}),
     setCurrentOutput: vi.fn(async (_text: string | null) => {}),
     ...over,
@@ -80,7 +87,7 @@ describe("executeStep (req-006)", () => {
       [],
       deps({
         listReady: folders({ ready: ["bug-001.md"] }),
-        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout" })),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
         moveMd,
         commitAndPush,
       }),
@@ -113,7 +120,7 @@ describe("executeStep (req-006)", () => {
   });
 
   it("recurring type not run today -> runs and pushes", async () => {
-    const runClaude = vi.fn(async () => ({ ok: true, summary: "review done" }));
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "review done", report: "" }));
     const d = await executeStep(repo, review, [], deps({ runClaude }));
     expect(d.kind).toBe("success");
     expect(runClaude).toHaveBeenCalled();
@@ -128,7 +135,7 @@ describe("executeStep — in-progress folder (req-008)", () => {
     });
     const runClaude = vi.fn(async () => {
       calls.push("claude");
-      return { ok: true, summary: "done" };
+      return { ok: true, summary: "done", report: "" };
     });
     await executeStep(
       repo,
@@ -146,7 +153,7 @@ describe("executeStep — in-progress folder (req-008)", () => {
     let seenPrompt = "";
     const runClaude = vi.fn(async (_dir: string, prompt: string) => {
       seenPrompt = prompt;
-      return { ok: true, summary: "done" };
+      return { ok: true, summary: "done", report: "" };
     });
     await executeStep(
       repo,
@@ -206,7 +213,7 @@ describe("executeStep — in-progress folder (req-008)", () => {
   });
 
   it("a failing claim (ready -> in-progress) becomes a logged error, no Claude run", async () => {
-    const runClaude = vi.fn(async () => ({ ok: true, summary: "done" }));
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "done", report: "" }));
     const d = await executeStep(
       repo,
       bug,
@@ -263,7 +270,7 @@ describe("executeStep — live status (req-008)", () => {
       ) => {
         o?.onOutput?.("Zeile 1");
         o?.onOutput?.("Zeile 1\nZeile 2");
-        return { ok: true, summary: "done" };
+        return { ok: true, summary: "done", report: "" };
       },
     );
     await executeStep(repo, review, [], deps({ runClaude, setCurrentOutput }));
@@ -289,7 +296,7 @@ describe("executeStep — live status (req-008)", () => {
       ) => {
         o?.onOutput?.("a");
         o?.onOutput?.("b");
-        return { ok: true, summary: "done" };
+        return { ok: true, summary: "done", report: "" };
       },
     );
     await executeStep(repo, review, [], deps({ runClaude, setCurrentOutput }));
@@ -314,11 +321,176 @@ describe("executeStep — live status (req-008)", () => {
             o?: { onOutput?: (tail: string) => void },
           ) => {
             o?.onOutput?.("etwas");
-            return { ok: true, summary: "done" };
+            return { ok: true, summary: "done", report: "" };
           },
         ),
       }),
     );
     expect(d.kind).toBe("success");
+  });
+});
+
+// req-010: a recurring analysis task (Code-Review, Security-Review, Doku) has
+// no work item to commit — its result is a report, which has to survive the
+// throwaway Claude session as a file in the target repo.
+describe("executeStep — Bericht ablegen (req-010)", () => {
+  const REPORT = "# Code-Review\n\nBefund 1: sehr ausführlich …\nBefund 2: …";
+  const REPORT_FILE =
+    "delivery/reviews/2026-07-24-code-review-appbaua-282a765.md";
+
+  function reviewDeps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
+    return deps({
+      runClaude: vi.fn(async () => ({
+        ok: true,
+        summary: "Fazit: alles gut.",
+        report: REPORT,
+      })),
+      ...over,
+    });
+  }
+
+  it("AC: a successful recurring run writes the full report into the repo", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(repo, review, [], reviewDeps({ writeRepoFile }));
+    expect(d.kind).toBe("success");
+    expect(writeRepoFile).toHaveBeenCalledTimes(1);
+    const [dir, rel, content] = writeRepoFile.mock.calls[0];
+    expect(dir).toBe("/work/appbaua");
+    expect(rel).toBe(REPORT_FILE);
+    expect(content).toContain(REPORT); // the FULL report, not the short message
+  });
+
+  it("AC: the filename names type, date and reference (repo + commit)", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(repo, review, [], reviewDeps({ writeRepoFile }));
+    const rel = writeRepoFile.mock.calls[0][1];
+    expect(rel).toContain("code-review"); // Typ
+    expect(rel).toContain("2026-07-24"); // Datum
+    expect(rel).toContain("appbaua"); // Repo
+    expect(rel).toContain("282a765"); // Commit
+  });
+
+  it("AC: the report is written first, then committed and pushed on dev", async () => {
+    // Order matters: a report written after the commit would never be pushed.
+    const order: string[] = [];
+    const writeRepoFile = vi.fn(async (_d: string, _r: string, _c: string) => {
+      order.push("write");
+    });
+    const commitAndPush = vi.fn(async () => {
+      order.push("push");
+      return { pushed: true, detail: "auf dev gepusht" };
+    });
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      reviewDeps({ commitAndPush, writeRepoFile }),
+    );
+    expect(order).toEqual(["write", "push"]);
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("auf dev gepusht");
+  });
+
+  it("AC: the log keeps the short message, not the full report", async () => {
+    const long = `${"x".repeat(5000)}\nFazit: alles gut.`;
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      reviewDeps({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Fazit: alles gut.",
+          report: long,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).not.toContain(long);
+    expect(d.message).toContain("Fazit: alles gut.");
+    expect(d.message.length).toBeLessThan(500);
+  });
+
+  it("the short message names the report file, so it stays findable", async () => {
+    const d = await executeStep(repo, review, [], reviewDeps());
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(REPORT_FILE);
+  });
+
+  it("file-driven tasks file no report — they commit code (out of scope)", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      reviewDeps({ listReady: folders({ ready: ["bug-001.md"] }), writeRepoFile }),
+    );
+    expect(d.kind).toBe("success");
+    expect(writeRepoFile).not.toHaveBeenCalled();
+  });
+
+  it("a failed Claude run files no report", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      reviewDeps({
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "Timeout",
+          report: "",
+        })),
+        writeRepoFile,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(writeRepoFile).not.toHaveBeenCalled();
+  });
+
+  it("an empty report writes no file", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      review,
+      [],
+      reviewDeps({
+        runClaude: vi.fn(async () => ({ ok: true, summary: "ok", report: "   " })),
+        writeRepoFile,
+      }),
+    );
+    expect(writeRepoFile).not.toHaveBeenCalled();
+  });
+
+  it("an undeterminable commit still produces a report file", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      review,
+      [],
+      reviewDeps({ headCommit: vi.fn(async () => null), writeRepoFile }),
+    );
+    expect(writeRepoFile.mock.calls[0][1]).toBe(
+      "delivery/reviews/2026-07-24-code-review-appbaua.md",
+    );
+  });
+
+  it("a failing write never turns a successful review into an error", async () => {
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      reviewDeps({
+        writeRepoFile: vi.fn(async () => {
+          throw new Error("Platte voll");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).not.toContain("Bericht:");
   });
 });
