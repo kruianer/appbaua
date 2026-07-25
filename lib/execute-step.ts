@@ -12,15 +12,19 @@ import {
 } from "./task-source";
 import {
   commitAndPush,
+  discardChanges,
+  headCommit,
   listReady,
   moveMd,
   prepareRepo,
+  writeRepoFile,
 } from "./workspace";
 import {
   fileTaskPrompt,
   recurringPrompt,
   runClaude,
 } from "./claude-runner";
+import { reportContent, reportPath } from "./review-report";
 import { setCurrentMd, setCurrentOutput } from "./worker-status";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
@@ -32,6 +36,14 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // ready/ -> in-progress/ -> done|failed/, publishes the filename and the live
 // Claude output to the worker status, and puts back .md files a crashed run
 // left behind in in-progress/.
+//
+// req-010 makes the result of a recurring analysis task durable: such a step
+// produces a report instead of code, so the full report is written to
+// delivery/reviews/ in the target repo and pushed like any other change. The
+// run log keeps only its short message.
+//
+// bug-002 makes failure durable too: a .md whose run failed is parked in
+// failed/ with its own commit, so the next pass does not pick it up again.
 
 export type StepDecision =
   | { kind: "skip" }
@@ -44,6 +56,12 @@ export type ExecuteDeps = {
   runClaude: typeof runClaude;
   commitAndPush: typeof commitAndPush;
   moveMd: typeof moveMd;
+  /** Drop what a failed run left in the working copy (bug-002). */
+  discardChanges: typeof discardChanges;
+  /** Which commit a filed report describes (req-010). */
+  headCommit: typeof headCommit;
+  /** Write the report file into the repo working copy (req-010). */
+  writeRepoFile: typeof writeRepoFile;
   /** Publish the .md this step works on (req-008). */
   setCurrentMd: typeof setCurrentMd;
   /** Publish the live Claude output tail of this step (req-008). */
@@ -58,6 +76,9 @@ const defaultDeps = (): ExecuteDeps => ({
   runClaude,
   commitAndPush,
   moveMd,
+  discardChanges,
+  headCommit,
+  writeRepoFile,
   setCurrentMd,
   setCurrentOutput,
   now: () => new Date(),
@@ -76,6 +97,9 @@ export async function executeStep(
   if (!d.token) {
     return { kind: "error", message: "Kein GitHub-Token für Push konfiguriert" };
   }
+  // Bound once, so every git helper below gets the credential it needs without
+  // reaching for the environment again (bug-003).
+  const token = d.token;
 
   // Recurring types: skip if already ran today for this repo.
   if (src.kind === "recurring") {
@@ -86,7 +110,7 @@ export async function executeStep(
 
   let dir: string;
   try {
-    dir = await d.prepareRepo(repo.url, d.token);
+    dir = await d.prepareRepo(repo.url, token);
   } catch (err) {
     return { kind: "error", message: `Repo vorbereiten fehlgeschlagen: ${String(err)}` };
   }
@@ -134,15 +158,13 @@ export async function executeStep(
   await outputWrites;
 
   if (!outcome.ok) {
-    // Move the .md to failed/ (file-driven only), nothing pushed.
-    if (src.base && mdRel && mdName) {
-      try {
-        await d.moveMd(dir, mdRel, `${failedDir(src.base)}/${mdName}`);
-      } catch {
-        /* best effort */
-      }
-    }
-    return { kind: "error", message: outcome.summary };
+    // Park the .md under failed/ and push that move (file-driven only), so the
+    // same task is not picked up again on the next pass (bug-002).
+    const parked =
+      src.base && mdName
+        ? await parkFailed(d, dir, src.base, mdName, token)
+        : "";
+    return { kind: "error", message: `${outcome.summary}${parked}` };
   }
 
   // Success: for file-driven, move in-progress -> done before committing.
@@ -154,15 +176,100 @@ export async function executeStep(
     }
   }
 
+  // A recurring analysis task changes no work item of its own — its result IS
+  // the report. File it so it outlives the container session (req-010).
+  const reportRel =
+    src.kind === "recurring" && outcome.report.trim()
+      ? await fileReport(d, dir, repo, taskType, outcome.report)
+      : null;
+
   const commitMsg = mdName
     ? `worker: ${mdName} abgearbeitet`
     : `worker: ${taskType.label} durchgeführt`;
-  const push = await d.commitAndPush(dir, commitMsg);
+  const push = await d.commitAndPush(dir, commitMsg, token);
 
+  // The log stays a short message; it only names the file so the full report
+  // remains findable from the Verlauf (req-010).
+  const note = reportRel ? ` (Bericht: ${reportRel})` : "";
   return {
     kind: "success",
-    message: `${outcome.summary} — ${push.detail}`,
+    message: `${outcome.summary} — ${push.detail}${note}`,
   };
+}
+
+/**
+ * Move the .md of a failed run from ready/ to failed/ and commit that move on
+ * its own (bug-002). Returns a note for the run-log message.
+ *
+ * The commit is what makes the failure stick: without it the next prepareRepo
+ * resets ready/ back from origin, so a permanently failing task would be
+ * retried on every pass forever, while its untracked failed/ copy sat around
+ * waiting to be swept into an unrelated commit — the .md would then be in
+ * ready/ AND failed/ at once.
+ *
+ * Everything the failed attempt left behind is discarded first, so the commit
+ * carries the move and nothing else: a half-finished attempt must never reach
+ * dev. Discarding also restores ready/<md> — the claim into in-progress/ was
+ * never committed — which is where the move starts from.
+ *
+ * Best effort: a move or push that fails must not hide the original error, it
+ * only changes the note.
+ */
+async function parkFailed(
+  d: ExecuteDeps,
+  dir: string,
+  base: string,
+  mdName: string,
+  token: string,
+): Promise<string> {
+  try {
+    await d.discardChanges(dir);
+    await d.moveMd(
+      dir,
+      `${readyDir(base)}/${mdName}`,
+      `${failedDir(base)}/${mdName}`,
+    );
+    const push = await d.commitAndPush(
+      dir,
+      `worker: ${mdName} fehlgeschlagen`,
+      token,
+    );
+    return ` — ${mdName} nach failed/ verschoben (${push.detail})`;
+  } catch (err) {
+    return ` — ${mdName} konnte nicht nach failed/ verschoben werden: ${String(err)}`;
+  }
+}
+
+/**
+ * Write Claude's full report into delivery/reviews/ of the working copy and
+ * return its repo-relative path (req-010). Best effort: a report that cannot be
+ * written must not turn a successful review into a failed step — the analysis
+ * itself did happen, and the log message then simply names no file.
+ */
+async function fileReport(
+  d: ExecuteDeps,
+  dir: string,
+  repo: Repo,
+  taskType: TaskType,
+  report: string,
+): Promise<string | null> {
+  try {
+    const ref = {
+      taskId: taskType.id,
+      repoName: repo.name,
+      commit: await d.headCommit(dir),
+      now: d.now(),
+    };
+    const rel = reportPath(ref);
+    await d.writeRepoFile(
+      dir,
+      rel,
+      reportContent({ ...ref, taskLabel: taskType.label, report }),
+    );
+    return rel;
+  } catch {
+    return null;
+  }
 }
 
 /**

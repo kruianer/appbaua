@@ -7,6 +7,7 @@ import { getWorkerState } from "./worker-state";
 import { getRunLogStore } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
 import { executeStep, type StepDecision } from "./execute-step";
+import { redact } from "./redact";
 import {
   clearRunningStep,
   setPauseUntil,
@@ -15,10 +16,11 @@ import {
 
 // The worker loop. Runs server-side, independent of any browser. Each step
 // executes real work via Claude Code (req-006, executeStep): skip / success /
-// error. An empty run logs one "idle" row and waits EMPTY_PAUSE_MS. It also
-// writes its live status (running step / pause window, req-005) so the start
-// page can show what it is doing right now. Deps (runStep, now, status
-// mutators, sleep) are injectable for tests.
+// error. An empty run logs one "idle" row. A pass that got nothing done —
+// nothing to do, or every step failed — waits EMPTY_PAUSE_MS before looking
+// again (bug-002). It also writes its live status (running step / pause window,
+// req-005) so the start page can show what it is doing right now. Deps
+// (runStep, now, status mutators, sleep) are injectable for tests.
 
 export const EMPTY_PAUSE_MS = 5 * 60_000;
 
@@ -47,8 +49,10 @@ const defaultDeps: LoopDeps = {
 };
 
 /**
- * Run exactly one pass over the current config. Returns how many steps were
- * executed. Re-checks worker-state and per-step due-ness live, so config
+ * Run exactly one pass over the current config. Returns how many steps actually
+ * got work done, i.e. succeeded — a failed step is logged but does not count
+ * as progress, so a permanently failing task cannot keep the loop from pausing
+ * (bug-002). Re-checks worker-state and per-step due-ness live, so config
  * changes take effect within the pass. `stepCounter` is a mutable ref shared
  * across passes so the 1-in-10 error cadence is stable over time.
  */
@@ -78,7 +82,7 @@ export async function runOnce(
     return 0;
   }
 
-  let done = 0;
+  let succeeded = 0;
   for (const step of steps) {
     // Stop if the switch was flipped off mid-run (after finishing current step
     // is handled by the loop; here we simply stop starting new steps).
@@ -127,22 +131,29 @@ export async function runOnce(
       repo: step.repo.name,
       taskType: step.taskType.label,
       status: decision.kind === "success" ? "success" : "error",
-      message: decision.message,
+      // Last stop before the message becomes a durable, UI-visible log row: no
+      // credential gets past here, whichever tool put one into it (bug-003).
+      message: redact(decision.message),
     });
-    done += 1;
+    // Only success is progress. Counting errors here would keep the loop from
+    // ever pausing while a step fails on every single pass (bug-002).
+    if (decision.kind === "success") succeeded += 1;
   }
   await deps.clearRunningStep(); // no step running after the pass
-  return done;
+  return succeeded;
 }
 
-/** Endless loop. After an empty pass, wait EMPTY_PAUSE_MS before looking again. */
+/**
+ * Endless loop. After a pass that got nothing done — nothing was due, or every
+ * step failed — wait EMPTY_PAUSE_MS before looking again (bug-002).
+ */
 export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
   const stepCounter = { n: 0 };
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    let done = 0;
+    let succeeded = 0;
     try {
-      done = await runOnce(stepCounter, deps);
+      succeeded = await runOnce(stepCounter, deps);
     } catch (err) {
       // A whole pass failed unexpectedly: never let the loop die. Clear any
       // stuck running status and pause before trying again.
@@ -154,7 +165,7 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
         /* ignore */
       }
     }
-    if (done === 0) {
+    if (succeeded === 0) {
       // Record the pause window so the start page can show "Pause bis HH:MM".
       const until = new Date(deps.now().getTime() + EMPTY_PAUSE_MS).toISOString();
       await deps.setPauseUntil(until);

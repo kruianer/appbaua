@@ -98,14 +98,20 @@ chmod 600 ~/appbaua-env/dev.env
 ### System-Kacheln: Host-Einblick ohne Docker-Socket (req-009)
 
 Die Einstellungsseite zeigt Speicherplatz, CPU-Last, RAM und die CPU-Last des
-Workers. Dafür bekommt der **App-Container** in `docker-compose.yml` zwei
-read-only Mounts — nichts davon muss auf dem Host eingerichtet werden, der
-Deploy bringt sie mit:
+Workers. Dafür bekommt der **App-Container** in `docker-compose.yml` genau
+**einen** read-only Mount — nichts davon muss auf dem Host eingerichtet werden,
+der Deploy bringt ihn mit:
 
-| Mount               | wofür                                              |
-|---------------------|----------------------------------------------------|
+| Mount                 | wofür                                                |
+|-----------------------|------------------------------------------------------|
 | `/proc:/host/proc:ro` | CPU-Last, RAM und die Prozesse des Worker-Containers |
-| `/:/host/root:ro`     | freier Speicherplatz des Datenträgers (nur `statfs`) |
+
+Der **freie Speicherplatz** braucht keinen Mount: `statfs` auf dem eigenen
+Wurzel-Dateisystem des Containers (`HOST_DISK=/`) liefert die Werte der
+overlay-Unterlage, also des Docker-Datenträgers des Hosts. Früher war dafür das
+ganze Host-Wurzelverzeichnis gemountet (`/:/host/root:ro`) — damit lagen auch
+`~/appbaua-env/*.env` mit `GITHUB_TOKEN` und DB-Passwort im Lesebereich des
+einzigen internetzugewandten Prozesses (bug-005).
 
 Im Host-`/proc` stehen **alle** Prozesse des Rechners, auch die aus anderen
 Containern. Damit findet die App die Worker-Schleife und den während eines

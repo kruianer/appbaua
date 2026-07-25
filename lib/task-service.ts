@@ -55,8 +55,9 @@ export type SetDayResult =
   | { ok: false; error: "invalid-window" | "not-found" };
 
 /**
- * Set one weekday's schedule for a task type. An invalid window (end not after
- * start, or only one side filled) is rejected and nothing is saved.
+ * Set one weekday's schedule for a task type. An invalid window (start and end
+ * identical, or only one side filled and the day disabled) is rejected and
+ * nothing is saved. A window over midnight like 22:00–06:00 is valid.
  */
 export async function setDaySchedule(
   id: string,

@@ -26,7 +26,6 @@ import {
 // in a transaction so the array index becomes the new position.
 
 let pool: Pool | null = null;
-let schemaReady: Promise<void> | null = null;
 
 /**
  * Build the pg pool config from env. Prefers discrete PG* fields over a
@@ -56,18 +55,33 @@ function getPool(): Pool {
   return pool;
 }
 
-async function ensureSchema(): Promise<void> {
-  if (!schemaReady) {
-    schemaReady = (async () => {
-      const sql = await fs.readFile(
-        path.join(process.cwd(), "lib", "schema.sql"),
-        "utf8",
-      );
-      await getPool().query(sql);
-    })();
-  }
-  return schemaReady;
+/**
+ * Wraps a one-shot setup so it runs at most once — but is retried after a
+ * failure. Caching the REJECTED promise would be fatal: the first attempt can
+ * fail just because the DB was not accepting connections yet (or schema.sql was
+ * briefly unreadable), and every later query would then keep failing until the
+ * container restarts (bug-005). Exported for testing.
+ */
+export function retryingOnce(run: () => Promise<void>): () => Promise<void> {
+  let pending: Promise<void> | null = null;
+  return () => {
+    if (!pending) {
+      pending = run().catch((err) => {
+        pending = null; // der nächste Aufruf versucht es erneut
+        throw err;
+      });
+    }
+    return pending;
+  };
 }
+
+const ensureSchema = retryingOnce(async () => {
+  const sql = await fs.readFile(
+    path.join(process.cwd(), "lib", "schema.sql"),
+    "utf8",
+  );
+  await getPool().query(sql);
+});
 
 export function createPgStore(): RepoStore {
   return {

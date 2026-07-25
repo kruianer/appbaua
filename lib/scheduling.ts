@@ -1,7 +1,10 @@
 import {
+  type DaySchedule,
   type TaskType,
   type Weekday,
   WEEKDAYS,
+  isOvernightWindow,
+  isWithinWindow,
   toMinutes,
 } from "./task-types";
 import type { Repo } from "./repos";
@@ -20,23 +23,52 @@ export function minutesOfDay(now: Date): number {
   return now.getHours() * 60 + now.getMinutes();
 }
 
+/** The weekday before the given one (Mon-first list, so mon -> sun). */
+export function previousWeekday(day: Weekday): Weekday {
+  const i = WEEKDAYS.indexOf(day);
+  return WEEKDAYS[(i + WEEKDAYS.length - 1) % WEEKDAYS.length];
+}
+
+/** Does today's own window cover `nowMin`? An enabled day with no window is all-day. */
+function coversNow(ds: DaySchedule | undefined, nowMin: number): boolean {
+  if (!ds || !ds.enabled) return false;
+  const start = toMinutes(ds.start);
+  const end = toMinutes(ds.end);
+  if (start === null || end === null) return true; // enabled, no window = all day
+  return isWithinWindow(nowMin, start, end);
+}
+
+/**
+ * Does yesterday's window still run into today? Only a window over midnight
+ * (22:00–06:00) does, and only up to its end. An all-day yesterday stops at
+ * midnight.
+ */
+function spillsIntoToday(ds: DaySchedule | undefined, nowMin: number): boolean {
+  if (!ds || !ds.enabled) return false;
+  const start = toMinutes(ds.start);
+  const end = toMinutes(ds.end);
+  if (start === null || end === null) return false;
+  return isOvernightWindow(start, end) && nowMin <= end;
+}
+
 /**
  * Is this task type due to run right now? Inactive => never. always => yes.
  * Otherwise the current weekday must be enabled and (if a window is set) the
  * current time must fall within [start, end]; an enabled day with no window is
  * all-day.
+ *
+ * A window whose end lies before its start runs over midnight (bug-004): it
+ * covers both sides of midnight on its own weekday AND reaches into the
+ * following day, so Monday 22:00–06:00 is due on Monday 23:30 and on Tuesday
+ * 02:00.
  */
 export function isTaskDue(t: TaskType, now: Date): boolean {
   if (!t.active) return false;
   if (t.always) return true;
   const day = weekdayOf(now);
-  const ds = t.schedule[day];
-  if (!ds || !ds.enabled) return false;
-  const start = toMinutes(ds.start);
-  const end = toMinutes(ds.end);
-  if (start === null || end === null) return true; // enabled, no window = all day
   const nowMin = minutesOfDay(now);
-  return nowMin >= start && nowMin <= end;
+  if (coversNow(t.schedule[day], nowMin)) return true;
+  return spillsIntoToday(t.schedule[previousWeekday(day)], nowMin);
 }
 
 export type PlannedStep = { repo: Repo; taskType: TaskType };

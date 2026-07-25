@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import {
   DEFAULT_TASK_TYPES,
   defaultTaskTypes,
+  isOvernightWindow,
   isValidTime,
   isValidWindow,
+  isWithinWindow,
   prefillDay,
   runsAlways,
   toMinutes,
@@ -61,8 +63,11 @@ describe("isValidWindow", () => {
   it("end after start = valid", () => {
     expect(isValidWindow("17:00", "19:00")).toBe(true);
   });
-  it("end before start = invalid", () => {
-    expect(isValidWindow("19:00", "17:00")).toBe(false);
+  // bug-004: end before start is a window over midnight, not an error.
+  it("end before start = window over midnight = valid", () => {
+    expect(isValidWindow("22:00", "06:00")).toBe(true);
+    expect(isValidWindow("19:00", "17:00")).toBe(true);
+    expect(isValidWindow("23:59", "00:00")).toBe(true);
   });
   it("equal start/end = invalid", () => {
     expect(isValidWindow("10:00", "10:00")).toBe(false);
@@ -70,6 +75,48 @@ describe("isValidWindow", () => {
   it("only one side filled = invalid", () => {
     expect(isValidWindow("09:00", null)).toBe(false);
     expect(isValidWindow(null, "09:00")).toBe(false);
+  });
+  it("malformed times = invalid", () => {
+    expect(isValidWindow("22:00", "6:0")).toBe(false);
+    expect(isValidWindow("24:00", "06:00")).toBe(false);
+  });
+});
+
+describe("isOvernightWindow", () => {
+  it("is true only when the end lies before the start", () => {
+    expect(isOvernightWindow(22 * 60, 6 * 60)).toBe(true);
+    expect(isOvernightWindow(9 * 60, 17 * 60)).toBe(false);
+    expect(isOvernightWindow(10 * 60, 10 * 60)).toBe(false);
+  });
+});
+
+describe("isWithinWindow", () => {
+  const start = 22 * 60; // 22:00
+  const end = 6 * 60; // 06:00
+
+  it("same-day window includes both ends and excludes the outside", () => {
+    expect(isWithinWindow(9 * 60, 9 * 60, 17 * 60)).toBe(true); // 09:00
+    expect(isWithinWindow(17 * 60, 9 * 60, 17 * 60)).toBe(true); // 17:00
+    expect(isWithinWindow(8 * 60 + 59, 9 * 60, 17 * 60)).toBe(false);
+    expect(isWithinWindow(17 * 60 + 1, 9 * 60, 17 * 60)).toBe(false);
+  });
+
+  it("window over midnight covers the late evening", () => {
+    expect(isWithinWindow(22 * 60, start, end)).toBe(true); // 22:00
+    expect(isWithinWindow(23 * 60 + 30, start, end)).toBe(true); // 23:30
+    expect(isWithinWindow(23 * 60 + 59, start, end)).toBe(true); // 23:59
+  });
+
+  it("window over midnight covers the early morning", () => {
+    expect(isWithinWindow(0, start, end)).toBe(true); // 00:00
+    expect(isWithinWindow(2 * 60, start, end)).toBe(true); // 02:00
+    expect(isWithinWindow(6 * 60, start, end)).toBe(true); // 06:00
+  });
+
+  it("window over midnight excludes the day in between", () => {
+    expect(isWithinWindow(6 * 60 + 1, start, end)).toBe(false); // 06:01
+    expect(isWithinWindow(12 * 60, start, end)).toBe(false); // 12:00
+    expect(isWithinWindow(21 * 60 + 59, start, end)).toBe(false); // 21:59
   });
 });
 
