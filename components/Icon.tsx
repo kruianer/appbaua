@@ -23,6 +23,8 @@ export const ICONS = {
   // Tasks tab (req-007 moved the cog to the new Einstellungen tab).
   list: '<path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><path d="M4 6h.01"/><path d="M4 12h.01"/><path d="M4 18h.01"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  // "Auf appbaua umstellen/aktualisieren" (req-012).
+  sync: '<path d="M20 11a8 8 0 0 0-13.7-5.7L4 7.6"/><path d="M4 4.1v3.5h3.5"/><path d="M4 13a8 8 0 0 0 13.7 5.7L20 16.4"/><path d="M20 19.9v-3.5h-3.5"/>',
   brand: '<path d="M6.5 8l4 4-4 4"/><path d="M12.5 17h6"/>',
 } as const;
 

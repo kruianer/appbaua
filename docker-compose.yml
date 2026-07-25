@@ -42,7 +42,13 @@ services:
       PGUSER: ${POSTGRES_USER}
       PGPASSWORD: ${POSTGRES_PASSWORD}
       PGDATABASE: ${POSTGRES_DB}
+      # PAT for the private-repo reachability check (req-001) and for the
+      # "Auf appbaua umstellen" rollout (req-012), which clones a target repo and
+      # pushes to its dev branch — so this token needs write access.
       GITHUB_TOKEN: ${GITHUB_TOKEN}
+      # Which repo the appbaua standard is read from (req-012). Optional; the
+      # app falls back to github.com/kruianer/appbaua.
+      APPBAUA_SOURCE_REPO: ${APPBAUA_SOURCE_REPO:-}
       NODE_ENV: production
       # System-Kacheln (req-009): wo die Host-Werte im Container liegen.
       HOST_PROC: /host/proc
