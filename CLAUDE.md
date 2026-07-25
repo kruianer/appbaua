@@ -18,6 +18,15 @@ Languages, frameworks, commands, conventions, and the glossary for this
 project are defined in [delivery/stack.md](delivery/stack.md). Follow
 them exactly.
 
+## Ideen
+
+Der Worker schlägt einmal pro Tag genau eine neue Idee für dieses Repo
+vor und legt sie als .md-Datei in [delivery/idea/](delivery/idea) ab;
+umgesetzte Ideen liegen in `delivery/idea/done/`. Die inhaltliche
+Richtung dafür steht — falls vorhanden — in
+[delivery/idea-direction.md](delivery/idea-direction.md) und wird vom
+Nutzer gepflegt. Ohne diese Datei schlägt der Worker frei vor.
+
 ## Areas
 
 Geschäftsfunktions-Bereiche der App, zur Einordnung von Requirements.

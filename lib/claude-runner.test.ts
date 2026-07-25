@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   createActivityStream,
   createLiveTail,
+  ideaPrompt,
   lastLines,
   recurringPrompt,
   runClaude,
   LIVE_TAIL_LINES,
+  NO_IDEA_MESSAGE,
 } from "./claude-runner";
 import type { run } from "./workspace";
 
@@ -110,6 +112,58 @@ describe("recurringPrompt (req-010)", () => {
     expect(p).toContain("Code-Review");
     expect(p).toContain("vollständigen Bericht");
     expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+});
+
+// req-011: the Ideen task used to fall through to recurringPrompt ("Führe eine
+// Ideen für dieses Repo durch"), which asks for a review report — not for an
+// idea file. The prompt below is the only place that can rule out duplicates,
+// already-implemented ideas and off-direction proposals, so each of those
+// instructions is pinned here.
+describe("ideaPrompt (req-011)", () => {
+  const p = ideaPrompt({
+    ideaDir: "delivery/idea",
+    doneDir: "delivery/idea/done",
+    directionFile: "delivery/idea-direction.md",
+  });
+
+  it("asks for exactly one new idea", () => {
+    expect(p).toContain("GENAU EINE neue Idee");
+  });
+
+  it("AC: names the open ideas, the implemented ones and the direction as input", () => {
+    expect(p).toContain("delivery/idea/");
+    expect(p).toContain("delivery/idea/done/");
+    expect(p).toContain("delivery/idea-direction.md");
+  });
+
+  it("AC: rules out duplicates of open and of already implemented ideas", () => {
+    expect(p).toContain("Dublette");
+    expect(p).toContain("umgesetzten Idee");
+  });
+
+  it("AC: falls back to a free proposal when there is no direction", () => {
+    expect(p).toContain("gibt es keine Richtungs-Vorgabe");
+  });
+
+  it("AC: prescribes the shape of the idea file", () => {
+    expect(p).toContain("Frontmatter");
+    expect(p).toContain("titel, datum");
+    expect(p).toContain("## Problem/Nutzen");
+    expect(p).toContain("## Skizze");
+  });
+
+  it("AC: says what to do when there is no new idea — no file, fixed answer", () => {
+    expect(p).toContain("lege KEINE Datei an");
+    expect(p).toContain(NO_IDEA_MESSAGE);
+  });
+
+  it("leaves committing and pushing to the worker", () => {
+    expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+
+  it("asks for no report — the idea file IS the result", () => {
+    expect(p).not.toContain("Bericht");
   });
 });
 

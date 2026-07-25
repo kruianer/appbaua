@@ -7,6 +7,7 @@ import type { RunLogEntry } from "./run-log";
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
+const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
 
 /**
@@ -629,5 +630,238 @@ describe("executeStep — fehlgeschlagene .md wird persistiert (bug-002)", () =>
     );
     expect(d.kind).toBe("success");
     expect(discardChanges).not.toHaveBeenCalled();
+  });
+});
+
+// req-011: the Ideen task. Once per repo and calendar day, Claude proposes
+// exactly one new idea as a file in delivery/idea/. Whether it did is read off
+// the folder, not off its answer.
+describe("executeStep — Ideen-Task (req-011)", () => {
+  /**
+   * Fake for the idea folder: the listing before the Claude run and the one
+   * after it. The step reads that difference to decide what happened.
+   */
+  function ideaFolder(before: string[], after: string[]) {
+    let calls = 0;
+    return vi.fn(async (_dir: string, rel: string) => {
+      if (rel !== "delivery/idea") return [];
+      calls += 1;
+      return calls === 1 ? before : after;
+    });
+  }
+
+  /** Claude run that writes one new idea file into the working copy. */
+  function proposes(before: string[], name: string) {
+    return ideaFolder(before, [...before, name]);
+  }
+
+  it("AC: a new idea file is created and pushed on dev", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({ listReady: proposes([], "dark-mode.md"), commitAndPush }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("dark-mode.md");
+    expect(d.message).toContain("auf dev gepusht");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: neue Idee dark-mode.md",
+      "tok",
+    );
+  });
+
+  it("AC: a second run on the same calendar day is skipped", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 5).toISOString(),
+        repo: "appbaua",
+        taskType: "Ideen",
+        status: "success",
+        message: "Neue Idee: dark-mode.md — auf dev gepusht",
+      },
+    ];
+    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const d = await executeStep(repo, ideen, ranToday, deps({ prepareRepo }));
+    expect(d.kind).toBe("skip");
+    expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
+  });
+
+  it("a run for another repo does not use up this repo's day", async () => {
+    const ranElsewhere: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 5).toISOString(),
+        repo: "anderes-repo",
+        taskType: "Ideen",
+        status: "success",
+        message: "",
+      },
+    ];
+    const d = await executeStep(
+      repo,
+      ideen,
+      ranElsewhere,
+      deps({ listReady: proposes([], "dark-mode.md") }),
+    );
+    expect(d.kind).toBe("success");
+  });
+
+  it("AC: the existing and the implemented ideas plus the direction reach Claude", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "vorgeschlagen", report: "" };
+    });
+    await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({ listReady: proposes(["csv-export.md"], "dark-mode.md"), runClaude }),
+    );
+    expect(seenPrompt).toContain("delivery/idea/");
+    expect(seenPrompt).toContain("delivery/idea/done/");
+    expect(seenPrompt).toContain("delivery/idea-direction.md");
+    expect(seenPrompt).toContain("Dublette");
+  });
+
+  it("AC: no new idea -> nothing is committed and the log says so", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({
+        listReady: ideaFolder(["csv-export.md"], ["csv-export.md"]),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "keine neue Idee gefunden",
+          report: "",
+        })),
+        commitAndPush,
+        discardChanges,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe("keine neue Idee gefunden");
+    expect(commitAndPush).not.toHaveBeenCalled();
+    expect(discardChanges).toHaveBeenCalledWith("/work/appbaua"); // nothing half-done reaches dev
+  });
+
+  it("AC: an empty-handed run still uses up the day", async () => {
+    // "keine neue Idee gefunden" is a success, so ranTodayForRepo sees it and
+    // the next pass of the same day skips.
+    const empty = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({ listReady: ideaFolder([], []) }),
+    );
+    expect(empty.kind).toBe("success");
+    if (empty.kind !== "success") return;
+    const log: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: now.toISOString(),
+        endedAt: now.toISOString(),
+        repo: "appbaua",
+        taskType: "Ideen",
+        status: "success",
+        message: empty.message,
+      },
+    ];
+    expect((await executeStep(repo, ideen, log, deps())).kind).toBe("skip");
+  });
+
+  it("an overwritten existing idea does not count as a new one", async () => {
+    // Rewriting csv-export.md leaves the folder unchanged — no proposal.
+    const d = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({ listReady: ideaFolder(["csv-export.md"], ["csv-export.md"]) }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe("keine neue Idee gefunden");
+  });
+
+  it("files no review report — the idea file is the result (req-010 stays untouched)", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({
+        listReady: proposes([], "dark-mode.md"),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "vorgeschlagen",
+          report: "# Ein langer Bericht",
+        })),
+        writeRepoFile,
+      }),
+    );
+    expect(writeRepoFile).not.toHaveBeenCalled();
+  });
+
+  it("claims no .md — the Ideen task has no work-item queue", async () => {
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({ listReady: proposes([], "dark-mode.md"), moveMd, setCurrentMd }),
+    );
+    expect(moveMd).not.toHaveBeenCalled();
+    expect(setCurrentMd).not.toHaveBeenCalled();
+  });
+
+  it("a failed Claude run stays an error and commits nothing", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const d = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({
+        listReady: proposes([], "dark-mode.md"),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Timeout");
+    expect(commitAndPush).not.toHaveBeenCalled();
+  });
+
+  it("a push that fails is reported in the log message", async () => {
+    const d = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({
+        listReady: proposes([], "dark-mode.md"),
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: "push failed: keine Rechte",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("push failed: keine Rechte");
   });
 });
