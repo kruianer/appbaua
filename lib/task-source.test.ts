@@ -1,10 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
+  IDEA_DIR,
+  newMdFiles,
   oldestMd,
   ranTodayForRepo,
   readyDir,
   doneDir,
   failedDir,
+  runsOncePerDay,
   sourceFor,
 } from "./task-source";
 import type { RunLogEntry } from "./run-log";
@@ -24,6 +27,22 @@ describe("sourceFor", () => {
   it("unknown type defaults to recurring", () => {
     expect(sourceFor("whatever").kind).toBe("recurring");
   });
+
+  // req-011: "ideen" was missing from this map entirely, so the Ideen task ran
+  // as an unknown type — recurring, without a folder, with the review prompt.
+  it("maps ideen to the idea folder of the repo", () => {
+    expect(sourceFor("ideen")).toEqual({ base: IDEA_DIR, kind: "idea" });
+    expect(IDEA_DIR).toBe("delivery/idea");
+  });
+});
+
+describe("runsOncePerDay", () => {
+  it("is true for recurring and idea types, false for file-driven ones", () => {
+    expect(runsOncePerDay(sourceFor("ideen"))).toBe(true);
+    expect(runsOncePerDay(sourceFor("code-review"))).toBe(true);
+    expect(runsOncePerDay(sourceFor("bug"))).toBe(false);
+    expect(runsOncePerDay(sourceFor("requirement"))).toBe(false);
+  });
 });
 
 describe("folder helpers", () => {
@@ -31,6 +50,29 @@ describe("folder helpers", () => {
     expect(readyDir("delivery/bugs")).toBe("delivery/bugs/ready");
     expect(doneDir("delivery/bugs")).toBe("delivery/bugs/done");
     expect(failedDir("delivery/bugs")).toBe("delivery/bugs/failed");
+  });
+
+  it("puts implemented ideas under done/ (req-011)", () => {
+    expect(doneDir(IDEA_DIR)).toBe("delivery/idea/done");
+  });
+});
+
+// req-011: whether a run proposed an idea is decided by the folder, not by
+// Claude's wording.
+describe("newMdFiles", () => {
+  it("returns the .md files that were not there before", () => {
+    expect(newMdFiles(["csv-export.md"], ["csv-export.md", "dark-mode.md"])).toEqual(
+      ["dark-mode.md"],
+    );
+  });
+  it("is empty when nothing was added", () => {
+    expect(newMdFiles(["csv-export.md"], ["csv-export.md"])).toEqual([]);
+  });
+  it("ignores the done/ folder and non-md entries", () => {
+    expect(newMdFiles([], ["done", ".gitkeep", "notizen.txt"])).toEqual([]);
+  });
+  it("sorts, so the message is stable", () => {
+    expect(newMdFiles([], ["b.md", "a.md"])).toEqual(["a.md", "b.md"]);
   });
 });
 

@@ -116,6 +116,43 @@ export function recurringPrompt(kindLabel: string): string {
 }
 
 /**
+ * What the worker logs — and what Claude is asked to answer — when a run found
+ * nothing worth proposing (req-011).
+ */
+export const NO_IDEA_MESSAGE = "keine neue Idee gefunden";
+
+/**
+ * The prompt for the Ideen task (req-011). Unlike the other recurring types it
+ * produces no report: its result is exactly one new idea file, written by Claude
+ * into `ideaDir` of the working copy, which the worker then commits and pushes.
+ * Everything the idea must not be — a duplicate of an open idea, a re-run of
+ * something already implemented, off the repo's steer — is stated here, because
+ * this prompt is the only place that can rule it out.
+ */
+export function ideaPrompt(paths: {
+  ideaDir: string;
+  doneDir: string;
+  directionFile: string;
+}): string {
+  return [
+    `Schlage GENAU EINE neue Idee für dieses Repo vor.`,
+    `Lies dazu zuerst die bereits vorhandenen Ideen in ${paths.ideaDir}/ (offen)`,
+    `und ${paths.doneDir}/ (bereits umgesetzt) sowie — falls vorhanden — die`,
+    `Richtungs-Vorgabe ${paths.directionFile} und die CLAUDE.md dieses Repos.`,
+    `Die neue Idee darf inhaltlich weder eine Dublette einer vorhandenen noch`,
+    `einer bereits umgesetzten Idee sein und muss zur Richtungs-Vorgabe passen;`,
+    `gibt es keine Richtungs-Vorgabe, schlage frei eine sinnvolle Idee zum Repo vor.`,
+    `Lege die Idee als neue .md-Datei direkt in ${paths.ideaDir}/ ab`,
+    `(Dateiname in kebab-case, NICHT in ${paths.doneDir}/), mit Frontmatter`,
+    `(titel, datum) und den Abschnitten "## Problem/Nutzen" und "## Skizze".`,
+    `Findest du keine solche Idee, lege KEINE Datei an und antworte genau`,
+    `"${NO_IDEA_MESSAGE}".`,
+    `Ändere sonst nichts im Repo — kein Code, keine anderen Dateien.`,
+    `Committe/pushe NICHT selbst. Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
  * Run Claude Code in `dir` with `prompt`. Injectable runner for tests.
  */
 export async function runClaude(

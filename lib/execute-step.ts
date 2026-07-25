@@ -2,12 +2,15 @@ import type { Repo } from "./repos";
 import type { TaskType } from "./task-types";
 import type { RunLogEntry } from "./run-log";
 import {
+  IDEA_DIRECTION_FILE,
   doneDir,
   failedDir,
   inProgressDir,
+  newMdFiles,
   oldestMd,
   ranTodayForRepo,
   readyDir,
+  runsOncePerDay,
   sourceFor,
 } from "./task-source";
 import {
@@ -20,7 +23,9 @@ import {
   writeRepoFile,
 } from "./workspace";
 import {
+  NO_IDEA_MESSAGE,
   fileTaskPrompt,
+  ideaPrompt,
   recurringPrompt,
   runClaude,
 } from "./claude-runner";
@@ -44,6 +49,11 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 //
 // bug-002 makes failure durable too: a .md whose run failed is parked in
 // failed/ with its own commit, so the next pass does not pick it up again.
+//
+// req-011 adds the Ideen task: once per repo and calendar day, Claude proposes
+// exactly one new idea as a file in delivery/idea/. Whether that happened is
+// decided by comparing the folder before and after the run, not by reading
+// Claude's answer — so "keine neue Idee gefunden" is a fact, not a phrasing.
 
 export type StepDecision =
   | { kind: "skip" }
@@ -101,8 +111,9 @@ export async function executeStep(
   // reaching for the environment again (bug-003).
   const token = d.token;
 
-  // Recurring types: skip if already ran today for this repo.
-  if (src.kind === "recurring") {
+  // Types without a work-item queue (recurring, idea): skip if they already ran
+  // today for this repo.
+  if (runsOncePerDay(src)) {
     if (ranTodayForRepo(recentLog, repo.name, taskType.label, d.now())) {
       return { kind: "skip" };
     }
@@ -138,10 +149,23 @@ export async function executeStep(
     await d.setCurrentMd(md);
   }
 
-  const prompt =
-    src.kind === "file" && mdRel
-      ? fileTaskPrompt(mdRel)
-      : recurringPrompt(taskType.label);
+  // Which ideas the repo already had, so the step can tell a proposal from an
+  // empty-handed run afterwards (req-011).
+  const ideasBefore =
+    src.kind === "idea" && src.base ? await d.listReady(dir, src.base) : [];
+
+  let prompt: string;
+  if (src.kind === "file" && mdRel) {
+    prompt = fileTaskPrompt(mdRel);
+  } else if (src.kind === "idea" && src.base) {
+    prompt = ideaPrompt({
+      ideaDir: src.base,
+      doneDir: doneDir(src.base),
+      directionFile: IDEA_DIRECTION_FILE,
+    });
+  } else {
+    prompt = recurringPrompt(taskType.label);
+  }
 
   // Live output: the tail arrives while Claude runs, so the status writes are
   // queued instead of awaited (a slow write must not stall the process). The
@@ -165,6 +189,28 @@ export async function executeStep(
         ? await parkFailed(d, dir, src.base, mdName, token)
         : "";
     return { kind: "error", message: `${outcome.summary}${parked}` };
+  }
+
+  // The Ideen task is done when a new idea file exists — or honestly done when
+  // none does (req-011). Either way the day counts as used, which is what the
+  // 'success' decision records in the run log.
+  if (src.kind === "idea" && src.base) {
+    const created = newMdFiles(ideasBefore, await d.listReady(dir, src.base));
+    if (created.length === 0) {
+      // Nothing was proposed, so nothing of this run belongs on dev — whatever
+      // it touched along the way is dropped rather than committed.
+      await d.discardChanges(dir).catch(() => {});
+      return { kind: "success", message: NO_IDEA_MESSAGE };
+    }
+    const push = await d.commitAndPush(
+      dir,
+      `worker: neue Idee ${created.join(", ")}`,
+      token,
+    );
+    return {
+      kind: "success",
+      message: `Neue Idee: ${created.join(", ")} — ${push.detail}`,
+    };
   }
 
   // Success: for file-driven, move in-progress -> done before committing.
