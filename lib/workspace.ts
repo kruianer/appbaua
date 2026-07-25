@@ -19,7 +19,7 @@ export type RunResult = { ok: boolean; code: number; stdout: string; stderr: str
 export type RunOptions = {
   cwd?: string;
   timeoutMs?: number;
-  env?: NodeJS.ProcessEnv;
+  env?: Record<string, string | undefined>;
   /**
    * Called with every stdout/stderr chunk as it arrives (req-008), so a
    * caller can publish a live tail while the process is still running. The
@@ -120,7 +120,7 @@ export function basicAuthHeader(token: string): string {
  * process command line, where any `ps` could read it. Command-level config is
  * never written to `.git/config`, so nothing of this survives the call.
  */
-export function authEnv(token: string): NodeJS.ProcessEnv {
+export function authEnv(token: string): Record<string, string> {
   return {
     GIT_CONFIG_COUNT: "1",
     GIT_CONFIG_KEY_0: "http.extraHeader",
