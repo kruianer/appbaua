@@ -1,35 +1,46 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { redact } from "./redact";
 
 // Git workspace helpers for req-006. Clones/updates a target repo into a work
 // dir using the GitHub token for auth, and ensures the `dev` branch. All git
 // runs shell out; process output is captured for logging.
+//
+// bug-003: the token is never part of the remote URL — it travels as an HTTP
+// Authorization header supplied per call (see authEnv), so it lands neither in
+// `.git/config` nor in the URL git quotes back in its error messages. What git
+// does print goes through the redaction filter before anyone logs it.
 
 const WORK_ROOT = process.env.WORKER_WORKDIR || "/tmp/appbaua-work";
 
 export type RunResult = { ok: boolean; code: number; stdout: string; stderr: string };
 
+export type RunOptions = {
+  cwd?: string;
+  timeoutMs?: number;
+  env?: NodeJS.ProcessEnv;
+  /**
+   * Called with every stdout/stderr chunk as it arrives (req-008), so a
+   * caller can publish a live tail while the process is still running. The
+   * full output is still returned at the end.
+   */
+  onData?: (chunk: string) => void;
+  /**
+   * How the child's stdin is wired. "ignore" closes it right away, which
+   * keeps a CLI from waiting on (and warning about) piped input that never
+   * comes (bug-001). Defaults to a pipe nobody writes to.
+   */
+  stdin?: "ignore" | "pipe";
+};
+
+/** Seam so the git calls below can be observed in tests without a real repo. */
+export type WorkspaceDeps = { runImpl?: typeof run };
+
 export function run(
   cmd: string,
   args: string[],
-  opts: {
-    cwd?: string;
-    timeoutMs?: number;
-    env?: NodeJS.ProcessEnv;
-    /**
-     * Called with every stdout/stderr chunk as it arrives (req-008), so a
-     * caller can publish a live tail while the process is still running. The
-     * full output is still returned at the end.
-     */
-    onData?: (chunk: string) => void;
-    /**
-     * How the child's stdin is wired. "ignore" closes it right away, which
-     * keeps a CLI from waiting on (and warning about) piped input that never
-     * comes (bug-001). Defaults to a pipe nobody writes to.
-     */
-    stdin?: "ignore" | "pipe";
-  } = {},
+  opts: RunOptions = {},
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
@@ -83,10 +94,41 @@ export function run(
   });
 }
 
-/** Build an https clone URL carrying the token, from a normalized repo url. */
-export function tokenUrl(normalizedUrl: string, token: string): string {
+/**
+ * The URL git talks to and stores in `.git/config`: plain https, no credentials
+ * (bug-003).
+ */
+export function remoteUrl(normalizedUrl: string): string {
   // normalizedUrl is like github.com/owner/repo
-  return `https://x-access-token:${token}@${normalizedUrl}.git`;
+  return `https://${normalizedUrl}.git`;
+}
+
+/**
+ * The Authorization header value that authenticates the PAT against GitHub.
+ * Same credential as before (`x-access-token:<PAT>`), only sent as HTTP Basic
+ * auth instead of being baked into the URL.
+ */
+export function basicAuthHeader(token: string): string {
+  const basic = Buffer.from(`x-access-token:${token}`, "utf8").toString("base64");
+  return `Authorization: Basic ${basic}`;
+}
+
+/**
+ * Environment for every git call that talks to the remote (bug-003). The header
+ * is handed over as one-shot config via GIT_CONFIG_*, which is what
+ * `git -c http.extraHeader=…` does — but it also keeps the token out of the
+ * process command line, where any `ps` could read it. Command-level config is
+ * never written to `.git/config`, so nothing of this survives the call.
+ */
+export function authEnv(token: string): NodeJS.ProcessEnv {
+  return {
+    GIT_CONFIG_COUNT: "1",
+    GIT_CONFIG_KEY_0: "http.extraHeader",
+    GIT_CONFIG_VALUE_0: basicAuthHeader(token),
+    // Headless worker: a rejected header must fail the call, not park git on a
+    // username prompt that nobody will ever answer.
+    GIT_TERMINAL_PROMPT: "0",
+  };
 }
 
 /** Local directory name for a repo (owner-repo). */
@@ -102,9 +144,12 @@ export function repoDir(normalizedUrl: string): string {
 export async function prepareRepo(
   normalizedUrl: string,
   token: string,
+  deps: WorkspaceDeps = {},
 ): Promise<string> {
+  const git = deps.runImpl ?? run;
   const dir = repoDir(normalizedUrl);
-  const url = tokenUrl(normalizedUrl, token);
+  const url = remoteUrl(normalizedUrl);
+  const auth = authEnv(token);
   await fs.mkdir(WORK_ROOT, { recursive: true });
 
   const exists = await fs
@@ -113,30 +158,36 @@ export async function prepareRepo(
     .catch(() => false);
 
   if (!exists) {
-    const clone = await run("git", ["clone", url, dir]);
-    if (!clone.ok) throw new Error(`clone failed: ${clone.stderr}`);
+    const clone = await git("git", ["clone", url, dir], { env: auth });
+    if (!clone.ok) throw new Error(`clone failed: ${redact(clone.stderr, [token])}`);
   } else {
-    await run("git", ["remote", "set-url", "origin", url], { cwd: dir });
-    const fetch = await run("git", ["fetch", "origin"], { cwd: dir });
-    if (!fetch.ok) throw new Error(`fetch failed: ${fetch.stderr}`);
+    // Rewriting the remote also heals a working copy an earlier worker left
+    // behind with the token in its URL: set-url replaces that line in
+    // .git/config with the credential-free one (bug-003).
+    await git("git", ["remote", "set-url", "origin", url], { cwd: dir });
+    const fetch = await git("git", ["fetch", "origin"], { cwd: dir, env: auth });
+    if (!fetch.ok) throw new Error(`fetch failed: ${redact(fetch.stderr, [token])}`);
   }
 
   // Ensure identity so commits succeed in a fresh container.
-  await run("git", ["config", "user.email", "worker@appbaua.local"], { cwd: dir });
-  await run("git", ["config", "user.name", "appbaua-worker"], { cwd: dir });
+  await git("git", ["config", "user.email", "worker@appbaua.local"], { cwd: dir });
+  await git("git", ["config", "user.name", "appbaua-worker"], { cwd: dir });
 
   // Check out dev: track origin/dev if present, else create from current HEAD.
-  const hasRemoteDev = await run("git", ["ls-remote", "--exit-code", "origin", "dev"], { cwd: dir });
+  const hasRemoteDev = await git("git", ["ls-remote", "--exit-code", "origin", "dev"], {
+    cwd: dir,
+    env: auth,
+  });
   if (hasRemoteDev.ok) {
-    await run("git", ["checkout", "-B", "dev", "origin/dev"], { cwd: dir });
-    await run("git", ["reset", "--hard", "origin/dev"], { cwd: dir });
+    await git("git", ["checkout", "-B", "dev", "origin/dev"], { cwd: dir });
+    await git("git", ["reset", "--hard", "origin/dev"], { cwd: dir });
   } else {
-    await run("git", ["checkout", "-B", "dev"], { cwd: dir });
+    await git("git", ["checkout", "-B", "dev"], { cwd: dir });
   }
   // reset --hard restores tracked files but leaves untracked leftovers of an
   // earlier run lying around, where the next `git add -A` would sweep them into
   // an unrelated commit (bug-002). Start every step from a clean working copy.
-  await run("git", ["clean", "-fd"], { cwd: dir });
+  await git("git", ["clean", "-fd"], { cwd: dir });
   return dir;
 }
 
@@ -152,20 +203,34 @@ export async function discardChanges(dir: string): Promise<void> {
   await run("git", ["clean", "-fd"], { cwd: dir });
 }
 
-/** Stage everything, commit, push to origin/dev. Returns false if nothing to commit. */
+/**
+ * Stage everything, commit, push to origin/dev. Returns false if nothing to
+ * commit. The token is needed for the push itself: the remote URL no longer
+ * carries it, so the credential has to come along per call (bug-003).
+ */
 export async function commitAndPush(
   dir: string,
   message: string,
+  token: string,
+  deps: WorkspaceDeps = {},
 ): Promise<{ pushed: boolean; detail: string }> {
-  await run("git", ["add", "-A"], { cwd: dir });
-  const status = await run("git", ["status", "--porcelain"], { cwd: dir });
+  const git = deps.runImpl ?? run;
+  await git("git", ["add", "-A"], { cwd: dir });
+  const status = await git("git", ["status", "--porcelain"], { cwd: dir });
   if (!status.stdout.trim()) {
     return { pushed: false, detail: "keine Aenderungen" };
   }
-  const commit = await run("git", ["commit", "-m", message], { cwd: dir });
-  if (!commit.ok) return { pushed: false, detail: `commit failed: ${commit.stderr}` };
-  const push = await run("git", ["push", "origin", "dev"], { cwd: dir });
-  if (!push.ok) return { pushed: false, detail: `push failed: ${push.stderr}` };
+  const commit = await git("git", ["commit", "-m", message], { cwd: dir });
+  if (!commit.ok) {
+    return { pushed: false, detail: `commit failed: ${redact(commit.stderr, [token])}` };
+  }
+  const push = await git("git", ["push", "origin", "dev"], {
+    cwd: dir,
+    env: authEnv(token),
+  });
+  if (!push.ok) {
+    return { pushed: false, detail: `push failed: ${redact(push.stderr, [token])}` };
+  }
   return { pushed: true, detail: "auf dev gepusht" };
 }
 

@@ -226,3 +226,38 @@ describe("worker loop — Dauerfehler pausiert (bug-002)", () => {
     quiet.mockRestore();
   });
 });
+
+// bug-003: the run log is the last stop before a message becomes durable and
+// visible in the UI. Whatever a step reports — and whichever tool leaked a
+// credential into it — nothing with a token gets written here.
+describe("worker loop — keine Credentials im Verlauf (bug-003)", () => {
+  const PAT = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8";
+
+  it("AC: a logged git error contains no token", async () => {
+    setStore(createMemoryStore([repos[0]]));
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const runStep = async (): Promise<StepDecision> => ({
+      kind: "error",
+      message:
+        "Repo vorbereiten fehlgeschlagen: Error: clone failed: fatal: unable " +
+        `to access 'https://x-access-token:${PAT}@github.com/kruianer/appbaua.git/'`,
+    });
+    await runOnce({ n: 0 }, deps({ runStep }));
+    const [row] = await logStore.list(0, 1);
+    expect(row.status).toBe("error");
+    expect(row.message).not.toContain(PAT);
+    expect(row.message).toContain("clone failed"); // still says what went wrong
+  });
+
+  it("leaves an ordinary message untouched", async () => {
+    setStore(createMemoryStore([repos[0]]));
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1)));
+    const runStep = async (): Promise<StepDecision> => ({
+      kind: "success",
+      message: "bug-003.md abgearbeitet — auf dev gepusht",
+    });
+    await runOnce({ n: 0 }, deps({ runStep }));
+    const [row] = await logStore.list(0, 1);
+    expect(row.message).toBe("bug-003.md abgearbeitet — auf dev gepusht");
+  });
+});

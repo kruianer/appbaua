@@ -522,6 +522,7 @@ describe("executeStep — fehlgeschlagene .md wird persistiert (bug-002)", () =>
     expect(commitAndPush).toHaveBeenCalledWith(
       "/work/appbaua",
       "worker: bug-001.md fehlgeschlagen",
+      "tok", // the push needs the credential handed in now (bug-003)
     );
   });
 

@@ -4,6 +4,7 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import { redact } from "./redact";
 
 export type WorkerStatus = {
   currentRepo: string | null;
@@ -145,7 +146,11 @@ export async function setCurrentMd(md: string | null): Promise<void> {
   await patchRunning({ currentMd: md });
 }
 
-/** Latest tail of the running step's Claude output. */
+/**
+ * Latest tail of the running step's Claude output. Scrubbed on the way in: the
+ * tail goes straight onto the start page, so a credential a tool echoed must
+ * not travel with it (bug-003).
+ */
 export async function setCurrentOutput(text: string | null): Promise<void> {
-  await patchRunning({ currentOutput: text });
+  await patchRunning({ currentOutput: text === null ? null : redact(text) });
 }

@@ -97,6 +97,9 @@ export async function executeStep(
   if (!d.token) {
     return { kind: "error", message: "Kein GitHub-Token für Push konfiguriert" };
   }
+  // Bound once, so every git helper below gets the credential it needs without
+  // reaching for the environment again (bug-003).
+  const token = d.token;
 
   // Recurring types: skip if already ran today for this repo.
   if (src.kind === "recurring") {
@@ -107,7 +110,7 @@ export async function executeStep(
 
   let dir: string;
   try {
-    dir = await d.prepareRepo(repo.url, d.token);
+    dir = await d.prepareRepo(repo.url, token);
   } catch (err) {
     return { kind: "error", message: `Repo vorbereiten fehlgeschlagen: ${String(err)}` };
   }
@@ -158,7 +161,9 @@ export async function executeStep(
     // Park the .md under failed/ and push that move (file-driven only), so the
     // same task is not picked up again on the next pass (bug-002).
     const parked =
-      src.base && mdName ? await parkFailed(d, dir, src.base, mdName) : "";
+      src.base && mdName
+        ? await parkFailed(d, dir, src.base, mdName, token)
+        : "";
     return { kind: "error", message: `${outcome.summary}${parked}` };
   }
 
@@ -181,7 +186,7 @@ export async function executeStep(
   const commitMsg = mdName
     ? `worker: ${mdName} abgearbeitet`
     : `worker: ${taskType.label} durchgeführt`;
-  const push = await d.commitAndPush(dir, commitMsg);
+  const push = await d.commitAndPush(dir, commitMsg, token);
 
   // The log stays a short message; it only names the file so the full report
   // remains findable from the Verlauf (req-010).
@@ -215,6 +220,7 @@ async function parkFailed(
   dir: string,
   base: string,
   mdName: string,
+  token: string,
 ): Promise<string> {
   try {
     await d.discardChanges(dir);
@@ -223,7 +229,11 @@ async function parkFailed(
       `${readyDir(base)}/${mdName}`,
       `${failedDir(base)}/${mdName}`,
     );
-    const push = await d.commitAndPush(dir, `worker: ${mdName} fehlgeschlagen`);
+    const push = await d.commitAndPush(
+      dir,
+      `worker: ${mdName} fehlgeschlagen`,
+      token,
+    );
     return ` — ${mdName} nach failed/ verschoben (${push.detail})`;
   } catch (err) {
     return ` — ${mdName} konnte nicht nach failed/ verschoben werden: ${String(err)}`;

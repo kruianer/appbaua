@@ -7,6 +7,7 @@ import { getWorkerState } from "./worker-state";
 import { getRunLogStore } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
 import { executeStep, type StepDecision } from "./execute-step";
+import { redact } from "./redact";
 import {
   clearRunningStep,
   setPauseUntil,
@@ -130,7 +131,9 @@ export async function runOnce(
       repo: step.repo.name,
       taskType: step.taskType.label,
       status: decision.kind === "success" ? "success" : "error",
-      message: decision.message,
+      // Last stop before the message becomes a durable, UI-visible log row: no
+      // credential gets past here, whichever tool put one into it (bug-003).
+      message: redact(decision.message),
     });
     // Only success is progress. Counting errors here would keep the loop from
     // ever pausing while a step fails on every single pass (bug-002).
