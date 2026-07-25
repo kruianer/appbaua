@@ -1,4 +1,5 @@
 import { run, type RunResult } from "./workspace";
+import { describeEvent, finalResultText } from "./claude-events";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
 // CLI runs non-interactively with permissions skipped so it never asks. Auth is
@@ -6,6 +7,12 @@ import { run, type RunResult } from "./workspace";
 // container) — NOT an API key, so no usage costs. Coding always uses Opus. A
 // run is capped at CLAUDE_TIMEOUT_MS; on timeout or a missing CLI it returns a
 // clean failure (never throws), so the worker logs "Fehler" and moves on.
+//
+// The CLI runs with structured streaming output and closed stdin (bug-001):
+// print mode alone writes nothing to stdout until the very end, which made the
+// live output of req-008 look frozen for minutes. The event stream is condensed
+// into activity lines (claude-events), and the logged summary is taken from the
+// stream's final "result" event, so the Fazit stays what it was (req-004).
 
 export const CLAUDE_TIMEOUT_MS = 60 * 60_000; // 60 minutes
 export const CLAUDE_MODEL = "opus";
@@ -52,6 +59,27 @@ export function createLiveTail(
   };
 }
 
+/**
+ * Turns the chunk stream of a `--output-format stream-json` run into a
+ * throttled tail of human-readable activity lines (bug-001). Chunks do not
+ * respect line boundaries, so an incomplete trailing line is held back until
+ * the rest of it arrives. Events that say nothing worth showing emit nothing at
+ * all — the tail then simply keeps its previous content.
+ */
+export function createActivityStream(
+  emit: (tail: string) => void,
+  opts: { intervalMs?: number; lines?: number; now?: () => number } = {},
+): (chunk: string) => void {
+  const pushTail = createLiveTail(emit, opts);
+  let rest = "";
+  return (chunk: string) => {
+    const parts = (rest + chunk).split("\n");
+    rest = parts.pop() ?? "";
+    const activity = parts.flatMap(describeEvent);
+    if (activity.length > 0) pushTail(`${activity.join("\n")}\n`);
+  };
+}
+
 /** The prompt handed to Claude Code for a file-driven task. */
 export function fileTaskPrompt(mdRelPath: string): string {
   return [
@@ -83,9 +111,9 @@ export async function runClaude(
     runImpl?: typeof run;
     timeoutMs?: number;
     /**
-     * Receives the last ~50 output lines while the run is still going
-     * (req-008), at most about once per second. Errors from it are swallowed —
-     * live output must never break the run.
+     * Receives the last ~50 activity lines while the run is still going
+     * (req-008; content per bug-001), at most about once per second. Errors from
+     * it are swallowed — live output must never break the run.
      */
     onOutput?: (tail: string) => void;
     /** Clock for the throttle; injectable for tests. */
@@ -96,15 +124,29 @@ export async function runClaude(
   const timeoutMs = deps?.timeoutMs ?? CLAUDE_TIMEOUT_MS;
   const onOutput = deps?.onOutput;
   const onData = onOutput
-    ? createLiveTail(onOutput, { now: deps?.now })
+    ? createActivityStream(onOutput, { now: deps?.now })
     : undefined;
 
   let res: RunResult;
   try {
     res = await runImpl(
       "claude",
-      ["-p", prompt, "--model", CLAUDE_MODEL, "--dangerously-skip-permissions"],
-      { cwd: dir, timeoutMs, onData },
+      [
+        "-p",
+        prompt,
+        "--model",
+        CLAUDE_MODEL,
+        "--dangerously-skip-permissions",
+        // One JSON event per line while the session runs, instead of a silent
+        // stdout (bug-001). The CLI requires --verbose for stream-json in print
+        // mode.
+        "--output-format",
+        "stream-json",
+        "--verbose",
+      ],
+      // Closed stdin: nothing is piped in, and an open pipe makes the CLI wait
+      // for input and warn about it (bug-001).
+      { cwd: dir, timeoutMs, onData, stdin: "ignore" },
     );
   } catch (err) {
     return { ok: false, summary: `Claude-Aufruf fehlgeschlagen: ${String(err)}` };
@@ -117,9 +159,9 @@ export async function runClaude(
     return { ok: false, summary: "Claude-Lauf: Timeout (60 min)" };
   }
   if (!res.ok) {
-    const tail = (res.stderr || res.stdout).trim().slice(-300);
+    const tail = (res.stderr.trim() || finalResultText(res.stdout)).slice(-300);
     return { ok: false, summary: `Claude-Lauf fehlgeschlagen: ${tail}` };
   }
-  const tail = res.stdout.trim().slice(-300);
+  const tail = finalResultText(res.stdout).slice(-300);
   return { ok: true, summary: tail || "Claude-Lauf erfolgreich" };
 }

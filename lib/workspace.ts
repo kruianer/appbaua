@@ -23,12 +23,19 @@ export function run(
      * full output is still returned at the end.
      */
     onData?: (chunk: string) => void;
+    /**
+     * How the child's stdin is wired. "ignore" closes it right away, which
+     * keeps a CLI from waiting on (and warning about) piped input that never
+     * comes (bug-001). Defaults to a pipe nobody writes to.
+     */
+    stdin?: "ignore" | "pipe";
   } = {},
 ): Promise<RunResult> {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
+      stdio: [opts.stdin ?? "pipe", "pipe", "pipe"],
     });
     let stdout = "";
     let stderr = "";
@@ -48,12 +55,14 @@ export function run(
         /* ignore */
       }
     };
-    child.stdout.on("data", (d) => {
+    // Optional chaining because an explicit stdio array widens the spawn type:
+    // both streams are pipes here, so they are always present.
+    child.stdout?.on("data", (d) => {
       const s = d.toString();
       stdout += s;
       emit(s);
     });
-    child.stderr.on("data", (d) => {
+    child.stderr?.on("data", (d) => {
       const s = d.toString();
       stderr += s;
       emit(s);
