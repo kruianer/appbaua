@@ -84,15 +84,37 @@ export function toMinutes(value: string | null): number | null {
 }
 
 /**
- * A day window is valid when: both times empty (= all day), OR both set with
- * end strictly after start. A single side set, or end<=start, is invalid.
+ * A day window is valid when: both times empty (= all day), OR both set to
+ * different times. An end BEFORE the start is a window over midnight
+ * (22:00–06:00) and explicitly allowed — the vision asks for night windows
+ * (bug-004). Invalid: only one side set, or start === end (an empty window; use
+ * both-empty, i.e. prefillDay's 00:00–23:59, for all day).
  */
 export function isValidWindow(start: string | null, end: string | null): boolean {
   if (!start && !end) return true;
   const s = toMinutes(start);
   const e = toMinutes(end);
   if (s === null || e === null) return false;
-  return e > s;
+  return e !== s;
+}
+
+/** True when a window wraps around midnight, i.e. its end lies before its start. */
+export function isOvernightWindow(start: number, end: number): boolean {
+  return end < start;
+}
+
+/**
+ * Is `nowMin` (minutes since midnight) inside the window [start, end]? Both
+ * ends are inclusive. A window over midnight covers both sides of it, so
+ * 22:00–06:00 matches 22:00–23:59 and 00:00–06:00.
+ */
+export function isWithinWindow(
+  nowMin: number,
+  start: number,
+  end: number,
+): boolean {
+  if (isOvernightWindow(start, end)) return nowMin >= start || nowMin <= end;
+  return nowMin >= start && nowMin <= end;
 }
 
 /** True when an active type runs around the clock (the "immer" flag). */

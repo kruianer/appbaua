@@ -88,11 +88,13 @@ describe("req-002 acceptance criteria", () => {
     });
   });
 
-  it("AC: end-before-start (19:00–17:00) is rejected and nothing is saved", async () => {
+  // Superseded by bug-004: end-before-start is now a window over midnight.
+  // Identical start/end stays the rejected case.
+  it("AC: an empty window (19:00–19:00) is rejected and nothing is saved", async () => {
     const res = await setDaySchedule("bug", "tue", {
       enabled: true,
       start: "19:00",
-      end: "17:00",
+      end: "19:00",
     });
     expect(res).toEqual({ ok: false, error: "invalid-window" });
     const bug = (await getTaskStore().list()).find((t) => t.id === "bug")!;
@@ -119,6 +121,21 @@ describe("req-002 acceptance criteria", () => {
       start: "17:00",
       end: "19:00",
     }); // schedule preserved underneath
+  });
+
+  it("bug-004 AC: Monday 22:00–06:00 is accepted and persisted", async () => {
+    const res = await setDaySchedule("bug", "mon", {
+      enabled: true,
+      start: "22:00",
+      end: "06:00",
+    });
+    expect(res.ok).toBe(true);
+    const bug = (await getTaskStore().list()).find((t) => t.id === "bug")!;
+    expect(bug.schedule.mon).toEqual({
+      enabled: true,
+      start: "22:00",
+      end: "06:00",
+    }); // re-read from the store = it stays
   });
 
   it("only-one-side window gets the empty side prefilled (09:00–23:59)", async () => {

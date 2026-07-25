@@ -25,7 +25,8 @@ export async function PUT(
   }
 
   const messages: Record<string, string> = {
-    "invalid-window": "Endzeit muss nach der Startzeit liegen.",
+    "invalid-window":
+      "Start- und Endzeit müssen sich unterscheiden. Ein Fenster über Mitternacht (z. B. 22:00–06:00) ist erlaubt.",
     "not-found": "Task-Typ nicht gefunden.",
   };
   return NextResponse.json(
