@@ -63,8 +63,11 @@ einem separaten Rechner.
 
 ## Nicht-Ziele
 
-- Nie autonom nach prod deployen oder auf main mergen — das bleibt das
-  Gate des Menschen.
+- Nie autonom/unaufgefordert nach prod deployen oder auf main mergen —
+  das bleibt das Gate des Menschen. Nur auf ausdrücklichen Wunsch des
+  Nutzers in einer konkreten Sitzung darf der Worker die Promotion für
+  ihn ausführen (Details und Bedingungen: delivery/devops.md, Abschnitt
+  „Promotion").
 - Keine Scope-Ausweitung: nur das erfasste Requirement bauen, keine
   ungefragten Zusatzfeatures; Ideen gehen als Vorschlag in Prio 5.
 - Grundlegende Architektur-Weichen (Stack, Datenmodell-Umbau) vorschlagen,
