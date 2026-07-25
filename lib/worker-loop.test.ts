@@ -1,5 +1,10 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { runOnce, type LoopDeps } from "./worker-loop";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import {
+  runOnce,
+  runForever,
+  EMPTY_PAUSE_MS,
+  type LoopDeps,
+} from "./worker-loop";
 import { setStore, createMemoryStore } from "./store";
 import { setTaskStore, createMemoryTaskStore } from "./task-store";
 import { setWorkerStore, createMemoryWorkerStore } from "./worker-state";
@@ -99,7 +104,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
         ? { kind: "error", message: "Claude-Lauf fehlgeschlagen" }
         : { kind: "success", message: "ok" };
     const done = await runOnce({ n: 0 }, deps({ runStep }));
-    expect(done).toBe(2);
+    expect(done).toBe(1); // the error is logged but is not progress (bug-002)
     const rows = [...(await logStore.list(0, 10))].reverse();
     expect(rows.map((r) => `${r.repo}:${r.status}`)).toEqual([
       "appbaua:error",
@@ -118,7 +123,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
       { n: 0 },
       deps({ runStep, clearRunningStep: async () => void cleared++ }),
     );
-    expect(done).toBe(2); // appbaua (error) + worker (success) both logged
+    expect(done).toBe(1); // both logged, but only worker actually got work done
     const rows = [...(await logStore.list(0, 10))].reverse();
     expect(rows.map((r) => `${r.repo}:${r.status}`)).toEqual([
       "appbaua:error",
@@ -135,5 +140,89 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     expect(done).toBe(1);
     const rows = await logStore.list(0, 10);
     expect(rows.map((r) => r.repo)).toEqual(["appbaua"]);
+  });
+});
+
+// bug-002: errors used to count as work done, so a step that failed on every
+// pass (missing Claude CLI, no push rights, broken repo) kept the loop from
+// ever pausing — git fetch every few seconds, a run log filling up, rate
+// limits burnt.
+describe("worker loop — Dauerfehler pausiert (bug-002)", () => {
+  it("a pass in which every step fails got nothing done", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const runStep = async (): Promise<StepDecision> => ({
+      kind: "error",
+      message: "Claude-Code-CLI nicht verfügbar",
+    });
+    const done = await runOnce({ n: 0 }, deps({ runStep }));
+    expect(done).toBe(0);
+    expect(await logStore.count()).toBe(2); // still logged, both repos
+  });
+
+  it("AC: a permanently failing step pauses between passes instead of spinning", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs, 2 repos
+    const stop = new Error("stop"); // runForever is endless; leave it from sleep
+    const pauses: number[] = [];
+    let steps = 0;
+    const d = deps({
+      runStep: async (): Promise<StepDecision> => {
+        steps += 1;
+        // Safety valve: without the fix nothing ever pauses, so stop feeding the
+        // loop work after a generous budget — the test then fails on the step
+        // count below instead of hanging until the timeout.
+        if (steps > 20) return { kind: "skip" };
+        return { kind: "error", message: "Claude-Code-CLI nicht verfügbar" };
+      },
+      sleep: async (ms: number) => {
+        pauses.push(ms);
+        if (pauses.length >= 3) throw stop;
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    expect(pauses).toEqual([EMPTY_PAUSE_MS, EMPTY_PAUSE_MS, EMPTY_PAUSE_MS]);
+    expect(steps).toBe(6); // 3 passes × 2 repos — not hundreds
+  });
+
+  it("a productive pass is not delayed — only a pass without progress pauses", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs, 2 repos
+    const stop = new Error("stop");
+    const pauses: number[] = [];
+    let steps = 0;
+    const d = deps({
+      runStep: async (): Promise<StepDecision> => {
+        steps += 1;
+        // Two productive passes, then nothing left to do.
+        return steps <= 4
+          ? { kind: "success", message: "ok" }
+          : { kind: "skip" };
+      },
+      sleep: async (ms: number) => {
+        pauses.push(ms);
+        throw stop;
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    expect(pauses).toEqual([EMPTY_PAUSE_MS]); // only the third, empty pass
+    expect(steps).toBe(6);
+  });
+
+  it("a pass that blows up entirely pauses too", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1)));
+    // runForever logs the failed pass; keep the test output readable.
+    const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
+    const stop = new Error("stop");
+    const pauses: number[] = [];
+    const d = deps({
+      setRunningStep: async () => {
+        throw new Error("Status-Store weg");
+      },
+      sleep: async (ms: number) => {
+        pauses.push(ms);
+        throw stop;
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    expect(pauses).toEqual([EMPTY_PAUSE_MS]);
+    quiet.mockRestore();
   });
 });

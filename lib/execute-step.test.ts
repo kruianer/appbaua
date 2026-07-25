@@ -36,6 +36,7 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
     runClaude: vi.fn(async () => ({ ok: true, summary: "done", report: "" })),
     commitAndPush: vi.fn(async () => ({ pushed: true, detail: "auf dev gepusht" })),
     moveMd: vi.fn(async () => {}),
+    discardChanges: vi.fn(async (_dir: string) => {}),
     headCommit: vi.fn(async (_dir: string) => "282a765"),
     writeRepoFile: writerFake(),
     setCurrentMd: vi.fn(async (_md: string | null) => {}),
@@ -78,7 +79,7 @@ describe("executeStep (req-006)", () => {
     expect(commitAndPush).toHaveBeenCalled();
   });
 
-  it("file-driven claude failure -> md moved to failed, NOT pushed", async () => {
+  it("file-driven claude failure -> md moved to failed and pushed (bug-002)", async () => {
     const moveMd = vi.fn(async () => {});
     const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
     const d = await executeStep(
@@ -93,12 +94,12 @@ describe("executeStep (req-006)", () => {
       }),
     );
     expect(d.kind).toBe("error");
-    expect(moveMd).toHaveBeenCalledWith(
+    expect(moveMd).toHaveBeenLastCalledWith(
       "/work/appbaua",
-      "delivery/bugs/in-progress/bug-001.md",
+      "delivery/bugs/ready/bug-001.md",
       "delivery/bugs/failed/bug-001.md",
     );
-    expect(commitAndPush).not.toHaveBeenCalled();
+    expect(commitAndPush).toHaveBeenCalled();
   });
 
   it("recurring type already ran today -> skip", async () => {
@@ -492,5 +493,140 @@ describe("executeStep — Bericht ablegen (req-010)", () => {
     expect(d.kind).toBe("success");
     if (d.kind !== "success") return;
     expect(d.message).not.toContain("Bericht:");
+  });
+});
+
+// bug-002: a .md whose run failed used to be moved to failed/ locally only.
+// The next prepareRepo reset ready/ back from origin, so the same task was
+// retried forever while the untracked failed/ copy waited to be swept into an
+// unrelated commit — leaving the file in ready/ AND failed/ at once.
+describe("executeStep — fehlgeschlagene .md wird persistiert (bug-002)", () => {
+  const timeout = () =>
+    vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" }));
+
+  function failingDeps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
+    return deps({
+      listReady: folders({ ready: ["bug-001.md"] }),
+      runClaude: timeout(),
+      ...over,
+    });
+  }
+
+  it("AC: the failed .md is committed and pushed under failed/", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(repo, bug, [], failingDeps({ commitAndPush }));
+    expect(d.kind).toBe("error");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: bug-001.md fehlgeschlagen",
+    );
+  });
+
+  it("AC: the move starts in ready/, so the .md is not in ready/ AND failed/", async () => {
+    // The commit has to record both halves of the move. Moving out of
+    // in-progress/ would only ADD failed/bug-001.md while ready/bug-001.md
+    // stayed untouched in the index.
+    const order: string[] = [];
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      failingDeps({
+        discardChanges: vi.fn(async (_dir: string) => {
+          order.push("discard");
+        }),
+        moveMd: vi.fn(async (_dir: string, from: string, to: string) => {
+          order.push(`move ${from} -> ${to}`);
+        }),
+        commitAndPush: vi.fn(async () => {
+          order.push("push");
+          return { pushed: true, detail: "auf dev gepusht" };
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(order).toEqual([
+      "move delivery/bugs/ready/bug-001.md -> delivery/bugs/in-progress/bug-001.md",
+      // everything the failed attempt left behind goes first — the commit must
+      // carry the move and nothing else
+      "discard",
+      "move delivery/bugs/ready/bug-001.md -> delivery/bugs/failed/bug-001.md",
+      "push",
+    ]);
+  });
+
+  it("the run log says where the .md went", async () => {
+    const d = await executeStep(repo, bug, [], failingDeps());
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Timeout"); // the original failure stays
+    expect(d.message).toContain("bug-001.md nach failed/ verschoben");
+    expect(d.message).toContain("auf dev gepusht");
+  });
+
+  it("a push that fails is reported, but stays one 'error' step", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      failingDeps({
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: "push failed: keine Rechte",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("push failed: keine Rechte");
+  });
+
+  it("a move that fails never hides the original error", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      failingDeps({
+        moveMd: vi.fn(async (_dir: string, _from: string, to: string) => {
+          if (to.includes("/failed/")) throw new Error("weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Timeout");
+    expect(d.message).toContain("konnte nicht nach failed/ verschoben werden");
+  });
+
+  it("a recurring type has no .md to park and pushes nothing", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      deps({ runClaude: timeout(), commitAndPush, discardChanges }),
+    );
+    expect(d.kind).toBe("error");
+    expect(commitAndPush).not.toHaveBeenCalled();
+    expect(discardChanges).not.toHaveBeenCalled();
+  });
+
+  it("a successful step discards nothing — its work is what gets committed", async () => {
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        discardChanges,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(discardChanges).not.toHaveBeenCalled();
   });
 });

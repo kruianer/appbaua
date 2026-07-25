@@ -12,6 +12,7 @@ import {
 } from "./task-source";
 import {
   commitAndPush,
+  discardChanges,
   headCommit,
   listReady,
   moveMd,
@@ -40,6 +41,9 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // produces a report instead of code, so the full report is written to
 // delivery/reviews/ in the target repo and pushed like any other change. The
 // run log keeps only its short message.
+//
+// bug-002 makes failure durable too: a .md whose run failed is parked in
+// failed/ with its own commit, so the next pass does not pick it up again.
 
 export type StepDecision =
   | { kind: "skip" }
@@ -52,6 +56,8 @@ export type ExecuteDeps = {
   runClaude: typeof runClaude;
   commitAndPush: typeof commitAndPush;
   moveMd: typeof moveMd;
+  /** Drop what a failed run left in the working copy (bug-002). */
+  discardChanges: typeof discardChanges;
   /** Which commit a filed report describes (req-010). */
   headCommit: typeof headCommit;
   /** Write the report file into the repo working copy (req-010). */
@@ -70,6 +76,7 @@ const defaultDeps = (): ExecuteDeps => ({
   runClaude,
   commitAndPush,
   moveMd,
+  discardChanges,
   headCommit,
   writeRepoFile,
   setCurrentMd,
@@ -148,15 +155,11 @@ export async function executeStep(
   await outputWrites;
 
   if (!outcome.ok) {
-    // Move the .md to failed/ (file-driven only), nothing pushed.
-    if (src.base && mdRel && mdName) {
-      try {
-        await d.moveMd(dir, mdRel, `${failedDir(src.base)}/${mdName}`);
-      } catch {
-        /* best effort */
-      }
-    }
-    return { kind: "error", message: outcome.summary };
+    // Park the .md under failed/ and push that move (file-driven only), so the
+    // same task is not picked up again on the next pass (bug-002).
+    const parked =
+      src.base && mdName ? await parkFailed(d, dir, src.base, mdName) : "";
+    return { kind: "error", message: `${outcome.summary}${parked}` };
   }
 
   // Success: for file-driven, move in-progress -> done before committing.
@@ -187,6 +190,44 @@ export async function executeStep(
     kind: "success",
     message: `${outcome.summary} — ${push.detail}${note}`,
   };
+}
+
+/**
+ * Move the .md of a failed run from ready/ to failed/ and commit that move on
+ * its own (bug-002). Returns a note for the run-log message.
+ *
+ * The commit is what makes the failure stick: without it the next prepareRepo
+ * resets ready/ back from origin, so a permanently failing task would be
+ * retried on every pass forever, while its untracked failed/ copy sat around
+ * waiting to be swept into an unrelated commit — the .md would then be in
+ * ready/ AND failed/ at once.
+ *
+ * Everything the failed attempt left behind is discarded first, so the commit
+ * carries the move and nothing else: a half-finished attempt must never reach
+ * dev. Discarding also restores ready/<md> — the claim into in-progress/ was
+ * never committed — which is where the move starts from.
+ *
+ * Best effort: a move or push that fails must not hide the original error, it
+ * only changes the note.
+ */
+async function parkFailed(
+  d: ExecuteDeps,
+  dir: string,
+  base: string,
+  mdName: string,
+): Promise<string> {
+  try {
+    await d.discardChanges(dir);
+    await d.moveMd(
+      dir,
+      `${readyDir(base)}/${mdName}`,
+      `${failedDir(base)}/${mdName}`,
+    );
+    const push = await d.commitAndPush(dir, `worker: ${mdName} fehlgeschlagen`);
+    return ` — ${mdName} nach failed/ verschoben (${push.detail})`;
+  } catch (err) {
+    return ` — ${mdName} konnte nicht nach failed/ verschoben werden: ${String(err)}`;
+  }
 }
 
 /**

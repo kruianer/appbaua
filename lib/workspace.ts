@@ -133,7 +133,23 @@ export async function prepareRepo(
   } else {
     await run("git", ["checkout", "-B", "dev"], { cwd: dir });
   }
+  // reset --hard restores tracked files but leaves untracked leftovers of an
+  // earlier run lying around, where the next `git add -A` would sweep them into
+  // an unrelated commit (bug-002). Start every step from a clean working copy.
+  await run("git", ["clean", "-fd"], { cwd: dir });
   return dir;
+}
+
+/**
+ * Throw away everything uncommitted in the working copy — tracked changes and
+ * untracked leftovers alike (bug-002). Used after a failed step, so a
+ * half-finished attempt cannot end up in the commit that parks its .md under
+ * failed/. Ignored files (node_modules, .env, …) survive: `git clean` without
+ * `-x` leaves them alone.
+ */
+export async function discardChanges(dir: string): Promise<void> {
+  await run("git", ["reset", "--hard"], { cwd: dir });
+  await run("git", ["clean", "-fd"], { cwd: dir });
 }
 
 /** Stage everything, commit, push to origin/dev. Returns false if nothing to commit. */
