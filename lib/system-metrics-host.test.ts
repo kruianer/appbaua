@@ -5,6 +5,7 @@ import {
   type HostSource,
   type SampleCache,
   collectSystemMetrics,
+  createNodeSource,
 } from "./system-metrics-host";
 import { DEFAULT_WORKER_PATTERNS, type DiskMetric } from "./system-metrics";
 
@@ -250,5 +251,25 @@ describe("collectSystemMetrics — einzelne Werte fallen aus", () => {
     expect(metrics.memory).toBeNull();
     expect(metrics.disk).toEqual(DISK);
     expect(metrics.cpu).toEqual({ percent: 50 });
+  });
+});
+
+// bug-005: Der freie Speicherplatz war der einzige Grund, das ganze
+// Host-Wurzelverzeichnis read-only in den App-Container zu mounten. statfs
+// braucht das nicht — es genügt ein Pfad auf demselben Dateisystem, und das
+// eigene "/" des Containers ist die overlay-Schicht des Docker-Datenträgers.
+
+describe("createNodeSource — freier Speicherplatz ohne Host-Mount", () => {
+  it("AC: statfs auf dem eigenen Wurzel-Dateisystem liefert einen Wert", async () => {
+    const disk = await createNodeSource(null, "/").diskUsage();
+
+    expect(disk).not.toBeNull();
+    expect(disk?.totalBytes).toBeGreaterThan(0);
+    expect(disk?.freeBytes).toBeGreaterThanOrEqual(0);
+    expect(disk?.freeBytes ?? 0).toBeLessThanOrEqual(disk?.totalBytes ?? 0);
+  });
+
+  it("ohne beobachteten Pfad bleibt die Kachel n/v", async () => {
+    expect(await createNodeSource(null, null).diskUsage()).toBeNull();
   });
 });

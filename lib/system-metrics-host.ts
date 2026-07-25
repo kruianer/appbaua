@@ -1,10 +1,13 @@
 // Erhebt die Momentanwerte des Hosts für die System-Kacheln (req-009).
 //
-// Ohne Docker-Socket: Das Host-/proc und der Datenträger werden read-only in
-// den App-Container gemountet (siehe docker-compose.yml). Weil im Host-/proc
-// ALLE Prozesse des Rechners stehen — auch die des Worker-Containers —, lässt
-// sich die CPU-Last des Workers (Worker-Schleife + laufender Claude-Prozess)
-// allein daraus bestimmen.
+// Ohne Docker-Socket: Das Host-/proc wird read-only in den App-Container
+// gemountet (siehe docker-compose.yml). Weil dort ALLE Prozesse des Rechners
+// stehen — auch die des Worker-Containers —, lässt sich die CPU-Last des
+// Workers (Worker-Schleife + laufender Claude-Prozess) allein daraus bestimmen.
+//
+// Der freie Speicherplatz braucht dagegen KEINEN Host-Mount: statfs auf dem
+// eigenen Wurzel-Dateisystem liefert im Container die Werte der
+// overlay-Unterlage, also des Docker-Datenträgers des Hosts (bug-005).
 //
 // Kein Hintergrund-Polling: gemessen wird ausschließlich, wenn die
 // Einstellungsseite einen Wert anfragt. Es läuft kein Timer im Server.
@@ -65,8 +68,11 @@ export const BOOTSTRAP_DELAY_MS = 200;
 
 /** Kandidaten für das Host-/proc: Mount im Container, sonst das eigene /proc. */
 const PROC_CANDIDATES = ["/host/proc", "/proc"];
-/** Kandidaten für den beobachteten Datenträger. */
-const DISK_CANDIDATES = ["/host/root", "/"];
+/**
+ * Kandidat für den beobachteten Datenträger: das eigene Wurzel-Dateisystem.
+ * Kein Host-Mount — siehe Kopfkommentar und bug-005.
+ */
+const DISK_CANDIDATES = ["/"];
 
 function candidates(configured: string | undefined, fallback: string[]): string[] {
   const trimmed = (configured ?? "").trim();
