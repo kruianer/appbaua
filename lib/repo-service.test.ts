@@ -1,13 +1,15 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createMemoryStore, setStore, getStore } from "./store";
 import {
   addRepo,
+  convertRepoToAppbaua,
   listRepos,
   removeRepo,
   reorderRepos,
   toggleRepo,
 } from "./repo-service";
 import type { ReachabilityResult } from "./reachability";
+import type { ConvertResult } from "./appbaua-standard";
 
 const reachable = () => Promise.resolve({ ok: true } as ReachabilityResult);
 const unreachable = () =>
@@ -114,5 +116,69 @@ describe("req-001 acceptance criteria", () => {
   it("rejects an empty url", async () => {
     const res = await addRepo({ url: "  " }, { checkReachable: reachable });
     expect(res).toEqual({ ok: false, error: "empty" });
+  });
+});
+
+// req-012: the repo list's "Auf appbaua umstellen" action. The rollout itself is
+// covered in appbaua-standard.test.ts; here it is only about which repo the
+// action addresses and how its outcome reaches the caller.
+describe("convertRepoToAppbaua (req-012)", () => {
+  const summary = {
+    skills: 6,
+    folders: 5,
+    foldersCreated: 5,
+    claudeMd: "angelegt" as const,
+    branch: "dev",
+    pushDetail: "auf dev gepusht",
+  };
+
+  async function seedRepo(name: string): Promise<string> {
+    const res = await addRepo(
+      { url: `github.com/kruianer/${name}`, name },
+      { checkReachable: reachable },
+    );
+    if (!res.ok) throw new Error(res.error);
+    return res.repo.id;
+  }
+
+  it("rollt den Standard in genau das geklickte Repo aus", async () => {
+    await seedRepo("appbaua");
+    const id = await seedRepo("leer-repo");
+    const seen: string[] = [];
+
+    const res = await convertRepoToAppbaua(id, {
+      rollOut: async (url) => {
+        seen.push(url);
+        return { ok: true, summary, message: "6 Skills kopiert" };
+      },
+    });
+
+    expect(seen).toEqual(["github.com/kruianer/leer-repo"]);
+    expect(res).toEqual({ ok: true, message: "6 Skills kopiert", summary });
+  });
+
+  it("eine unbekannte id ist ein 'nicht gefunden' und rollt nichts aus", async () => {
+    const rollOut = vi.fn(
+      async (): Promise<ConvertResult> => ({ ok: true, summary, message: "x" }),
+    );
+
+    const res = await convertRepoToAppbaua("gibt-es-nicht", { rollOut });
+
+    expect(res).toEqual({
+      ok: false,
+      error: "Repo nicht gefunden.",
+      notFound: true,
+    });
+    expect(rollOut).not.toHaveBeenCalled();
+  });
+
+  it("gibt den Fehler der Umstellung unverändert weiter", async () => {
+    const id = await seedRepo("leer-repo");
+
+    const res = await convertRepoToAppbaua(id, {
+      rollOut: async () => ({ ok: false, error: "Nichts gepusht — keine Rechte" }),
+    });
+
+    expect(res).toEqual({ ok: false, error: "Nichts gepusht — keine Rechte" });
   });
 });

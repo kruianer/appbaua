@@ -6,6 +6,11 @@ import {
   normalizeUrl,
 } from "./repos";
 import { checkReachable } from "./reachability";
+import {
+  type ConvertResult,
+  type ConvertSummary,
+  queueAppbauaStandard,
+} from "./appbaua-standard";
 
 // Application service: the operations req-001 exposes. Routes stay thin and
 // call these; tests exercise them directly. Reachability is injected so tests
@@ -62,6 +67,31 @@ export async function removeRepo(id: string): Promise<Repo[]> {
   const repos = await getStore().list();
   const next = repos.filter((r) => r.id !== id);
   return getStore().replace(next);
+}
+
+export type ConvertRepoResult =
+  | { ok: true; message: string; summary: ConvertSummary }
+  | { ok: false; error: string; notFound?: boolean };
+
+/**
+ * Bring the repo with this id up to the appbaua standard (req-012). The lookup
+ * and the unknown-id case belong to the operation, not to the HTTP layer, so the
+ * route above it stays plain glue. The rollout itself is injectable for tests.
+ */
+export async function convertRepoToAppbaua(
+  id: string,
+  deps?: { rollOut?: (targetUrl: string) => Promise<ConvertResult> },
+): Promise<ConvertRepoResult> {
+  const repos = await getStore().list();
+  const repo = repos.find((r) => r.id === id);
+  if (!repo) {
+    return { ok: false, error: "Repo nicht gefunden.", notFound: true };
+  }
+
+  const result = await (deps?.rollOut ?? queueAppbauaStandard)(repo.url);
+  return result.ok
+    ? { ok: true, message: result.message, summary: result.summary }
+    : { ok: false, error: result.error };
 }
 
 /** Reorder to exactly the given id order (order = priority, index 0 = highest). */

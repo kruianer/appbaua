@@ -63,6 +63,12 @@ export function AppShell({
   const [dragId, setDragId] = useState<string | null>(null);
   const [ghRepos, setGhRepos] = useState<GithubRepo[]>([]);
   const [ghLoading, setGhLoading] = useState(false);
+  // req-012: which repo is currently being converted, and the last result per
+  // repo (success summary or error) shown right at its entry.
+  const [converting, setConverting] = useState<string | null>(null);
+  const [convertResult, setConvertResult] = useState<
+    Record<string, { ok: boolean; text: string }>
+  >({});
 
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -134,6 +140,42 @@ export function AppShell({
       setRepos(data.repos);
     }
   }, [confirmId]);
+
+  // Roll the appbaua standard out into one repo (req-012). One at a time: the
+  // rollouts share work directories server-side, and the entry has to stay
+  // readable while it runs.
+  const convert = useCallback(
+    async (id: string) => {
+      if (converting) return;
+      setConverting(id);
+      setConvertResult((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+      try {
+        const res = await fetch(`/api/repos/${id}/appbaua`, { method: "POST" });
+        const data = await res.json().catch(() => ({}));
+        setConvertResult((prev) => ({
+          ...prev,
+          [id]: res.ok
+            ? { ok: true, text: data.message ?? "Umstellung abgeschlossen." }
+            : { ok: false, text: data.error ?? "Umstellung fehlgeschlagen." },
+        }));
+      } catch {
+        setConvertResult((prev) => ({
+          ...prev,
+          [id]: {
+            ok: false,
+            text: "Umstellung fehlgeschlagen — Zielrepo nicht erreichbar?",
+          },
+        }));
+      } finally {
+        setConverting(null);
+      }
+    },
+    [converting],
+  );
 
   const persistOrder = useCallback(async (ordered: Repo[]) => {
     await fetch("/api/repos/reorder", {
@@ -358,6 +400,8 @@ export function AppShell({
                   {repos.map((r, i) => {
                     const dragging = r.id === dragId;
                     const first = i === 0;
+                    const busy = r.id === converting;
+                    const result = convertResult[r.id];
                     return (
                       <div
                         key={r.id}
@@ -366,6 +410,8 @@ export function AppShell({
                         style={{
                           display: "flex",
                           alignItems: "center",
+                          // The appbaua row below wraps onto its own line.
+                          flexWrap: "wrap",
                           gap: "var(--space-3)",
                           padding: "var(--space-3)",
                           background: "var(--color-surface)",
@@ -483,6 +529,52 @@ export function AppShell({
                         >
                           <Icon name="trash" size={18} />
                         </button>
+                        {/* req-012: bring this repo up to the appbaua standard.
+                            Own line, so the entry above stays readable. */}
+                        <div
+                          style={{
+                            flexBasis: "100%",
+                            minWidth: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            flexWrap: "wrap",
+                            gap: "var(--space-2)",
+                          }}
+                        >
+                          <button
+                            className="btn btn-secondary"
+                            aria-label={`${r.name} auf appbaua umstellen`}
+                            onClick={() => convert(r.id)}
+                            disabled={converting !== null}
+                            style={{
+                              flex: "none",
+                              fontSize: 12,
+                              padding: "6px 10px",
+                            }}
+                          >
+                            <Icon name="sync" size={15} />
+                            {busy ? "Wird umgestellt …" : "Auf appbaua umstellen"}
+                          </button>
+                          {result && (
+                            <span
+                              role="status"
+                              style={{
+                                // Beside the button while it fits, on its own
+                                // line as soon as it does not.
+                                flex: "1 1 160px",
+                                minWidth: 0,
+                                fontSize: 12,
+                                lineHeight: 1.35,
+                                wordBreak: "break-word",
+                                color: result.ok
+                                  ? muted(70)
+                                  : "var(--color-accent-300)",
+                              }}
+                            >
+                              {result.text}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}

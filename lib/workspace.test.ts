@@ -196,3 +196,37 @@ describe("git-Fehlermeldungen ohne Token (bug-003)", () => {
     expect(res.detail).not.toContain(PAT);
   });
 });
+
+// req-012 leans on this: the rollout pushes to the TARGET repo's dev branch, and
+// a target that has no dev yet gets one branched off its default branch.
+describe("dev-Branch im Zielrepo (req-012)", () => {
+  it("AC: fehlt dev, wird es vom aktuellen HEAD (Default-Branch) abgezweigt", async () => {
+    const { runImpl, calls } = fakeGit((args) =>
+      args[0] === "ls-remote" ? { ok: false, code: 2 } : undefined,
+    );
+    await prepareRepo(FRESH, PAT, { runImpl });
+
+    expect(sub(calls, "checkout")?.args).toEqual(["checkout", "-B", "dev"]);
+    // Nothing to reset to: the branch starts at the cloned default branch.
+    expect(calls.some((c) => c.args[0] === "reset")).toBe(false);
+  });
+
+  it("ein vorhandenes dev wird getrackt statt neu erzeugt", async () => {
+    const { runImpl, calls } = fakeGit();
+    await prepareRepo(FRESH, PAT, { runImpl });
+
+    expect(sub(calls, "checkout")?.args).toEqual([
+      "checkout",
+      "-B",
+      "dev",
+      "origin/dev",
+    ]);
+  });
+
+  it("gepusht wird ausschließlich auf dev", async () => {
+    const { runImpl, calls } = fakeGit(dirtyStatus);
+    await commitAndPush(repoDir(FRESH), "appbaua: Standard", PAT, { runImpl });
+
+    expect(sub(calls, "push")?.args).toEqual(["push", "origin", "dev"]);
+  });
+});

@@ -22,6 +22,13 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# git at runtime: "Auf appbaua umstellen" (req-012) clones the appbaua source and
+# the target repo from inside the app and pushes to the target's dev branch.
+RUN apk add --no-cache git
+
+# Where that rollout clones repos (must be writable by the app user).
+ENV WORKER_WORKDIR=/work
+
 # Run as non-root.
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs
@@ -31,8 +38,9 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Directory for the JSON fallback store (used only when DATABASE_URL is unset).
-RUN mkdir -p .data && chown -R nextjs:nodejs .data
+# Directory for the JSON fallback store (used only when DATABASE_URL is unset)
+# and the work dir for the appbaua rollout (req-012).
+RUN mkdir -p .data /work && chown -R nextjs:nodejs .data /work
 
 USER nextjs
 EXPOSE 3000

@@ -3,6 +3,9 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { redact } from "./redact";
 
+/** What commitAndPush reports when the working copy holds nothing to commit. */
+export const NO_CHANGES_DETAIL = "keine Aenderungen";
+
 // Git workspace helpers for req-006. Clones/updates a target repo into a work
 // dir using the GitHub token for auth, and ensures the `dev` branch. All git
 // runs shell out; process output is captured for logging.
@@ -218,7 +221,7 @@ export async function commitAndPush(
   await git("git", ["add", "-A"], { cwd: dir });
   const status = await git("git", ["status", "--porcelain"], { cwd: dir });
   if (!status.stdout.trim()) {
-    return { pushed: false, detail: "keine Aenderungen" };
+    return { pushed: false, detail: NO_CHANGES_DETAIL };
   }
   const commit = await git("git", ["commit", "-m", message], { cwd: dir });
   if (!commit.ok) {
@@ -277,4 +280,81 @@ export async function listReady(dir: string, readyRel: string): Promise<string[]
   } catch {
     return [];
   }
+}
+
+/**
+ * Every folder and file below `rel`, as repo-relative paths, sorted (req-012).
+ * This is what makes the appbaua rollout read its source at runtime instead of
+ * carrying a hardcoded list: whatever `.claude/skills/` and `delivery/` contain
+ * on the day it runs is what gets rolled out.
+ *
+ * A missing `rel` yields empty lists rather than an error — a source repo
+ * without one of the two folders simply rolls out nothing from it. Symlinks are
+ * ignored: neither branch of the walk claims them, so nothing outside the
+ * working copy can be pulled in through one.
+ */
+export async function listTree(
+  dir: string,
+  rel: string,
+): Promise<{ dirs: string[]; files: string[] }> {
+  const dirs: string[] = [];
+  const files: string[] = [];
+
+  const walk = async (current: string): Promise<void> => {
+    // Missing or unreadable folder: nothing to roll out from it.
+    const entries = await fs
+      .readdir(path.join(dir, current), { withFileTypes: true })
+      .catch(() => null);
+    if (!entries) return;
+    for (const entry of entries) {
+      const childRel = `${current}/${entry.name}`;
+      if (entry.isDirectory()) {
+        dirs.push(childRel);
+        await walk(childRel);
+      } else if (entry.isFile()) {
+        files.push(childRel);
+      }
+    }
+  };
+
+  await walk(rel);
+  dirs.sort();
+  files.sort();
+  return { dirs, files };
+}
+
+/** Does `rel` exist inside the working copy (file or folder)? */
+export async function repoPathExists(dir: string, rel: string): Promise<boolean> {
+  return fs
+    .stat(path.join(dir, rel))
+    .then(() => true)
+    .catch(() => false);
+}
+
+/** Create `rel` and its parents inside the working copy. */
+export async function ensureRepoDir(dir: string, rel: string): Promise<void> {
+  await fs.mkdir(path.join(dir, rel), { recursive: true });
+}
+
+/** Read a file from the working copy, or null when it is not there. */
+export async function readRepoFile(
+  dir: string,
+  rel: string,
+): Promise<string | null> {
+  return fs.readFile(path.join(dir, rel), "utf8").catch(() => null);
+}
+
+/**
+ * Copy one file from one working copy into another, creating the target folder
+ * and overwriting a file of the same name (req-012).
+ */
+export async function copyRepoFile(
+  fromDir: string,
+  fromRel: string,
+  toDir: string,
+  toRel: string,
+): Promise<void> {
+  const target = path.join(toDir, toRel);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.copyFile(path.join(fromDir, fromRel), target);
 }
