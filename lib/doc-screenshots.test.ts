@@ -1,5 +1,6 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import {
   MAX_SHOTS,
   NO_DEV_URL_MESSAGE,
@@ -357,7 +358,12 @@ describe("screenshotNote (req-017)", () => {
 
 describe("the browser driver is optional (bug-006)", () => {
   /** The module as it stands on disk — the import statements are the thing under test. */
-  const SOURCE = readFileSync(new URL("./doc-screenshots.ts", import.meta.url), "utf8");
+  // Resolved from cwd, not import.meta.url: under Vitest the module URL is not a
+  // file:// URL on every OS, which made new URL()/fileURLToPath() throw on Windows.
+  const SOURCE = readFileSync(
+    path.join(process.cwd(), "lib", "doc-screenshots.ts"),
+    "utf8",
+  );
 
   it("repro: names the driver in no import that vitest, tsc or Next can resolve", () => {
     // Each of these three resolves the specifier while it PROCESSES the file,
