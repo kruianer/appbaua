@@ -53,6 +53,9 @@ export const TEST_TIMEOUT_MS = 30 * 60_000;
 /** What the Verlauf says when the repo names no test command at all. */
 export const NO_TEST_COMMAND_MESSAGE = `kein Test-Befehl in ${STACK_FILE} hinterlegt`;
 
+/** What the Verlauf says when a declared command could not be run at all. */
+export const NOT_RUNNABLE_MESSAGE = "Tests nicht ausführbar — ungeprüft";
+
 /** What the Verlauf says when the gate passed. */
 export const GATE_GREEN_MESSAGE = "Test-Suite grün";
 
@@ -61,10 +64,14 @@ export const GATE_RED_MESSAGE = "Test-Suite rot";
 
 /**
  * green — the full suite ran and passed.
- * red   — install or suite failed; `reason` says how.
+ * red   — install or suite RAN and failed; `reason` says how. Only this blocks.
  * no-command — the repo declares no test command, so there is no suite to run.
+ * not-runnable — a command IS declared but could not be executed at all (shell
+ *   syntax the worker won't spawn, or the tool is not installed / "command not
+ *   found"). Distinct from red: "we could not check" must not be treated as a
+ *   real red failure (req-025), so this lets the run through as unchecked.
  */
-export type GateStatus = "green" | "red" | "no-command";
+export type GateStatus = "green" | "red" | "no-command" | "not-runnable";
 
 export type TestGateResult = {
   status: GateStatus;
@@ -173,8 +180,10 @@ async function exec(
 ): Promise<TestGateResult | null> {
   const parts = splitCommand(command);
   if (!parts) {
+    // Shell syntax the worker won't spawn: a declared-but-unrunnable command,
+    // not a red suite (req-025).
     return {
-      status: "red",
+      status: "not-runnable",
       command,
       reason: `${command}: kein ausführbarer Befehl`,
     };
@@ -187,6 +196,16 @@ async function exec(
     env,
   });
   if (res.ok) return null;
+  // Exit 127 = the program itself was not found (tool not installed). That is
+  // "could not run the suite", not "the suite failed" — so it does not block
+  // like a red run (req-025).
+  if (res.code === 127) {
+    return {
+      status: "not-runnable",
+      command,
+      reason: `${command}: ${failureTail(res)}`,
+    };
+  }
   return { status: "red", command, reason: `${command}: ${failureTail(res)}` };
 }
 
@@ -242,5 +261,8 @@ export async function runTestGate(
  */
 export function testGateNote(gate: TestGateResult): string {
   if (gate.status === "no-command") return ` (${NO_TEST_COMMAND_MESSAGE})`;
+  if (gate.status === "not-runnable") {
+    return ` (${NOT_RUNNABLE_MESSAGE}: ${gate.reason})`;
+  }
   return ` (${GATE_GREEN_MESSAGE}: ${gate.command})`;
 }

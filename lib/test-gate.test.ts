@@ -1,6 +1,6 @@
 import path from "node:path";
 import { describe, it, expect, vi } from "vitest";
-import type { RunResult } from "./workspace";
+import type { RunResult, RunOptions } from "./workspace";
 import {
   DEPENDENCY_DIR,
   GATE_GREEN_MESSAGE,
@@ -51,7 +51,9 @@ const fail = (stdout = "", stderr = "", code = 1): RunResult => ({
 
 /** A runner that answers per program+args, and records what it was asked to do. */
 function runner(answer: (cmd: string, args: string[]) => RunResult) {
-  return vi.fn(async (cmd: string, args: string[]) => answer(cmd, args));
+  return vi.fn(async (cmd: string, args: string[], _opts?: RunOptions) =>
+    answer(cmd, args),
+  );
 }
 
 describe("testCommandFrom / installCommandFrom (req-019)", () => {
@@ -211,13 +213,35 @@ describe("runTestGate (req-019)", () => {
     expect(runImpl).toHaveBeenCalledTimes(1);
   });
 
-  it("a command the worker cannot spawn is red, not green", async () => {
+  it("req-025: a command the worker cannot spawn is not-runnable, not red", async () => {
     const stack = ["## Commands", "", "- Test: `npm test && npm run lint`"].join("\n");
     const runImpl = runner(() => ok());
     const gate = await runTestGate("/work/repo", stack, { runImpl });
-    expect(gate.status).toBe("red");
+    // Shell syntax the worker won't spawn: unchecked, not a red failure.
+    expect(gate.status).toBe("not-runnable");
     expect(gate.reason).toContain("kein ausführbarer Befehl");
     expect(runImpl).not.toHaveBeenCalled();
+  });
+
+  it("req-025: a test tool that is not installed (exit 127) is not-runnable, not red", async () => {
+    const stack = ["## Commands", "", "- Test: `colcon test`"].join("\n");
+    // 127 = command not found. The suite could not run — that must not block.
+    const runImpl = runner(() => fail("", "colcon: command not found", 127));
+    const gate = await runTestGate("/work/repo", stack, {
+      runImpl,
+      removeDir: vi.fn(async () => {}),
+    });
+    expect(gate.status).toBe("not-runnable");
+  });
+
+  it("req-025: a suite that RAN and failed is still red (not-runnable only for unrunnable)", async () => {
+    const stack = ["## Commands", "", "- Test: `npm test`"].join("\n");
+    const runImpl = runner(() => fail("FAIL x.test.ts > kaputt", "", 1));
+    const gate = await runTestGate("/work/repo", stack, {
+      runImpl,
+      removeDir: vi.fn(async () => {}),
+    });
+    expect(gate.status).toBe("red");
   });
 
   it("a dependency folder that cannot be removed does not stop the gate", async () => {

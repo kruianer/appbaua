@@ -1834,6 +1834,34 @@ describe("executeStep — Test-Gate vor done/ (req-019)", () => {
     );
   });
 
+  it("req-025: not-runnable gate (tool not installed) -> .md lands in done/, no repair", async () => {
+    const moveMd = vi.fn(async () => {});
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "done", report: "" }));
+    const runTestGate = vi.fn(
+      async (_dir: string, _stack: string | null): Promise<TestGateResult> => ({
+        status: "not-runnable",
+        command: "colcon test",
+        reason: "colcon test: colcon: command not found",
+      }),
+    );
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), moveMd, runTestGate, runClaude }),
+    );
+    expect(d.kind).toBe("success"); // unchecked, but NOT a failure
+    expect(runTestGate).toHaveBeenCalledTimes(1); // no re-check, no repair attempt
+    expect(runClaude).toHaveBeenCalledTimes(1); // only the work run, not a repair
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+    if (d.kind !== "success") throw new Error("expected success");
+    expect(d.message).toContain("ungeprüft"); // the Verlauf says it was not tested
+  });
+
   it("AC: red, then repaired in the same run -> the .md still lands in done/", async () => {
     const moveMd = vi.fn(async () => {});
     const runTestGate = redThenGreen();
