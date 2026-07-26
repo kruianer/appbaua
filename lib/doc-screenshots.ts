@@ -290,8 +290,11 @@ export async function captureDocScreenshots(
       const page = queue.shift() as string;
       try {
         const target = shotTarget(page, taken);
-        const file = path.join(dir, target.rel);
-        await ensureDir(path.dirname(file));
+        // Repo-relative path: keep forward slashes on every OS (git paths,
+        // not OS filesystem paths) — path.join would emit backslashes on
+        // Windows and break the committed screenshot paths.
+        const file = path.posix.join(dir, target.rel);
+        await ensureDir(path.posix.dirname(file));
         const hrefs = await driver.shoot(`${base}${page}`, file);
         shot.push(target);
         for (const next of internalPaths(hrefs, base)) {
