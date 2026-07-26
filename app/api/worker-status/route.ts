@@ -4,6 +4,7 @@ import { listTaskTypes } from "@/lib/task-service";
 import { getWorkerState } from "@/lib/worker-state";
 import { getWorkerStatusStore } from "@/lib/worker-status";
 import { getRunLogStore } from "@/lib/run-log-store";
+import { getPreviewStore } from "@/lib/preview-store";
 import { buildDashboard, startOfTodayIso } from "@/lib/dashboard";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const now = new Date();
   const store = getRunLogStore();
-  const [state, status, repos, taskTypes, today, lastError] =
+  const [state, status, repos, taskTypes, today, lastError, preview] =
     await Promise.all([
       getWorkerState(),
       getWorkerStatusStore().get(),
@@ -19,6 +20,9 @@ export async function GET() {
       listTaskTypes(),
       store.metricsSince(startOfTodayIso(now)),
       store.lastError(),
+      // req-022: read-only here — the worker loop is what rebuilds this,
+      // never a page load (cloning every repo on every poll would be absurd).
+      getPreviewStore().get(),
     ]);
 
   const data = buildDashboard({
@@ -30,5 +34,5 @@ export async function GET() {
     lastError,
     now,
   });
-  return NextResponse.json(data);
+  return NextResponse.json({ ...data, preview });
 }

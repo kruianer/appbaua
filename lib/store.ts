@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import type { Repo } from "./repos";
+import { type Repo, DEFAULT_REPO_MODEL } from "./repos";
 
 // Persistence for the repo list.
 //
@@ -17,6 +17,16 @@ export interface RepoStore {
   replace(repos: Repo[]): Promise<Repo[]>;
 }
 
+/**
+ * Backfill for a persisted repo written before req-028: it has no `model`
+ * field, so reading it as a Repo would silently produce `undefined` rather than
+ * the documented default. Cheap and idempotent — a repo that already has one
+ * passes through unchanged.
+ */
+function withDefaultModel(repos: Repo[]): Repo[] {
+  return repos.map((r) => (r.model ? r : { ...r, model: DEFAULT_REPO_MODEL }));
+}
+
 const DATA_DIR = path.join(process.cwd(), ".data");
 const DATA_FILE = path.join(DATA_DIR, "repos.json");
 
@@ -26,7 +36,7 @@ export function createFileStore(): RepoStore {
       try {
         const raw = await fs.readFile(DATA_FILE, "utf8");
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? (parsed as Repo[]) : [];
+        return Array.isArray(parsed) ? withDefaultModel(parsed as Repo[]) : [];
       } catch {
         return [];
       }
@@ -40,7 +50,7 @@ export function createFileStore(): RepoStore {
 }
 
 export function createMemoryStore(initial: Repo[] = []): RepoStore {
-  let repos = [...initial];
+  let repos = withDefaultModel([...initial]);
   return {
     async list() {
       return [...repos];

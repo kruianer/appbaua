@@ -64,7 +64,8 @@ import {
   SECURITY_REPORT_DIR,
   hasSecurityFindings,
 } from "./security-report";
-import { setCurrentMd, setCurrentOutput } from "./worker-status";
+import { setCurrentMd, setCurrentOutput, setCurrentModel } from "./worker-status";
+import { isRateLimit, pauseUntilFrom } from "./rate-limit";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
 // logs. "skip" means no log entry (nothing to do); "success"/"error" produce a
@@ -128,13 +129,27 @@ export type StepDecision =
   | { kind: "skip" }
   /** `md`: the .md worked off, RECURRING_MD when the type has none (req-015). */
   | { kind: "success"; message: string; md?: string | null }
-  | { kind: "error"; message: string; md?: string | null };
+  | { kind: "error"; message: string; md?: string | null }
+  /**
+   * The Claude run failed on a rate/usage limit (req-029). NOT a failure: the
+   * .md stays in ready/ (never parked to failed/), and the loop pauses until
+   * `pauseUntil` (epoch ms) before trying the queue again.
+   */
+  | { kind: "rate-limited"; message: string; pauseUntil: number; md?: string | null };
 
 /** What the Verlauf leads with when a repo could not be made ready (req-020). */
 export const PREPARE_FAILED_MESSAGE = "Repo vorbereiten fehlgeschlagen";
 
 /** What the Verlauf leads with when the work never left the container (req-020). */
 export const PUSH_FAILED_MESSAGE = "Push fehlgeschlagen";
+
+/**
+ * Phase labels so a failed run says in which step it broke (req-026): the
+ * Verlauf leads with one of these, then the concrete cause. "Repo vorbereiten"
+ * and "Push" already have their own messages above; these cover the rest.
+ */
+export const PHASE_CLAUDE = "Claude-Lauf";
+export const PHASE_FILE_MOVE = "Datei verschieben";
 
 export type ExecuteDeps = {
   /** Clone/fetch and check out the branch the target repo itself names (req-020). */
@@ -161,6 +176,8 @@ export type ExecuteDeps = {
   setCurrentMd: typeof setCurrentMd;
   /** Publish the live Claude output tail of this step (req-008). */
   setCurrentOutput: typeof setCurrentOutput;
+  /** Publish the model this step's Claude call actually reports using (req-027). */
+  setCurrentModel: typeof setCurrentModel;
   now: () => Date;
   token: string | undefined;
 };
@@ -180,6 +197,7 @@ const defaultDeps = (): ExecuteDeps => ({
   runTestGate: (dir, stack) => runTestGate(dir, stack),
   setCurrentMd,
   setCurrentOutput,
+  setCurrentModel,
   now: () => new Date(),
   token: process.env.GITHUB_TOKEN,
 });
@@ -300,7 +318,7 @@ export async function executeStep(
     } catch (err) {
       return {
         kind: "error",
-        message: `${md} konnte nicht nach in-progress verschoben werden: ${String(err)}`,
+        message: `${PHASE_FILE_MOVE}: ${md} konnte nicht nach in-progress verschoben werden: ${String(err)}`,
         md: runMd(),
       };
     }
@@ -343,9 +361,19 @@ export async function executeStep(
   let outputWrites: Promise<void> = Promise.resolve();
   const claude = async (text: string) => {
     const res = await d.runClaude(dir, text, {
+      // The repo's own choice of model (req-028) — falls back to the project
+      // default inside runClaude when a repo has none set.
+      model: repo.model,
       onOutput: (tail) => {
         outputWrites = outputWrites
           .then(() => d.setCurrentOutput(tail))
+          .catch(() => {});
+      },
+      // The model this call actually reports using (req-027) — published so the
+      // Aktivität card can show it while the step runs.
+      onModel: (model) => {
+        outputWrites = outputWrites
+          .then(() => d.setCurrentModel(model))
           .catch(() => {});
       },
     });
@@ -355,6 +383,20 @@ export async function executeStep(
   const outcome = await claude(prompt);
 
   if (!outcome.ok) {
+    // A rate/usage limit is NOT a failure (req-029): the requirement is fine,
+    // the account is just throttled. Do NOT park to failed/ — discard the
+    // half-done work so the next attempt starts clean (bug-002), leave the .md
+    // in ready/ (the in-progress claim was never committed, so discarding
+    // restores it), and tell the loop to pause until the limit resets.
+    if (isRateLimit(outcome.summary)) {
+      await d.discardChanges(dir).catch(() => {});
+      return {
+        kind: "rate-limited",
+        message: `Rate-Limit: ${outcome.summary}`,
+        pauseUntil: pauseUntilFrom(outcome.summary, d.now().getTime()),
+        md: runMd(),
+      };
+    }
     // Park the .md under failed/ and push that move (file-driven only), so the
     // same task is not picked up again on the next pass (bug-002).
     const parked =
@@ -363,7 +405,7 @@ export async function executeStep(
         : "";
     return {
       kind: "error",
-      message: `${outcome.summary}${parked}`,
+      message: `${PHASE_CLAUDE}: ${outcome.summary}${parked}`,
       md: runMd(),
     };
   }

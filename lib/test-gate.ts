@@ -35,11 +35,26 @@ export const STACK_FILE = "delivery/stack.md";
  */
 export const DEPENDENCY_DIR = "node_modules";
 
+/**
+ * Environment for the install step so it pulls devDependencies even though the
+ * worker container sets NODE_ENV=production (bug-010): the test runner lives in
+ * devDependencies, and a production install would leave it out. All three keys
+ * say the same thing to npm across versions; harmless for non-npm installers.
+ */
+export const DEV_INSTALL_ENV: Record<string, string> = {
+  NODE_ENV: "development",
+  NPM_CONFIG_PRODUCTION: "false",
+  NPM_CONFIG_INCLUDE: "dev",
+};
+
 /** How long install and test may each take before they count as failed. */
 export const TEST_TIMEOUT_MS = 30 * 60_000;
 
 /** What the Verlauf says when the repo names no test command at all. */
 export const NO_TEST_COMMAND_MESSAGE = `kein Test-Befehl in ${STACK_FILE} hinterlegt`;
+
+/** What the Verlauf says when a declared command could not be run at all. */
+export const NOT_RUNNABLE_MESSAGE = "Tests nicht ausführbar — ungeprüft";
 
 /** What the Verlauf says when the gate passed. */
 export const GATE_GREEN_MESSAGE = "Test-Suite grün";
@@ -49,10 +64,14 @@ export const GATE_RED_MESSAGE = "Test-Suite rot";
 
 /**
  * green — the full suite ran and passed.
- * red   — install or suite failed; `reason` says how.
+ * red   — install or suite RAN and failed; `reason` says how. Only this blocks.
  * no-command — the repo declares no test command, so there is no suite to run.
+ * not-runnable — a command IS declared but could not be executed at all (shell
+ *   syntax the worker won't spawn, or the tool is not installed / "command not
+ *   found"). Distinct from red: "we could not check" must not be treated as a
+ *   real red failure (req-025), so this lets the run through as unchecked.
  */
-export type GateStatus = "green" | "red" | "no-command";
+export type GateStatus = "green" | "red" | "no-command" | "not-runnable";
 
 export type TestGateResult = {
   status: GateStatus;
@@ -157,11 +176,14 @@ async function exec(
   command: string,
   dir: string,
   timeoutMs: number,
+  env?: Record<string, string>,
 ): Promise<TestGateResult | null> {
   const parts = splitCommand(command);
   if (!parts) {
+    // Shell syntax the worker won't spawn: a declared-but-unrunnable command,
+    // not a red suite (req-025).
     return {
-      status: "red",
+      status: "not-runnable",
       command,
       reason: `${command}: kein ausführbarer Befehl`,
     };
@@ -171,8 +193,19 @@ async function exec(
     timeoutMs,
     // Nothing is piped in; an open pipe makes some CLIs wait for input.
     stdin: "ignore",
+    env,
   });
   if (res.ok) return null;
+  // Exit 127 = the program itself was not found (tool not installed). That is
+  // "could not run the suite", not "the suite failed" — so it does not block
+  // like a red run (req-025).
+  if (res.code === 127) {
+    return {
+      status: "not-runnable",
+      command,
+      reason: `${command}: ${failureTail(res)}`,
+    };
+  }
   return { status: "red", command, reason: `${command}: ${failureTail(res)}` };
 }
 
@@ -206,7 +239,12 @@ export async function runTestGate(
   const install = installCommandFrom(stack);
   if (install) {
     await removeDir(path.join(dir, DEPENDENCY_DIR)).catch(() => {});
-    const installFailed = await exec(runImpl, install, dir, timeoutMs);
+    // The worker container runs with NODE_ENV=production, which `run` inherits
+    // into every child. A production install skips devDependencies — and the
+    // test runner (vitest etc.) lives there, so the suite would fail with "not
+    // found" (bug-010). Force a dev install for this one step so the test tools
+    // are present; the test command below still runs in the normal environment.
+    const installFailed = await exec(runImpl, install, dir, timeoutMs, DEV_INSTALL_ENV);
     if (installFailed) return installFailed;
   }
 
@@ -223,5 +261,8 @@ export async function runTestGate(
  */
 export function testGateNote(gate: TestGateResult): string {
   if (gate.status === "no-command") return ` (${NO_TEST_COMMAND_MESSAGE})`;
+  if (gate.status === "not-runnable") {
+    return ` (${NOT_RUNNABLE_MESSAGE}: ${gate.reason})`;
+  }
   return ` (${GATE_GREEN_MESSAGE}: ${gate.command})`;
 }

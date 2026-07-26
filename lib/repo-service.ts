@@ -1,6 +1,8 @@
 import { getStore } from "./store";
 import {
   type Repo,
+  type RepoModel,
+  DEFAULT_REPO_MODEL,
   deriveName,
   isDuplicate,
   normalizeUrl,
@@ -49,7 +51,13 @@ export async function addRepo(
   if (!reach.ok) return { ok: false, error: "unreachable" };
 
   const name = (input.name ?? "").trim() || deriveName(normalized);
-  const repo: Repo = { id: newId(), name, url: normalized, active: true };
+  const repo: Repo = {
+    id: newId(),
+    name,
+    url: normalized,
+    active: true,
+    model: DEFAULT_REPO_MODEL,
+  };
   const next = [...repos, repo]; // append = lowest priority
   await getStore().replace(next);
   return { ok: true, repo, repos: next };
@@ -60,6 +68,16 @@ export async function toggleRepo(id: string): Promise<Repo[]> {
   const next = repos.map((r) =>
     r.id === id ? { ...r, active: !r.active } : r,
   );
+  return getStore().replace(next);
+}
+
+/** Set the model this repo's Claude Code calls use (req-028). */
+export async function setRepoModel(
+  id: string,
+  model: RepoModel,
+): Promise<Repo[]> {
+  const repos = await getStore().list();
+  const next = repos.map((r) => (r.id === id ? { ...r, model } : r));
   return getStore().replace(next);
 }
 

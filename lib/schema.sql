@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE INDEX IF NOT EXISTS repos_position_idx ON repos (position);
 
+-- Added with req-028: the Claude model this repo's runs use. NULL on rows
+-- written before req-028 — the store backfills those to the default (sonnet).
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS model TEXT;
+
 -- Task types (req-002). Predefined types, seeded on first use; the user only
 -- edits priority (position), active and the per-weekday schedule (JSONB:
 -- { mon: {enabled, start, end}, ... }). New types are added via code/seed.
@@ -81,3 +85,19 @@ CREATE TABLE IF NOT EXISTS worker_status (
 -- running step, cleared when the step ends.
 ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_md TEXT;
 ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_output TEXT;
+
+-- Added with req-029: why the worker is paused, when the reason is special
+-- enough to show (a rate limit). Null for the ordinary empty pause.
+ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS pause_reason TEXT;
+
+-- Added with req-027: the model the running step's Claude call actually
+-- reported using, read from the event stream's own "init" event.
+ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_model TEXT;
+
+-- The "Nächste Aktivitäten" preview (req-022). Single row keyed "worker",
+-- holding the whole list as JSON — it is rebuilt wholesale after every pass,
+-- never patched row by row, so one JSON blob is simpler than a table.
+CREATE TABLE IF NOT EXISTS preview (
+  id   TEXT PRIMARY KEY,
+  rows JSONB NOT NULL DEFAULT '[]'::jsonb
+);

@@ -15,12 +15,14 @@ const repos: Repo[] = [
     name: "leer-repo",
     url: "github.com/kruianer/leer-repo",
     active: true,
+    model: "sonnet",
   },
   {
     id: "r2",
     name: "zweites-repo",
     url: "github.com/kruianer/zweites-repo",
     active: true,
+    model: "sonnet",
   },
 ];
 

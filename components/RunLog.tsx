@@ -12,7 +12,7 @@ const STATUS_META: Record<
 > = {
   success: { label: "Erfolg", color: "var(--color-accent-300)" },
   error: { label: "Fehler", color: "#f0a3a3" },
-  idle: { label: "nichts zu tun", color: "var(--color-text)" },
+  idle: { label: "Leerlauf", color: "var(--color-text)" },
 };
 
 function fmt(iso: string): string {

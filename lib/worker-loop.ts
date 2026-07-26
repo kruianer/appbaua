@@ -4,7 +4,7 @@ import type { RunLogEntry } from "./run-log";
 import { listRepos } from "./repo-service";
 import { listTaskTypes } from "./task-service";
 import { getWorkerState } from "./worker-state";
-import { getRunLogStore } from "./run-log-store";
+import { getRunLogStore, isIdleSummary } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
 import { executeStep, type StepDecision } from "./execute-step";
 import { redact } from "./redact";
@@ -13,6 +13,8 @@ import {
   setPauseUntil,
   setRunningStep,
 } from "./worker-status";
+import { buildPreview } from "./preview";
+import { getPreviewStore } from "./preview-store";
 
 // The worker loop. Runs server-side, independent of any browser. Each step
 // executes real work via Claude Code (req-006, executeStep): skip / success /
@@ -30,6 +32,33 @@ import {
 
 export const EMPTY_PAUSE_MS = 5 * 60_000;
 
+/** Prefix the pause status carries when the wait is a rate limit (req-029). */
+export const RATE_LIMIT_PAUSE_PREFIX = "Pause wegen Rate-Limit bis";
+
+/**
+ * Outcome of one pass. `succeeded` counts steps that got work done (bug-002).
+ * `rateLimitUntil` (epoch ms) is set only when a step hit a rate limit and the
+ * loop should wait until then instead of the usual empty pause (req-029).
+ */
+export type PassResult = { succeeded: number; rateLimitUntil?: number };
+
+/** "DD.MM. HH:MM" for the idle-summary message (req-021). */
+function stampDe(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * The single idle-summary line (req-021): shows since when there has been
+ * nothing to do and when it was last checked. When start and last check are the
+ * same first pass, it reads as a plain "nichts zu tun".
+ */
+export function idleSummaryMessage(sinceIso: string, lastIso: string): string {
+  if (sinceIso === lastIso) return `Leerlauf — nichts zu tun (${stampDe(lastIso)})`;
+  return `Leerlauf — nichts zu tun seit ${stampDe(sinceIso)} (zuletzt geprüft ${stampDe(lastIso)})`;
+}
+
 export type LoopDeps = {
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
@@ -41,7 +70,9 @@ export type LoopDeps = {
   ) => Promise<StepDecision>;
   setRunningStep: (repo: string, taskType: string, startedAt: string) => Promise<void>;
   clearRunningStep: () => Promise<void>;
-  setPauseUntil: (iso: string | null) => Promise<void>;
+  setPauseUntil: (iso: string | null, reason?: string | null) => Promise<void>;
+  /** Rebuild and store "Nächste Aktivitäten" after this pass (req-022). */
+  updatePreview: () => Promise<void>;
 };
 
 const defaultDeps: LoopDeps = {
@@ -52,6 +83,13 @@ const defaultDeps: LoopDeps = {
   setRunningStep,
   clearRunningStep,
   setPauseUntil,
+  updatePreview: async () => {
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) return; // same precondition executeStep has for any real work
+    const [repos, taskTypes] = await Promise.all([listRepos(), listTaskTypes()]);
+    const rows = await buildPreview(repos, taskTypes, new Date(), token);
+    await getPreviewStore().set(rows);
+  },
 };
 
 /**
@@ -65,9 +103,9 @@ const defaultDeps: LoopDeps = {
 export async function runOnce(
   stepCounter: { n: number },
   deps: LoopDeps = defaultDeps,
-): Promise<number> {
+): Promise<PassResult> {
   const state = await getWorkerState();
-  if (!state.enabled) return 0; // switch off: do nothing, log nothing
+  if (!state.enabled) return { succeeded: 0 }; // switch off: do nothing, log nothing
 
   const repos = await listRepos();
   const taskTypes = await listTaskTypes();
@@ -77,6 +115,8 @@ export async function runOnce(
   let succeeded = 0;
   /** How many rows this pass wrote — what decides whether it stayed silent. */
   let logged = 0;
+  /** Set when a step hit a rate limit (req-029): epoch ms to resume at. */
+  let rateLimitUntilMs: number | null = null;
   for (const step of steps) {
     // Stop if the switch was flipped off mid-run (after finishing current step
     // is handled by the loop; here we simply stop starting new steps).
@@ -119,6 +159,24 @@ export async function runOnce(
       continue;
     }
 
+    if (decision.kind === "rate-limited") {
+      // A rate/usage limit hit (req-029): the .md is untouched in ready/, and
+      // every other step this pass would hit the same wall. Record it as its own
+      // (non-error) row, then stop the pass and hand the resume time up so the
+      // loop pauses until the limit resets — not the usual 5-minute empty pause.
+      await log.append({
+        startedAt,
+        endedAt,
+        repo: step.repo.name,
+        taskType: step.taskType.label,
+        status: "idle", // not "error": nothing failed, we are waiting
+        message: redact(decision.message),
+        md: decision.md ?? null,
+      });
+      rateLimitUntilMs = decision.pauseUntil;
+      break;
+    }
+
     await log.append({
       startedAt,
       endedAt,
@@ -141,20 +199,41 @@ export async function runOnce(
   // A pass that wrote nothing is about to pause, and a pause nobody can explain
   // is what req-020 is about: say so once. This covers both ways a pass can end
   // up empty — nothing was due at all, and every step that was due had nothing
-  // to do.
-  if (logged === 0) {
+  // to do. A rate-limited pass already wrote its own row, so it is not silent.
+  //
+  // req-021: consecutive idle passes collapse into ONE growing row instead of a
+  // new "nichts zu tun" line every 5 minutes. The row keeps the phase's start
+  // ("seit …") and moves its "zuletzt geprüft" forward; upsertIdle does the
+  // merge, so a real entry in between breaks the summary and the next idle pass
+  // starts a fresh one.
+  if (logged === 0 && rateLimitUntilMs === null) {
     const at = deps.now().toISOString();
-    await log.append({
-      startedAt: at,
+    const [newest] = await log.list(0, 1);
+    const since =
+      newest && isIdleSummary(newest) ? newest.startedAt : at;
+    await log.upsertIdle({
+      startedAt: since,
       endedAt: at,
       repo: null,
       taskType: null,
       status: "idle",
-      message: "nichts zu tun gefunden",
+      message: idleSummaryMessage(since, at),
       md: null, // no step ran, so there is no file to name (req-015)
     });
   }
-  return succeeded;
+
+  // req-022: refresh "Nächste Aktivitäten" after every pass — a real execution
+  // changed what is waiting, and even an idle pass can mean a schedule's window
+  // just opened or closed. Skipped during a rate-limit pause: nothing changed
+  // that the preview cares about, and it would only add load right when the
+  // account is already throttled.
+  if (rateLimitUntilMs === null) {
+    await deps.updatePreview().catch(() => {
+      /* best-effort: a stale preview must never break the pass itself */
+    });
+  }
+
+  return { succeeded, rateLimitUntil: rateLimitUntilMs ?? undefined };
 }
 
 /**
@@ -165,9 +244,9 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
   const stepCounter = { n: 0 };
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    let succeeded = 0;
+    let result: PassResult = { succeeded: 0 };
     try {
-      succeeded = await runOnce(stepCounter, deps);
+      result = await runOnce(stepCounter, deps);
     } catch (err) {
       // A whole pass failed unexpectedly: never let the loop die. Clear any
       // stuck running status and pause before trying again.
@@ -179,7 +258,20 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
         /* ignore */
       }
     }
-    if (succeeded === 0) {
+
+    if (result.rateLimitUntil !== undefined) {
+      // A rate limit was hit (req-029): wait until it resets (not the 5-minute
+      // empty pause) and show WHY, so the card reads "Pause wegen Rate-Limit bis
+      // HH:MM". The .md is untouched in ready/, so the queue retries after.
+      const untilMs = Math.max(result.rateLimitUntil, deps.now().getTime());
+      const until = new Date(untilMs).toISOString();
+      await deps.setPauseUntil(until, RATE_LIMIT_PAUSE_PREFIX);
+      await deps.sleep(untilMs - deps.now().getTime());
+      await deps.setPauseUntil(null);
+      continue;
+    }
+
+    if (result.succeeded === 0) {
       // Record the pause window so the start page can show "Pause bis HH:MM".
       const until = new Date(deps.now().getTime() + EMPTY_PAUSE_MS).toISOString();
       await deps.setPauseUntil(until);

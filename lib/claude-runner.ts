@@ -1,5 +1,5 @@
 import { run, type RunResult } from "./workspace";
-import { describeEvent, finalResultText } from "./claude-events";
+import { describeEvent, finalResultText, modelFromEvent } from "./claude-events";
 import { SECURITY_OK_MESSAGE } from "./security-report";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
@@ -299,21 +299,58 @@ export async function runClaude(
     runImpl?: typeof run;
     timeoutMs?: number;
     /**
+     * The model requested via --model (req-028): the repo's own choice, falling
+     * back to the project default when none is given. What actually ran is a
+     * separate question — see onModel below.
+     */
+    model?: string;
+    /**
      * Receives the last ~50 activity lines while the run is still going
      * (req-008; content per bug-001), at most about once per second. Errors from
      * it are swallowed — live output must never break the run.
      */
     onOutput?: (tail: string) => void;
+    /**
+     * Fires once with the model the run's own "init" event names (req-027) —
+     * the model actually used, read from the event stream rather than assumed
+     * from the --model flag handed in. Never fires again after the first call.
+     */
+    onModel?: (model: string) => void;
     /** Clock for the throttle; injectable for tests. */
     now?: () => number;
   },
 ): Promise<ClaudeOutcome> {
   const runImpl = deps?.runImpl ?? run;
   const timeoutMs = deps?.timeoutMs ?? CLAUDE_TIMEOUT_MS;
+  const model = deps?.model ?? CLAUDE_MODEL;
   const onOutput = deps?.onOutput;
-  const onData = onOutput
+  const onModel = deps?.onModel;
+  const activityData = onOutput
     ? createActivityStream(onOutput, { now: deps?.now })
     : undefined;
+  // A second, independent look at the same raw lines for the model (req-027):
+  // this must never depend on onOutput being set, and must never throw into the
+  // process's stdout handler.
+  let modelSeen = false;
+  let rest = "";
+  const onData =
+    activityData || onModel
+      ? (chunk: string) => {
+          activityData?.(chunk);
+          if (onModel && !modelSeen) {
+            const parts = (rest + chunk).split("\n");
+            rest = parts.pop() ?? "";
+            for (const line of parts) {
+              const model = modelFromEvent(line);
+              if (model) {
+                modelSeen = true;
+                onModel(model);
+                break;
+              }
+            }
+          }
+        }
+      : undefined;
 
   let res: RunResult;
   try {
@@ -323,7 +360,7 @@ export async function runClaude(
         "-p",
         prompt,
         "--model",
-        CLAUDE_MODEL,
+        model,
         "--dangerously-skip-permissions",
         // One JSON event per line while the session runs, instead of a silent
         // stdout (bug-001). The CLI requires --verbose for stream-json in print
@@ -348,7 +385,22 @@ export async function runClaude(
     return { ok: false, summary: "Claude-Code-CLI nicht verfügbar", report: "" };
   }
   if (res.code === 124) {
-    return { ok: false, summary: "Claude-Lauf: Timeout (60 min)", report: "" };
+    // On timeout, keep the last activity so a run that hung on a rate limit can
+    // be told from one that was genuinely busy (req-026). finalResultText finds
+    // no final "result" event on a killed run, so fall back to the raw tail.
+    const lastActivity = (
+      finalResultText(res.stdout) ||
+      res.stdout ||
+      res.stderr
+    )
+      .trim()
+      .slice(-300);
+    const note = lastActivity ? ` — zuletzt: ${lastActivity}` : "";
+    return {
+      ok: false,
+      summary: `Claude-Lauf: Timeout (60 min)${note}`,
+      report: "",
+    };
   }
   if (!res.ok) {
     const tail = (res.stderr.trim() || finalResultText(res.stdout)).slice(-300);

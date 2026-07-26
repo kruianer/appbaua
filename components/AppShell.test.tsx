@@ -13,7 +13,7 @@ import type { RunLogEntry } from "@/lib/run-log";
 // task types untouched.
 
 const repos: Repo[] = [
-  { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true },
+  { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" },
 ];
 
 function logEntry(): RunLogEntry {

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { type PoolConfig, Pool } from "pg";
-import type { Repo } from "./repos";
+import { type Repo, DEFAULT_REPO_MODEL } from "./repos";
 import type { RepoStore } from "./store";
 import { type TaskType, defaultTaskTypes } from "./task-types";
 import type { TaskTypeStore } from "./task-store";
@@ -13,12 +13,14 @@ import {
   LOG_MAX_AGE_DAYS,
   LOG_MAX_ROWS,
 } from "./run-log";
-import type { RunLogStore } from "./run-log-store";
+import { type RunLogStore, isIdleSummary } from "./run-log-store";
 import {
   type WorkerStatus,
   type WorkerStatusStore,
   EMPTY_STATUS,
 } from "./worker-status";
+import type { PreviewStore } from "./preview-store";
+import type { PreviewRow } from "./preview";
 
 // PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
 // is set (see store.ts). "position" holds the priority order (0 = highest);
@@ -92,12 +94,15 @@ export function createPgStore(): RepoStore {
         name: string;
         url: string;
         active: boolean;
-      }>("SELECT id, name, url, active FROM repos ORDER BY position ASC");
+        model: string | null;
+      }>("SELECT id, name, url, active, model FROM repos ORDER BY position ASC");
       return res.rows.map((r) => ({
         id: r.id,
         name: r.name,
         url: r.url,
         active: r.active,
+        // Backfill for a row written before req-028 (no model column value yet).
+        model: (r.model as Repo["model"]) || DEFAULT_REPO_MODEL,
       }));
     },
 
@@ -110,8 +115,8 @@ export function createPgStore(): RepoStore {
         for (let i = 0; i < repos.length; i++) {
           const r = repos[i];
           await client.query(
-            "INSERT INTO repos (id, name, url, active, position) VALUES ($1, $2, $3, $4, $5)",
-            [r.id, r.name, r.url, r.active, i],
+            "INSERT INTO repos (id, name, url, active, position, model) VALUES ($1, $2, $3, $4, $5, $6)",
+            [r.id, r.name, r.url, r.active, i, r.model],
           );
         }
         await client.query("COMMIT");
@@ -254,6 +259,24 @@ export function createPgRunLogStore(): RunLogStore {
       );
       return toEntry(res.rows[0]);
     },
+    async upsertIdle(entry: NewRunLogEntry): Promise<RunLogEntry> {
+      await ensureSchema();
+      // Is the newest row already an idle-summary? Then only move its end
+      // ("last checked") and message forward (req-021), keeping its start.
+      const newest = await getPool().query<Row>(
+        `SELECT ${COLUMNS} FROM run_log ORDER BY id DESC LIMIT 1`,
+      );
+      const last = newest.rows[0] ? toEntry(newest.rows[0]) : null;
+      if (last && isIdleSummary(last)) {
+        const upd = await getPool().query<Row>(
+          `UPDATE run_log SET ended_at = $1, message = $2 WHERE id = $3
+           RETURNING ${COLUMNS}`,
+          [entry.endedAt, entry.message, last.id],
+        );
+        return toEntry(upd.rows[0]);
+      }
+      return this.append(entry);
+    },
     async list(offset: number, limit: number): Promise<RunLogEntry[]> {
       await ensureSchema();
       const res = await getPool().query<Row>(
@@ -313,9 +336,11 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         pause_until: Date | null;
         current_md: string | null;
         current_output: string | null;
+        pause_reason: string | null;
+        current_model: string | null;
       }>(
         `SELECT current_repo, current_type, step_started_at, pause_until,
-                current_md, current_output
+                current_md, current_output, pause_reason, current_model
          FROM worker_status WHERE id = 'worker'`,
       );
       if (res.rows.length === 0) return { ...EMPTY_STATUS };
@@ -325,22 +350,26 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         currentType: r.current_type,
         currentMd: r.current_md,
         currentOutput: r.current_output,
+        currentModel: r.current_model,
         stepStartedAt: iso(r.step_started_at),
         pauseUntil: iso(r.pause_until),
+        pauseReason: r.pause_reason,
       };
     },
     async set(status: WorkerStatus): Promise<WorkerStatus> {
       await ensureSchema();
       await getPool().query(
-        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until, current_md, current_output)
-         VALUES ('worker', $1, $2, $3, $4, $5, $6)
+        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until, current_md, current_output, pause_reason, current_model)
+         VALUES ('worker', $1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
            current_repo = EXCLUDED.current_repo,
            current_type = EXCLUDED.current_type,
            step_started_at = EXCLUDED.step_started_at,
            pause_until = EXCLUDED.pause_until,
            current_md = EXCLUDED.current_md,
-           current_output = EXCLUDED.current_output`,
+           current_output = EXCLUDED.current_output,
+           pause_reason = EXCLUDED.pause_reason,
+           current_model = EXCLUDED.current_model`,
         [
           status.currentRepo,
           status.currentType,
@@ -348,9 +377,31 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
           status.pauseUntil,
           status.currentMd,
           status.currentOutput,
+          status.pauseReason,
+          status.currentModel,
         ],
       );
       return status;
+    },
+  };
+}
+
+export function createPgPreviewStore(): PreviewStore {
+  return {
+    async get(): Promise<PreviewRow[]> {
+      await ensureSchema();
+      const res = await getPool().query<{ rows: PreviewRow[] }>(
+        "SELECT rows FROM preview WHERE id = 'worker'",
+      );
+      return res.rows[0]?.rows ?? [];
+    },
+    async set(rows: PreviewRow[]): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO preview (id, rows) VALUES ('worker', $1)
+         ON CONFLICT (id) DO UPDATE SET rows = EXCLUDED.rows`,
+        [JSON.stringify(rows)],
+      );
     },
   };
 }

@@ -28,7 +28,7 @@ import {
   type TestGateResult,
 } from "./test-gate";
 
-const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
+const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
@@ -193,6 +193,41 @@ describe("executeStep (req-006)", () => {
       "delivery/bugs/failed/bug-001.md",
     );
     expect(commitAndPush).toHaveBeenCalled();
+    // req-026: the Verlauf names the phase that broke.
+    if (d.kind !== "error") throw new Error("expected error");
+    expect(d.message).toContain("Claude-Lauf");
+  });
+
+  it("req-029: a rate-limit claude failure -> rate-limited, .md stays in ready, no park", async () => {
+    const moveMd = vi.fn(async () => {});
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "Claude-Lauf: usage limit reached, resets at 2026-07-26T21:00:00Z",
+          report: "",
+        })),
+        moveMd,
+        discardChanges,
+        now: () => new Date(Date.UTC(2026, 6, 26, 20, 0, 0)),
+      }),
+    );
+    expect(d.kind).toBe("rate-limited");
+    if (d.kind !== "rate-limited") throw new Error("expected rate-limited");
+    // The .md is NOT parked to failed/ — it stays in ready/ for a later retry.
+    expect(moveMd).not.toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(discardChanges).toHaveBeenCalled(); // half-done work dropped
+    expect(d.pauseUntil).toBe(Date.UTC(2026, 6, 26, 21, 0, 0)); // resets-at honoured
+    expect(d.message).toContain("Rate-Limit");
   });
 
   it("recurring type already ran today -> skip", async () => {
@@ -1797,6 +1832,24 @@ describe("executeStep — Doku-Screenshots (req-017)", () => {
   });
 });
 
+describe("req-028: the repo's own model is passed to Claude", () => {
+  it("calls runClaude with this repo's model, not the project default", async () => {
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "ok", report: "" }));
+    const opusRepo: Repo = { ...repo, model: "opus" };
+    await executeStep(
+      opusRepo,
+      bug,
+      [],
+      deps({ listReady: folders({ ready: ["bug-001.md"] }), runClaude }),
+    );
+    expect(runClaude).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ model: "opus" }),
+    );
+  });
+});
+
 // req-019: nothing reaches done/ on a red suite. A file-driven .md is only
 // filed as finished after the repo's FULL test suite has run and come back
 // green — one repair attempt in the same run, and what stays red goes to
@@ -1832,6 +1885,34 @@ describe("executeStep — Test-Gate vor done/ (req-019)", () => {
       "delivery/bugs/in-progress/req-001.md",
       DONE,
     );
+  });
+
+  it("req-025: not-runnable gate (tool not installed) -> .md lands in done/, no repair", async () => {
+    const moveMd = vi.fn(async () => {});
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "done", report: "" }));
+    const runTestGate = vi.fn(
+      async (_dir: string, _stack: string | null): Promise<TestGateResult> => ({
+        status: "not-runnable",
+        command: "colcon test",
+        reason: "colcon test: colcon: command not found",
+      }),
+    );
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), moveMd, runTestGate, runClaude }),
+    );
+    expect(d.kind).toBe("success"); // unchecked, but NOT a failure
+    expect(runTestGate).toHaveBeenCalledTimes(1); // no re-check, no repair attempt
+    expect(runClaude).toHaveBeenCalledTimes(1); // only the work run, not a repair
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+    if (d.kind !== "success") throw new Error("expected success");
+    expect(d.message).toContain("ungeprüft"); // the Verlauf says it was not tested
   });
 
   it("AC: red, then repaired in the same run -> the .md still lands in done/", async () => {

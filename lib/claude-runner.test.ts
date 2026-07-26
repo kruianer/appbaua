@@ -389,6 +389,18 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     expect(last).toContain("→ Bash: npm test");
   });
 
+  it("req-027: onModel fires once with the model the init event names", async () => {
+    const clock = { t: 0 };
+    const models: string[] = [];
+    await runClaude("/repo", "prompt", {
+      runImpl: streamingRun(clock),
+      onOutput: () => {},
+      onModel: (m) => models.push(m),
+      now: () => clock.t,
+    });
+    expect(models).toEqual(["opus"]); // EVENTS' init event names "opus"
+  });
+
   it("AC: the live output changes while the step runs", async () => {
     const clock = { t: 0 };
     const seen: string[] = [];
@@ -410,6 +422,21 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
       now: () => clock.t,
     });
     expect(seen.join("\n")).not.toContain("no stdin data received");
+  });
+
+  it("req-026: a timeout keeps the last activity so a rate-limit hang is visible", async () => {
+    // The killed run has no final "result" event; the raw tail is what remains.
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: 124,
+      stdout: "…usage limit reached, waiting…",
+      stderr: "",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.ok).toBe(false);
+    expect(out.summary).toContain("Timeout");
+    expect(out.summary).toContain("zuletzt");
+    expect(out.summary).toContain("usage limit reached");
   });
 
   it("asks the CLI for the streaming event format and closes stdin", async () => {
