@@ -136,6 +136,14 @@ export const PREPARE_FAILED_MESSAGE = "Repo vorbereiten fehlgeschlagen";
 /** What the Verlauf leads with when the work never left the container (req-020). */
 export const PUSH_FAILED_MESSAGE = "Push fehlgeschlagen";
 
+/**
+ * Phase labels so a failed run says in which step it broke (req-026): the
+ * Verlauf leads with one of these, then the concrete cause. "Repo vorbereiten"
+ * and "Push" already have their own messages above; these cover the rest.
+ */
+export const PHASE_CLAUDE = "Claude-Lauf";
+export const PHASE_FILE_MOVE = "Datei verschieben";
+
 export type ExecuteDeps = {
   /** Clone/fetch and check out the branch the target repo itself names (req-020). */
   prepareRepo: typeof prepareRepoOnConvention;
@@ -300,7 +308,7 @@ export async function executeStep(
     } catch (err) {
       return {
         kind: "error",
-        message: `${md} konnte nicht nach in-progress verschoben werden: ${String(err)}`,
+        message: `${PHASE_FILE_MOVE}: ${md} konnte nicht nach in-progress verschoben werden: ${String(err)}`,
         md: runMd(),
       };
     }
@@ -363,7 +371,7 @@ export async function executeStep(
         : "";
     return {
       kind: "error",
-      message: `${outcome.summary}${parked}`,
+      message: `${PHASE_CLAUDE}: ${outcome.summary}${parked}`,
       md: runMd(),
     };
   }

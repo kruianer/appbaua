@@ -412,6 +412,21 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     expect(seen.join("\n")).not.toContain("no stdin data received");
   });
 
+  it("req-026: a timeout keeps the last activity so a rate-limit hang is visible", async () => {
+    // The killed run has no final "result" event; the raw tail is what remains.
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: 124,
+      stdout: "…usage limit reached, waiting…",
+      stderr: "",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.ok).toBe(false);
+    expect(out.summary).toContain("Timeout");
+    expect(out.summary).toContain("zuletzt");
+    expect(out.summary).toContain("usage limit reached");
+  });
+
   it("asks the CLI for the streaming event format and closes stdin", async () => {
     let seenArgs: string[] = [];
     let seenStdin: string | undefined;

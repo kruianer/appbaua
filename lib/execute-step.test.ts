@@ -193,6 +193,9 @@ describe("executeStep (req-006)", () => {
       "delivery/bugs/failed/bug-001.md",
     );
     expect(commitAndPush).toHaveBeenCalled();
+    // req-026: the Verlauf names the phase that broke.
+    if (d.kind !== "error") throw new Error("expected error");
+    expect(d.message).toContain("Claude-Lauf");
   });
 
   it("recurring type already ran today -> skip", async () => {

@@ -348,7 +348,22 @@ export async function runClaude(
     return { ok: false, summary: "Claude-Code-CLI nicht verfügbar", report: "" };
   }
   if (res.code === 124) {
-    return { ok: false, summary: "Claude-Lauf: Timeout (60 min)", report: "" };
+    // On timeout, keep the last activity so a run that hung on a rate limit can
+    // be told from one that was genuinely busy (req-026). finalResultText finds
+    // no final "result" event on a killed run, so fall back to the raw tail.
+    const lastActivity = (
+      finalResultText(res.stdout) ||
+      res.stdout ||
+      res.stderr
+    )
+      .trim()
+      .slice(-300);
+    const note = lastActivity ? ` — zuletzt: ${lastActivity}` : "";
+    return {
+      ok: false,
+      summary: `Claude-Lauf: Timeout (60 min)${note}`,
+      report: "",
+    };
   }
   if (!res.ok) {
     const tail = (res.stderr.trim() || finalResultText(res.stdout)).slice(-300);
