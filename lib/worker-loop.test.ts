@@ -70,7 +70,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     expect(row.status).toBe("idle");
   });
 
-  it("AC: order is task-type outer, repo inner; success entries", async () => {
+  it("AC: order is repo outer, task-type inner; success entries (bug-008)", async () => {
     setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 2))); // Bugs, Requirements
     const done = await runOnce({ n: 0 }, deps());
     expect(done).toBe(4);
@@ -78,8 +78,8 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     const chrono = [...rows].reverse().map((r) => `${r.taskType}×${r.repo}`);
     expect(chrono).toEqual([
       "Bugs×appbaua",
-      "Bugs×worker",
       "Requirements×appbaua",
+      "Bugs×worker",
       "Requirements×worker",
     ]);
     expect(rows.every((r) => r.status === "success")).toBe(true);

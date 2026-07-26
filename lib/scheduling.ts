@@ -74,10 +74,12 @@ export function isTaskDue(t: TaskType, now: Date): boolean {
 export type PlannedStep = { repo: Repo; taskType: TaskType };
 
 /**
- * Build the ordered list of steps for one run: task-type priority is the OUTER
- * loop, repo priority the INNER loop. Only active repos and active+due task
- * types are included. `repos` and `taskTypes` are already in priority order
- * (index 0 = highest).
+ * Build the ordered list of steps for one run: repo priority is the OUTER loop,
+ * task-type priority the INNER loop (bug-008). The worker works repo 1
+ * completely (all its due task types in priority order) before it moves to repo
+ * 2 — the repo list is the primary priority, per the vision ("Repo 1 vor Repo 2
+ * vor Repo 3"). Only active repos and active+due task types are included.
+ * `repos` and `taskTypes` are already in priority order (index 0 = highest).
  */
 export function planRun(
   repos: Repo[],
@@ -87,8 +89,8 @@ export function planRun(
   const activeRepos = repos.filter((r) => r.active);
   const dueTypes = taskTypes.filter((t) => isTaskDue(t, now));
   const steps: PlannedStep[] = [];
-  for (const taskType of dueTypes) {
-    for (const repo of activeRepos) {
+  for (const repo of activeRepos) {
+    for (const taskType of dueTypes) {
       steps.push({ repo, taskType });
     }
   }

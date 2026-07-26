@@ -140,15 +140,17 @@ describe("planRun", () => {
     { id: "r3", name: "aus", url: "u3", active: false },
   ];
 
-  it("orders task-type priority outer, repo priority inner; skips inactive", () => {
+  it("orders repo priority outer, task-type priority inner; skips inactive (bug-008)", () => {
     const [bug, req] = defaultTaskTypes(); // both always-on, active
     const steps = planRun(repos, [bug, req], WED_18);
+    // Repo 1 (appbaua) completely before repo 2 (worker): the repo list is the
+    // primary priority, not the task type.
     expect(
       steps.map((s) => `${s.taskType.label}×${s.repo.name}`),
     ).toEqual([
       "Bugs×appbaua",
-      "Bugs×worker",
       "Requirements×appbaua",
+      "Bugs×worker",
       "Requirements×worker",
     ]);
   });
