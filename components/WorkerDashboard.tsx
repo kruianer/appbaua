@@ -90,7 +90,11 @@ export function WorkerDashboard() {
       const dur = data.stepStartedAt ? elapsed(data.stepStartedAt, nowMs) : "0:00";
       statusLine = `${data.currentType} × ${data.currentRepo} · seit ${dur}`;
     } else if (phase === "pause" && data.pauseUntil) {
-      statusLine = `Pause bis ${hhmm(data.pauseUntil)}`;
+      // A rate-limit pause carries its own reason (req-029); the empty pause
+      // shows the plain wait.
+      statusLine = data.pauseReason
+        ? `${data.pauseReason} ${hhmm(data.pauseUntil)}`
+        : `Pause bis ${hhmm(data.pauseUntil)}`;
     } else if (phase === "stopped") {
       statusLine = "Worker gestoppt";
     } else {

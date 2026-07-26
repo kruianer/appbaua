@@ -65,6 +65,7 @@ import {
   hasSecurityFindings,
 } from "./security-report";
 import { setCurrentMd, setCurrentOutput } from "./worker-status";
+import { isRateLimit, pauseUntilFrom } from "./rate-limit";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
 // logs. "skip" means no log entry (nothing to do); "success"/"error" produce a
@@ -128,7 +129,13 @@ export type StepDecision =
   | { kind: "skip" }
   /** `md`: the .md worked off, RECURRING_MD when the type has none (req-015). */
   | { kind: "success"; message: string; md?: string | null }
-  | { kind: "error"; message: string; md?: string | null };
+  | { kind: "error"; message: string; md?: string | null }
+  /**
+   * The Claude run failed on a rate/usage limit (req-029). NOT a failure: the
+   * .md stays in ready/ (never parked to failed/), and the loop pauses until
+   * `pauseUntil` (epoch ms) before trying the queue again.
+   */
+  | { kind: "rate-limited"; message: string; pauseUntil: number; md?: string | null };
 
 /** What the Verlauf leads with when a repo could not be made ready (req-020). */
 export const PREPARE_FAILED_MESSAGE = "Repo vorbereiten fehlgeschlagen";
@@ -363,6 +370,20 @@ export async function executeStep(
   const outcome = await claude(prompt);
 
   if (!outcome.ok) {
+    // A rate/usage limit is NOT a failure (req-029): the requirement is fine,
+    // the account is just throttled. Do NOT park to failed/ — discard the
+    // half-done work so the next attempt starts clean (bug-002), leave the .md
+    // in ready/ (the in-progress claim was never committed, so discarding
+    // restores it), and tell the loop to pause until the limit resets.
+    if (isRateLimit(outcome.summary)) {
+      await d.discardChanges(dir).catch(() => {});
+      return {
+        kind: "rate-limited",
+        message: `Rate-Limit: ${outcome.summary}`,
+        pauseUntil: pauseUntilFrom(outcome.summary, d.now().getTime()),
+        md: runMd(),
+      };
+    }
     // Park the .md under failed/ and push that move (file-driven only), so the
     // same task is not picked up again on the next pass (bug-002).
     const parked =

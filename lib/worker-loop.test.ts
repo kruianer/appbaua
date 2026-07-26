@@ -52,7 +52,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
   it("AC: switch off -> no run, no log entries", async () => {
     setWorkerStore(createMemoryWorkerStore({ enabled: false }));
     const done = await runOnce({ n: 0 }, deps());
-    expect(done).toBe(0);
+    expect(done.succeeded).toBe(0);
     expect(await logStore.count()).toBe(0);
   });
 
@@ -64,7 +64,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
       ]),
     );
     const done = await runOnce({ n: 0 }, deps());
-    expect(done).toBe(0);
+    expect(done.succeeded).toBe(0);
     expect(await logStore.count()).toBe(1);
     const [row] = await logStore.list(0, 1);
     expect(row.status).toBe("idle");
@@ -73,7 +73,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
   it("AC: order is repo outer, task-type inner; success entries (bug-008)", async () => {
     setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 2))); // Bugs, Requirements
     const done = await runOnce({ n: 0 }, deps());
-    expect(done).toBe(4);
+    expect(done.succeeded).toBe(4);
     const rows = await logStore.list(0, 4);
     const chrono = [...rows].reverse().map((r) => `${r.taskType}×${r.repo}`);
     expect(chrono).toEqual([
@@ -93,7 +93,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
         ? { kind: "skip" }
         : { kind: "success", message: "ok" };
     const done = await runOnce({ n: 0 }, deps({ runStep }));
-    expect(done).toBe(1); // only worker counted
+    expect(done.succeeded).toBe(1); // only worker counted
     const rows = await logStore.list(0, 10);
     expect(rows.map((r) => r.repo)).toEqual(["worker"]); // appbaua not logged
   });
@@ -105,7 +105,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
         ? { kind: "error", message: "Claude-Lauf fehlgeschlagen" }
         : { kind: "success", message: "ok" };
     const done = await runOnce({ n: 0 }, deps({ runStep }));
-    expect(done).toBe(1); // the error is logged but is not progress (bug-002)
+    expect(done.succeeded).toBe(1); // the error is logged but is not progress (bug-002)
     const rows = [...(await logStore.list(0, 10))].reverse();
     expect(rows.map((r) => `${r.repo}:${r.status}`)).toEqual([
       "appbaua:error",
@@ -124,7 +124,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
       { n: 0 },
       deps({ runStep, clearRunningStep: async () => void cleared++ }),
     );
-    expect(done).toBe(1); // both logged, but only worker actually got work done
+    expect(done.succeeded).toBe(1); // both logged, but only worker actually got work done
     const rows = [...(await logStore.list(0, 10))].reverse();
     expect(rows.map((r) => `${r.repo}:${r.status}`)).toEqual([
       "appbaua:error",
@@ -138,7 +138,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
     setStore(createMemoryStore([repos[0], { ...repos[1], active: false }]));
     const done = await runOnce({ n: 0 }, deps());
-    expect(done).toBe(1);
+    expect(done.succeeded).toBe(1);
     const rows = await logStore.list(0, 10);
     expect(rows.map((r) => r.repo)).toEqual(["appbaua"]);
   });
@@ -156,7 +156,7 @@ describe("worker loop — Dauerfehler pausiert (bug-002)", () => {
       message: "Claude-Code-CLI nicht verfügbar",
     });
     const done = await runOnce({ n: 0 }, deps({ runStep }));
-    expect(done).toBe(0);
+    expect(done.succeeded).toBe(0);
     expect(await logStore.count()).toBe(2); // still logged, both repos
   });
 
@@ -205,6 +205,35 @@ describe("worker loop — Dauerfehler pausiert (bug-002)", () => {
     await expect(runForever(d)).rejects.toBe(stop);
     expect(pauses).toEqual([EMPTY_PAUSE_MS]); // only the third, empty pass
     expect(steps).toBe(6);
+  });
+
+  it("req-029: a rate-limited step pauses until reset, with a reason, not the empty pause", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const stop = new Error("stop");
+    const resetMs = WED_18.getTime() + 45 * 60_000; // 45 min ahead
+    const pauseArgs: Array<{ iso: string | null; reason?: string | null }> = [];
+    const slept: number[] = [];
+    const d = deps({
+      runStep: async (): Promise<StepDecision> => ({
+        kind: "rate-limited",
+        message: "Rate-Limit: usage limit",
+        pauseUntil: resetMs,
+      }),
+      setPauseUntil: async (iso, reason) => {
+        pauseArgs.push({ iso, reason });
+      },
+      sleep: async (ms: number) => {
+        slept.push(ms);
+        throw stop; // leave the endless loop after the first pause
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    // Paused until the reset instant, carrying the rate-limit reason.
+    expect(pauseArgs[0].iso).toBe(new Date(resetMs).toISOString());
+    expect(pauseArgs[0].reason).toContain("Rate-Limit");
+    // The wait matches the reset distance, not the 5-minute empty pause.
+    expect(slept[0]).toBe(resetMs - WED_18.getTime());
+    expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
   });
 
   it("a pass that blows up entirely pauses too", async () => {
@@ -352,7 +381,7 @@ describe("worker loop — kein wortloses Pausieren (req-020)", () => {
     const done = await runOnce({ n: 0 }, deps({ runStep }));
 
     // AC: die übrigen Repos werden weiter bearbeitet
-    expect(done).toBe(1);
+    expect(done.succeeded).toBe(1);
     const rows = [...(await logStore.list(0, 10))].reverse();
     expect(rows.map((r) => `${r.repo}:${r.status}`)).toEqual([
       "appbaua:error",
@@ -369,7 +398,7 @@ describe("worker loop — kein wortloses Pausieren (req-020)", () => {
 
     const done = await runOnce({ n: 0 }, deps({ runStep }));
 
-    expect(done).toBe(0);
+    expect(done.succeeded).toBe(0);
     expect(await logStore.count()).toBe(1);
     const [row] = await logStore.list(0, 1);
     expect(row.status).toBe("idle");

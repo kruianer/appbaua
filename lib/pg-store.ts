@@ -313,9 +313,10 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         pause_until: Date | null;
         current_md: string | null;
         current_output: string | null;
+        pause_reason: string | null;
       }>(
         `SELECT current_repo, current_type, step_started_at, pause_until,
-                current_md, current_output
+                current_md, current_output, pause_reason
          FROM worker_status WHERE id = 'worker'`,
       );
       if (res.rows.length === 0) return { ...EMPTY_STATUS };
@@ -327,20 +328,22 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         currentOutput: r.current_output,
         stepStartedAt: iso(r.step_started_at),
         pauseUntil: iso(r.pause_until),
+        pauseReason: r.pause_reason,
       };
     },
     async set(status: WorkerStatus): Promise<WorkerStatus> {
       await ensureSchema();
       await getPool().query(
-        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until, current_md, current_output)
-         VALUES ('worker', $1, $2, $3, $4, $5, $6)
+        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until, current_md, current_output, pause_reason)
+         VALUES ('worker', $1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (id) DO UPDATE SET
            current_repo = EXCLUDED.current_repo,
            current_type = EXCLUDED.current_type,
            step_started_at = EXCLUDED.step_started_at,
            pause_until = EXCLUDED.pause_until,
            current_md = EXCLUDED.current_md,
-           current_output = EXCLUDED.current_output`,
+           current_output = EXCLUDED.current_output,
+           pause_reason = EXCLUDED.pause_reason`,
         [
           status.currentRepo,
           status.currentType,
@@ -348,6 +351,7 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
           status.pauseUntil,
           status.currentMd,
           status.currentOutput,
+          status.pauseReason,
         ],
       );
       return status;

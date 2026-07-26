@@ -81,3 +81,7 @@ CREATE TABLE IF NOT EXISTS worker_status (
 -- running step, cleared when the step ends.
 ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_md TEXT;
 ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_output TEXT;
+
+-- Added with req-029: why the worker is paused, when the reason is special
+-- enough to show (a rate limit). Null for the ordinary empty pause.
+ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS pause_reason TEXT;

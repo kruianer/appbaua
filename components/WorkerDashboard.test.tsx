@@ -15,6 +15,7 @@ const IDLE: DashboardData = {
   currentOutput: null,
   stepStartedAt: null,
   pauseUntil: null,
+  pauseReason: null,
   today: { done: 0, errors: 0 },
   activeRepos: 1,
   totalRepos: 1,

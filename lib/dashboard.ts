@@ -21,6 +21,8 @@ export type DashboardData = {
   stepStartedAt: string | null;
   // pause:
   pauseUntil: string | null;
+  /** Why the worker is paused, when special (req-029: rate limit); else null. */
+  pauseReason: string | null;
   // tiles:
   today: { done: number; errors: number };
   activeRepos: number;
@@ -75,6 +77,7 @@ export function buildDashboard(input: {
     currentOutput: running ? status.currentOutput : null,
     stepStartedAt: status.stepStartedAt,
     pauseUntil: status.pauseUntil,
+    pauseReason: phase === "pause" ? status.pauseReason : null,
     today,
     activeRepos: repos.filter((r) => r.active).length,
     totalRepos: repos.length,

@@ -135,6 +135,7 @@ describe("buildDashboard — running step details (req-008)", () => {
     currentOutput: "Zeile 1\nZeile 2",
     stepStartedAt: now.toISOString(),
     pauseUntil: null,
+    pauseReason: null,
   };
 
   it("passes the .md name and the live output through while running", () => {

@@ -198,6 +198,38 @@ describe("executeStep (req-006)", () => {
     expect(d.message).toContain("Claude-Lauf");
   });
 
+  it("req-029: a rate-limit claude failure -> rate-limited, .md stays in ready, no park", async () => {
+    const moveMd = vi.fn(async () => {});
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "Claude-Lauf: usage limit reached, resets at 2026-07-26T21:00:00Z",
+          report: "",
+        })),
+        moveMd,
+        discardChanges,
+        now: () => new Date(Date.UTC(2026, 6, 26, 20, 0, 0)),
+      }),
+    );
+    expect(d.kind).toBe("rate-limited");
+    if (d.kind !== "rate-limited") throw new Error("expected rate-limited");
+    // The .md is NOT parked to failed/ — it stays in ready/ for a later retry.
+    expect(moveMd).not.toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(discardChanges).toHaveBeenCalled(); // half-done work dropped
+    expect(d.pauseUntil).toBe(Date.UTC(2026, 6, 26, 21, 0, 0)); // resets-at honoured
+    expect(d.message).toContain("Rate-Limit");
+  });
+
   it("recurring type already ran today -> skip", async () => {
     const ranToday: RunLogEntry[] = [
       {

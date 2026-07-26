@@ -22,6 +22,12 @@ export type WorkerStatus = {
   currentOutput: string | null;
   stepStartedAt: string | null; // ISO
   pauseUntil: string | null; // ISO
+  /**
+   * Why the worker is paused, when the reason is special enough to show (req-029:
+   * a rate limit). Null for the ordinary 5-minute empty pause — the card then
+   * shows its usual "Pause bis HH:MM".
+   */
+  pauseReason: string | null;
 };
 
 export const EMPTY_STATUS: WorkerStatus = {
@@ -31,6 +37,7 @@ export const EMPTY_STATUS: WorkerStatus = {
   currentOutput: null,
   stepStartedAt: null,
   pauseUntil: null,
+  pauseReason: null,
 };
 
 export interface WorkerStatusStore {
@@ -107,6 +114,7 @@ export async function setRunningStep(
     currentOutput: null,
     stepStartedAt: startedAt,
     pauseUntil: null,
+    pauseReason: null,
   });
 }
 
@@ -122,10 +130,14 @@ export async function clearRunningStep(): Promise<void> {
   });
 }
 
-export async function setPauseUntil(iso: string | null): Promise<void> {
+export async function setPauseUntil(
+  iso: string | null,
+  reason: string | null = null,
+): Promise<void> {
   await getWorkerStatusStore().set({
     ...EMPTY_STATUS,
     pauseUntil: iso,
+    pauseReason: iso ? reason : null,
   });
 }
 

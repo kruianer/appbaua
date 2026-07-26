@@ -30,6 +30,16 @@ import {
 
 export const EMPTY_PAUSE_MS = 5 * 60_000;
 
+/** Prefix the pause status carries when the wait is a rate limit (req-029). */
+export const RATE_LIMIT_PAUSE_PREFIX = "Pause wegen Rate-Limit bis";
+
+/**
+ * Outcome of one pass. `succeeded` counts steps that got work done (bug-002).
+ * `rateLimitUntil` (epoch ms) is set only when a step hit a rate limit and the
+ * loop should wait until then instead of the usual empty pause (req-029).
+ */
+export type PassResult = { succeeded: number; rateLimitUntil?: number };
+
 export type LoopDeps = {
   sleep: (ms: number) => Promise<void>;
   now: () => Date;
@@ -41,7 +51,7 @@ export type LoopDeps = {
   ) => Promise<StepDecision>;
   setRunningStep: (repo: string, taskType: string, startedAt: string) => Promise<void>;
   clearRunningStep: () => Promise<void>;
-  setPauseUntil: (iso: string | null) => Promise<void>;
+  setPauseUntil: (iso: string | null, reason?: string | null) => Promise<void>;
 };
 
 const defaultDeps: LoopDeps = {
@@ -65,9 +75,9 @@ const defaultDeps: LoopDeps = {
 export async function runOnce(
   stepCounter: { n: number },
   deps: LoopDeps = defaultDeps,
-): Promise<number> {
+): Promise<PassResult> {
   const state = await getWorkerState();
-  if (!state.enabled) return 0; // switch off: do nothing, log nothing
+  if (!state.enabled) return { succeeded: 0 }; // switch off: do nothing, log nothing
 
   const repos = await listRepos();
   const taskTypes = await listTaskTypes();
@@ -77,6 +87,8 @@ export async function runOnce(
   let succeeded = 0;
   /** How many rows this pass wrote — what decides whether it stayed silent. */
   let logged = 0;
+  /** Set when a step hit a rate limit (req-029): epoch ms to resume at. */
+  let rateLimitUntilMs: number | null = null;
   for (const step of steps) {
     // Stop if the switch was flipped off mid-run (after finishing current step
     // is handled by the loop; here we simply stop starting new steps).
@@ -119,6 +131,24 @@ export async function runOnce(
       continue;
     }
 
+    if (decision.kind === "rate-limited") {
+      // A rate/usage limit hit (req-029): the .md is untouched in ready/, and
+      // every other step this pass would hit the same wall. Record it as its own
+      // (non-error) row, then stop the pass and hand the resume time up so the
+      // loop pauses until the limit resets — not the usual 5-minute empty pause.
+      await log.append({
+        startedAt,
+        endedAt,
+        repo: step.repo.name,
+        taskType: step.taskType.label,
+        status: "idle", // not "error": nothing failed, we are waiting
+        message: redact(decision.message),
+        md: decision.md ?? null,
+      });
+      rateLimitUntilMs = decision.pauseUntil;
+      break;
+    }
+
     await log.append({
       startedAt,
       endedAt,
@@ -141,8 +171,8 @@ export async function runOnce(
   // A pass that wrote nothing is about to pause, and a pause nobody can explain
   // is what req-020 is about: say so once. This covers both ways a pass can end
   // up empty — nothing was due at all, and every step that was due had nothing
-  // to do.
-  if (logged === 0) {
+  // to do. A rate-limited pass already wrote its own row, so it is not silent.
+  if (logged === 0 && rateLimitUntilMs === null) {
     const at = deps.now().toISOString();
     await log.append({
       startedAt: at,
@@ -154,7 +184,7 @@ export async function runOnce(
       md: null, // no step ran, so there is no file to name (req-015)
     });
   }
-  return succeeded;
+  return { succeeded, rateLimitUntil: rateLimitUntilMs ?? undefined };
 }
 
 /**
@@ -165,9 +195,9 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
   const stepCounter = { n: 0 };
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    let succeeded = 0;
+    let result: PassResult = { succeeded: 0 };
     try {
-      succeeded = await runOnce(stepCounter, deps);
+      result = await runOnce(stepCounter, deps);
     } catch (err) {
       // A whole pass failed unexpectedly: never let the loop die. Clear any
       // stuck running status and pause before trying again.
@@ -179,7 +209,20 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
         /* ignore */
       }
     }
-    if (succeeded === 0) {
+
+    if (result.rateLimitUntil !== undefined) {
+      // A rate limit was hit (req-029): wait until it resets (not the 5-minute
+      // empty pause) and show WHY, so the card reads "Pause wegen Rate-Limit bis
+      // HH:MM". The .md is untouched in ready/, so the queue retries after.
+      const untilMs = Math.max(result.rateLimitUntil, deps.now().getTime());
+      const until = new Date(untilMs).toISOString();
+      await deps.setPauseUntil(until, RATE_LIMIT_PAUSE_PREFIX);
+      await deps.sleep(untilMs - deps.now().getTime());
+      await deps.setPauseUntil(null);
+      continue;
+    }
+
+    if (result.succeeded === 0) {
       // Record the pause window so the start page can show "Pause bis HH:MM".
       const until = new Date(deps.now().getTime() + EMPTY_PAUSE_MS).toISOString();
       await deps.setPauseUntil(until);
