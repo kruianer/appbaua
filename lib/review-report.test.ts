@@ -84,6 +84,16 @@ describe("reportPath", () => {
       }),
     ).toBe("delivery/reviews/2026-07-25-doku-appbaua-abc1234.md");
   });
+
+  // req-014: the Security task keeps the naming rules but its own folder.
+  it("puts the report into a given folder instead", () => {
+    expect(
+      reportPath(
+        { taskId: "security", repoName: "appbaua", commit: "abc1234", now },
+        "delivery/security",
+      ),
+    ).toBe("delivery/security/2026-07-25-security-appbaua-abc1234.md");
+  });
 });
 
 describe("reportContent (AC: the FULL report lands in the file)", () => {

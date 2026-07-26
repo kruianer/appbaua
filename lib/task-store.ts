@@ -1,11 +1,16 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { type TaskType, defaultTaskTypes } from "./task-types";
+import {
+  type TaskType,
+  defaultTaskTypes,
+  withMissingDefaults,
+} from "./task-types";
 
 // Persistence for the task-type list (req-002). Same seam pattern as the repo
 // store: file-backed for zero-infra dev, Postgres when DATABASE_URL/PGHOST is
-// set, memory store for tests. On an empty store the five predefined types are
-// seeded (in vision order) so the list is never empty.
+// set, memory store for tests. On an empty store the predefined types are
+// seeded (in vision order) so the list is never empty; a persisted list that
+// predates a newly added type grows it back (req-014).
 
 export interface TaskTypeStore {
   list(): Promise<TaskType[]>;
@@ -52,13 +57,33 @@ export function createMemoryTaskStore(initial?: TaskType[]): TaskTypeStore {
   };
 }
 
+/**
+ * Wrap a persistent store so predefined types it does not know yet are added
+ * and written back on the next read (req-014).
+ *
+ * Why a wrapper and not part of every store: the stores seed only an EMPTY
+ * list, so an installation that ran before a type existed would never see it —
+ * for the Security task that means it could never become due. The memory store
+ * stays untouched on purpose; tests hand it exactly the list they want.
+ */
+export function seedMissingDefaults(store: TaskTypeStore): TaskTypeStore {
+  return {
+    async list() {
+      const stored = await store.list();
+      const merged = withMissingDefaults(stored);
+      return merged === stored ? stored : store.replace(merged);
+    },
+    replace: (types) => store.replace(types),
+  };
+}
+
 function createDefaultTaskStore(): TaskTypeStore {
   if (process.env.DATABASE_URL || process.env.PGHOST) {
     const { createPgTaskStore } =
       require("./pg-store") as typeof import("./pg-store");
-    return createPgTaskStore();
+    return seedMissingDefaults(createPgTaskStore());
   }
-  return createFileTaskStore();
+  return seedMissingDefaults(createFileTaskStore());
 }
 
 let active: TaskTypeStore | null = null;

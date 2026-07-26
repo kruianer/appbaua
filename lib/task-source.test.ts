@@ -34,12 +34,19 @@ describe("sourceFor", () => {
     expect(sourceFor("ideen")).toEqual({ base: IDEA_DIR, kind: "idea" });
     expect(IDEA_DIR).toBe("delivery/idea");
   });
+
+  // req-014: Security is its own kind — no work-item folder, and a report only
+  // when there is a finding.
+  it("maps security to its own kind, without a work-item folder", () => {
+    expect(sourceFor("security")).toEqual({ base: null, kind: "security" });
+  });
 });
 
 describe("runsOncePerDay", () => {
-  it("is true for recurring and idea types, false for file-driven ones", () => {
+  it("is true for recurring, idea and security types, false for file-driven ones", () => {
     expect(runsOncePerDay(sourceFor("ideen"))).toBe(true);
     expect(runsOncePerDay(sourceFor("code-review"))).toBe(true);
+    expect(runsOncePerDay(sourceFor("security"))).toBe(true);
     expect(runsOncePerDay(sourceFor("bug"))).toBe(false);
     expect(runsOncePerDay(sourceFor("requirement"))).toBe(false);
   });

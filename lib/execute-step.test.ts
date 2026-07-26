@@ -8,6 +8,7 @@ const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbau
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
+const security = defaultTaskTypes().find((t) => t.id === "security")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
 
 /**
@@ -863,5 +864,245 @@ describe("executeStep — Ideen-Task (req-011)", () => {
     expect(d.kind).toBe("success");
     if (d.kind !== "success") return;
     expect(d.message).toContain("push failed: keine Rechte");
+  });
+});
+
+// req-014: the Security task. Once per repo and calendar day it checks the repo
+// against delivery/security.md, changes nothing, and files a report in
+// delivery/security/ — but only when it found something.
+describe("executeStep — Security-Task (req-014)", () => {
+  const FINDINGS = [
+    "## Zusammenfassung",
+    "",
+    "Zwei Abweichungen von den Vorgaben.",
+    "",
+    "### 1. Port 3000 von außen erreichbar (Schweregrad: hoch)",
+    "",
+    "Empfehlung: Firewall-Regel auf das WLAN begrenzen. Live verifiziert.",
+  ].join("\n");
+  const REPORT_FILE = "delivery/security/2026-07-24-security-appbaua-282a765.md";
+
+  /** A check that came back with findings. */
+  function found(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
+    return deps({
+      runClaude: vi.fn(async () => ({
+        ok: true,
+        summary: "2 Findings",
+        report: FINDINGS,
+      })),
+      ...over,
+    });
+  }
+
+  it("AC: a finding lands as a new file in delivery/security/ and is pushed on dev", async () => {
+    const writeRepoFile = writerFake();
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      found({ writeRepoFile, commitAndPush }),
+    );
+    expect(d.kind).toBe("success");
+    expect(writeRepoFile).toHaveBeenCalledTimes(1);
+    const [dir, rel, content] = writeRepoFile.mock.calls[0];
+    expect(dir).toBe("/work/appbaua");
+    expect(rel).toBe(REPORT_FILE);
+    expect(content).toContain(FINDINGS); // summary + findings verbatim
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: Security-Bericht abgelegt",
+      "tok",
+    );
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("auf dev gepusht");
+    expect(d.message).toContain(REPORT_FILE); // findable from the Verlauf
+  });
+
+  it("AC: the filename names type, date and repo", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(repo, security, [], found({ writeRepoFile }));
+    const rel = writeRepoFile.mock.calls[0][1];
+    expect(rel).toContain("security"); // Typ
+    expect(rel).toContain("2026-07-24"); // Datum
+    expect(rel).toContain("appbaua"); // Repo
+  });
+
+  it("AC: a second run on the same calendar day is skipped", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 20).toISOString(),
+        repo: "appbaua",
+        taskType: "Security",
+        status: "success",
+        message: "Security-Check ok",
+      },
+    ];
+    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const d = await executeStep(repo, security, ranToday, deps({ prepareRepo }));
+    expect(d.kind).toBe("skip");
+    expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
+  });
+
+  it("AC: no finding -> no report file, and the log says 'Security-Check ok'", async () => {
+    const writeRepoFile = writerFake();
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Security-Check ok",
+          report: "Security-Check ok",
+        })),
+        writeRepoFile,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe("Security-Check ok");
+    expect(writeRepoFile).not.toHaveBeenCalled();
+    expect(commitAndPush).not.toHaveBeenCalled();
+  });
+
+  it("AC: the security policy of the repo reaches the check", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "ok", report: "Security-Check ok" };
+    });
+    await executeStep(repo, security, [], deps({ runClaude }));
+    expect(seenPrompt).toContain("delivery/security.md");
+    expect(seenPrompt).toContain("Zugriff & Erreichbarkeit");
+    expect(seenPrompt).toContain("keine repo-spezifische Vorgabe vorlag");
+  });
+
+  it("changes no code: everything the run touched is dropped before the report", async () => {
+    const order: string[] = [];
+    await executeStep(
+      repo,
+      security,
+      [],
+      found({
+        discardChanges: vi.fn(async (_dir: string) => {
+          order.push("discard");
+        }),
+        writeRepoFile: vi.fn(async (_d: string, _r: string, _c: string) => {
+          order.push("write");
+        }),
+        commitAndPush: vi.fn(async () => {
+          order.push("push");
+          return { pushed: true, detail: "auf dev gepusht" };
+        }),
+      }),
+    );
+    expect(order).toEqual(["discard", "write", "push"]);
+  });
+
+  it("an empty-handed check still uses up the day", async () => {
+    const clean = await executeStep(repo, security, [], deps());
+    expect(clean.kind).toBe("success");
+    if (clean.kind !== "success") return;
+    const log: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: now.toISOString(),
+        endedAt: now.toISOString(),
+        repo: "appbaua",
+        taskType: "Security",
+        status: "success",
+        message: clean.message,
+      },
+    ];
+    expect((await executeStep(repo, security, log, deps())).kind).toBe("skip");
+  });
+
+  it("files nothing under delivery/reviews/ — Security has its own folder", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(repo, security, [], found({ writeRepoFile }));
+    expect(writeRepoFile.mock.calls[0][1]).not.toContain("delivery/reviews");
+  });
+
+  it("claims no .md — the Security task has no work-item queue", async () => {
+    const listReady = folders();
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    await executeStep(
+      repo,
+      security,
+      [],
+      found({ listReady, moveMd, setCurrentMd }),
+    );
+    expect(listReady).not.toHaveBeenCalled();
+    expect(moveMd).not.toHaveBeenCalled();
+    expect(setCurrentMd).not.toHaveBeenCalled();
+  });
+
+  it("a failed Claude run stays an error and files nothing", async () => {
+    const writeRepoFile = writerFake();
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "Timeout",
+          report: "",
+        })),
+        writeRepoFile,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Timeout");
+    expect(writeRepoFile).not.toHaveBeenCalled();
+    expect(commitAndPush).not.toHaveBeenCalled();
+  });
+
+  it("a failing write never turns a clean run into an error", async () => {
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      found({
+        writeRepoFile: vi.fn(async () => {
+          throw new Error("Platte voll");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).not.toContain("Bericht:");
+  });
+
+  it("the log keeps the short message, not the whole report", async () => {
+    const long = `${"x".repeat(5000)}\nFazit: 2 Findings.`;
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      found({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Fazit: 2 Findings.",
+          report: long,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).not.toContain(long);
+    expect(d.message.length).toBeLessThan(500);
   });
 });

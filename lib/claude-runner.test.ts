@@ -6,9 +6,11 @@ import {
   lastLines,
   recurringPrompt,
   runClaude,
+  securityPrompt,
   LIVE_TAIL_LINES,
   NO_IDEA_MESSAGE,
 } from "./claude-runner";
+import { SECURITY_OK_MESSAGE } from "./security-report";
 import type { run } from "./workspace";
 
 // Live output of a running Claude step (req-008): only the last ~50 lines, and
@@ -164,6 +166,47 @@ describe("ideaPrompt (req-011)", () => {
 
   it("asks for no report — the idea file IS the result", () => {
     expect(p).not.toContain("Bericht");
+  });
+});
+
+// req-014: the Security task asks for a report only when there IS something to
+// report — and it must not change the repo. Both, plus the four areas and the
+// shape of a finding, can only be stated here.
+describe("securityPrompt (req-014)", () => {
+  const p = securityPrompt({ policyFile: "delivery/security.md" });
+
+  it("AC: reads the repo's security policy as the target state", () => {
+    expect(p).toContain("delivery/security.md");
+    expect(p).toContain("SOLL");
+  });
+
+  it("AC: falls back to best practices and says so in the report", () => {
+    expect(p).toContain("Best-Practices");
+    expect(p).toContain("keine repo-spezifische Vorgabe vorlag");
+  });
+
+  it("AC: names all four areas that get checked", () => {
+    expect(p).toContain("Zugriff & Erreichbarkeit");
+    expect(p).toContain("Datenschutz & Datenhaltung");
+    expect(p).toContain("Backup & Wiederherstellung");
+    expect(p).toContain("Abhängigkeiten & bekannte Lücken");
+  });
+
+  it("AC: asks for a summary, a severity, a recommendation and live-vs-derived", () => {
+    expect(p).toContain("Kurz-Zusammenfassung");
+    expect(p).toContain("hoch/mittel/niedrig");
+    expect(p).toContain("Empfehlung");
+    expect(p).toContain("live verifiziert");
+  });
+
+  it("AC: no finding -> no report, fixed answer", () => {
+    expect(p).toContain("KEINEN Bericht");
+    expect(p).toContain(SECURITY_OK_MESSAGE);
+  });
+
+  it("changes nothing and leaves committing to the worker", () => {
+    expect(p).toContain("Ändere NICHTS im Repo");
+    expect(p).toContain("Committe/pushe NICHT selbst.");
   });
 });
 

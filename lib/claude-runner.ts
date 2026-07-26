@@ -1,5 +1,6 @@
 import { run, type RunResult } from "./workspace";
 import { describeEvent, finalResultText } from "./claude-events";
+import { SECURITY_OK_MESSAGE } from "./security-report";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
 // CLI runs non-interactively with permissions skipped so it never asks. Auth is
@@ -149,6 +150,43 @@ export function ideaPrompt(paths: {
     `"${NO_IDEA_MESSAGE}".`,
     `Ändere sonst nichts im Repo — kein Code, keine anderen Dateien.`,
     `Committe/pushe NICHT selbst. Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
+ * The prompt for the Security task (req-014). Like a recurring task it answers
+ * with a report — but only when it actually found something, because a run
+ * without findings files no file at all. The four areas, the severity, the
+ * recommendation and the live-vs-derived marking are pinned here, because this
+ * prompt is the only place that can ask for them.
+ */
+export function securityPrompt(paths: { policyFile: string }): string {
+  return [
+    `Führe einen Sicherheits-Check für dieses Repo durch, autonom und ohne Rückfragen.`,
+    `Lies zuerst — falls vorhanden — die Sicherheits-Vorgaben ${paths.policyFile}`,
+    `(Erreichbarkeit, HTTPS-Pflicht, Zugriffskreis, Backup-Erwartung, Datenschutz)`,
+    `sowie die CLAUDE.md dieses Repos. Sie sind das SOLL, gegen das du das IST prüfst.`,
+    `Fehlt ${paths.policyFile}, prüfe nach allgemeinen Sicherheits-Best-Practices und`,
+    `vermerke im Bericht ausdrücklich, dass keine repo-spezifische Vorgabe vorlag.`,
+    `Prüfe diese vier Bereiche, so tief dein Zugriff reicht`,
+    `(Requirements/Code/Config immer; Infrastruktur/SSH nur, wo Zugang hinterlegt ist):`,
+    `1. Zugriff & Erreichbarkeit (passt die tatsächliche Erreichbarkeit zur Vorgabe:`,
+    `nur WLAN vs. von außen, HTTPS erzwungen, Auth/Login vorhanden, wer darf zugreifen),`,
+    `2. Datenschutz & Datenhaltung (Secrets/Passwörter/Tokens im Repo, Umgang mit`,
+    `personenbezogenen/sensiblen Daten),`,
+    `3. Backup & Wiederherstellung (Abgleich mit der Backup-Erwartung),`,
+    `4. Abhängigkeiten & bekannte Lücken (veraltete/verwundbare Dependencies,`,
+    `unsichere Default-Konfiguration).`,
+    `Ändere NICHTS im Repo — kein Code, keine Config, keine Dateien; dies ist eine`,
+    `reine Prüfung. Committe/pushe NICHT selbst.`,
+    `Hast du mindestens ein Finding, gib deinen vollständigen Bericht als finale`,
+    `Antwort in Markdown aus — er wird als Datei im Repo abgelegt. Der Bericht`,
+    `beginnt mit einer Kurz-Zusammenfassung; danach folgt jedes Finding mit`,
+    `Schweregrad (hoch/mittel/niedrig), einer konkreten Empfehlung und der Angabe,`,
+    `ob es live verifiziert oder nur aus Code/Config erschlossen wurde.`,
+    `Findest du keine Auffälligkeit, gib KEINEN Bericht aus und antworte genau`,
+    `"${SECURITY_OK_MESSAGE}".`,
+    `Arbeite vollständig autonom; frage nichts.`,
   ].join(" ");
 }
 

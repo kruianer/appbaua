@@ -9,14 +9,16 @@ import {
   prefillDay,
   runsAlways,
   toMinutes,
+  withMissingDefaults,
 } from "./task-types";
 
 describe("defaultTaskTypes", () => {
-  it("are the five vision types in order P1–P5", () => {
+  it("are the vision types in order P1–P5, Security next to Code-Review", () => {
     expect(defaultTaskTypes().map((t) => t.label)).toEqual([
       "Bugs",
       "Requirements",
       "Code-Review",
+      "Security",
       "Doku",
       "Ideen",
     ]);
@@ -28,8 +30,72 @@ describe("defaultTaskTypes", () => {
       expect(Object.values(t.schedule).every((d) => !d.enabled)).toBe(true);
     }
   });
-  it("has exactly five predefined types", () => {
-    expect(DEFAULT_TASK_TYPES).toHaveLength(5);
+  it("has exactly six predefined types", () => {
+    expect(DEFAULT_TASK_TYPES).toHaveLength(6);
+  });
+});
+
+// req-014: Security was added after the stores had already been seeded, so a
+// list that lacks a predefined type has to grow it back — without touching the
+// user's order, activation or schedules.
+describe("withMissingDefaults", () => {
+  const stored = () =>
+    defaultTaskTypes().filter((t) => t.id !== "security");
+
+  it("adds a missing predefined type", () => {
+    expect(withMissingDefaults(stored()).map((t) => t.id)).toContain("security");
+  });
+
+  it("puts it at its place in the default order (after Code-Review)", () => {
+    const ids = withMissingDefaults(stored()).map((t) => t.id);
+    expect(ids).toEqual([
+      "bug",
+      "requirement",
+      "code-review",
+      "security",
+      "doku",
+      "ideen",
+    ]);
+  });
+
+  it("keeps the user's own order, activation and schedule", () => {
+    const custom = stored().map((t) =>
+      t.id === "doku" ? { ...t, active: false, always: false } : t,
+    );
+    // the user dragged Ideen to the top
+    const next = withMissingDefaults([
+      custom.find((t) => t.id === "ideen")!,
+      ...custom.filter((t) => t.id !== "ideen"),
+    ]);
+    // Ideen stays where the user dragged it; the new type follows Code-Review.
+    expect(next.map((t) => t.id)).toEqual([
+      "ideen",
+      "bug",
+      "requirement",
+      "code-review",
+      "security",
+      "doku",
+    ]);
+    expect(next.find((t) => t.id === "doku")!.active).toBe(false);
+    expect(next.find((t) => t.id === "doku")!.always).toBe(false);
+  });
+
+  it("a missing type without a predecessor lands before its successor, not last", () => {
+    const only = defaultTaskTypes().filter((t) => t.id === "ideen");
+    // Bugs are P1: re-adding them at the end would silently demote them.
+    expect(withMissingDefaults(only).map((t) => t.id)).toEqual([
+      "bug",
+      "requirement",
+      "code-review",
+      "security",
+      "doku",
+      "ideen",
+    ]);
+  });
+
+  it("returns the same list unchanged when nothing is missing", () => {
+    const all = defaultTaskTypes();
+    expect(withMissingDefaults(all)).toBe(all);
   });
 });
 

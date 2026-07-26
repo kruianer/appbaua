@@ -27,6 +27,18 @@ Richtung dafür steht — falls vorhanden — in
 [delivery/idea-direction.md](delivery/idea-direction.md) und wird vom
 Nutzer gepflegt. Ohne diese Datei schlägt der Worker frei vor.
 
+## Security
+
+Der Worker prüft dieses Repo höchstens einmal pro Tag auf Sicherheit
+(Task-Typ "Security", req-014): Zugriff & Erreichbarkeit, Datenschutz &
+Datenhaltung, Backup & Wiederherstellung, Abhängigkeiten & bekannte
+Lücken. Das SOLL dafür steht — falls vorhanden — in
+[delivery/security.md](delivery/security.md) (angelegt über den Skill
+`setup-security`); ohne diese Datei prüft er nach allgemeinen
+Best-Practices. Findet er etwas, legt er einen Bericht in
+`delivery/security/` ab; findet er nichts, entsteht keine Datei. Der
+Task ändert keinen Code.
+
 ## Areas
 
 Geschäftsfunktions-Bereiche der App, zur Einordnung von Requirements.

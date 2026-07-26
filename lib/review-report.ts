@@ -69,9 +69,13 @@ export function reportFileName(ref: ReportRef): string {
   return `${parts.join("-")}.md`;
 }
 
-/** Repo-relative path the report is written to. */
-export function reportPath(ref: ReportRef): string {
-  return `${REPORT_DIR}/${reportFileName(ref)}`;
+/**
+ * Repo-relative path the report is written to. The folder is a parameter
+ * because not every report is a review: the Security task files into its own
+ * folder (req-014) with the same naming rules.
+ */
+export function reportPath(ref: ReportRef, dir: string = REPORT_DIR): string {
+  return `${dir}/${reportFileName(ref)}`;
 }
 
 /**

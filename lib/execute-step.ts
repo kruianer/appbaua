@@ -28,8 +28,15 @@ import {
   ideaPrompt,
   recurringPrompt,
   runClaude,
+  securityPrompt,
 } from "./claude-runner";
-import { reportContent, reportPath } from "./review-report";
+import { REPORT_DIR, reportContent, reportPath } from "./review-report";
+import {
+  SECURITY_OK_MESSAGE,
+  SECURITY_POLICY_FILE,
+  SECURITY_REPORT_DIR,
+  hasSecurityFindings,
+} from "./security-report";
 import { setCurrentMd, setCurrentOutput } from "./worker-status";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
@@ -54,6 +61,11 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // exactly one new idea as a file in delivery/idea/. Whether that happened is
 // decided by comparing the folder before and after the run, not by reading
 // Claude's answer — so "keine neue Idee gefunden" is a fact, not a phrasing.
+//
+// req-014 adds the Security task: once per repo and calendar day, Claude checks
+// the repo against delivery/security.md. It changes no code — whatever the run
+// touched is discarded — and it files a report in delivery/security/ only when
+// it found something; a clean check leaves nothing behind but a log line.
 
 export type StepDecision =
   | { kind: "skip" }
@@ -163,6 +175,8 @@ export async function executeStep(
       doneDir: doneDir(src.base),
       directionFile: IDEA_DIRECTION_FILE,
     });
+  } else if (src.kind === "security") {
+    prompt = securityPrompt({ policyFile: SECURITY_POLICY_FILE });
   } else {
     prompt = recurringPrompt(taskType.label);
   }
@@ -210,6 +224,35 @@ export async function executeStep(
     return {
       kind: "success",
       message: `Neue Idee: ${created.join(", ")} — ${push.detail}`,
+    };
+  }
+
+  // The Security task checks, it does not change (req-014). Whatever the run
+  // touched along the way is dropped first, so the only thing that can reach
+  // dev is the report written right after — and a check without findings files
+  // nothing at all.
+  if (src.kind === "security") {
+    await d.discardChanges(dir).catch(() => {});
+    if (!hasSecurityFindings(outcome.report)) {
+      return { kind: "success", message: SECURITY_OK_MESSAGE };
+    }
+    const rel = await fileReport(
+      d,
+      dir,
+      repo,
+      taskType,
+      outcome.report,
+      SECURITY_REPORT_DIR,
+    );
+    const push = await d.commitAndPush(
+      dir,
+      `worker: ${taskType.label}-Bericht abgelegt`,
+      token,
+    );
+    const where = rel ? ` (Bericht: ${rel})` : "";
+    return {
+      kind: "success",
+      message: `${outcome.summary} — ${push.detail}${where}`,
     };
   }
 
@@ -287,10 +330,12 @@ async function parkFailed(
 }
 
 /**
- * Write Claude's full report into delivery/reviews/ of the working copy and
- * return its repo-relative path (req-010). Best effort: a report that cannot be
- * written must not turn a successful review into a failed step — the analysis
- * itself did happen, and the log message then simply names no file.
+ * Write Claude's full report into `folder` of the working copy — delivery/
+ * reviews/ for a recurring analysis (req-010), delivery/security/ for the
+ * Security task (req-014) — and return its repo-relative path. Best effort: a
+ * report that cannot be written must not turn a successful review into a failed
+ * step — the analysis itself did happen, and the log message then simply names
+ * no file.
  */
 async function fileReport(
   d: ExecuteDeps,
@@ -298,6 +343,7 @@ async function fileReport(
   repo: Repo,
   taskType: TaskType,
   report: string,
+  folder: string = REPORT_DIR,
 ): Promise<string | null> {
   try {
     const ref = {
@@ -306,7 +352,7 @@ async function fileReport(
       commit: await d.headCommit(dir),
       now: d.now(),
     };
-    const rel = reportPath(ref);
+    const rel = reportPath(ref, folder);
     await d.writeRepoFile(
       dir,
       rel,

@@ -44,11 +44,16 @@ export type TaskType = {
   schedule: Schedule;
 };
 
-/** The five predefined types in the vision order P1–P5. */
+/**
+ * The predefined types in the vision order P1–P5. Security sits next to
+ * Code-Review, because the vision puts "Code-Review & Security-Review" on the
+ * same priority P3 (req-014).
+ */
 export const DEFAULT_TASK_TYPES: { id: string; label: string }[] = [
   { id: "bug", label: "Bugs" },
   { id: "requirement", label: "Requirements" },
   { id: "code-review", label: "Code-Review" },
+  { id: "security", label: "Security" },
   { id: "doku", label: "Doku" },
   { id: "ideen", label: "Ideen" },
 ];
@@ -60,14 +65,59 @@ export function emptySchedule(): Schedule {
   }, {} as Schedule);
 }
 
-export function defaultTaskTypes(): TaskType[] {
-  return DEFAULT_TASK_TYPES.map((t) => ({
+function freshTaskType(t: { id: string; label: string }): TaskType {
+  return {
     id: t.id,
     label: t.label,
     active: true,
     always: true, // default: runs anytime until the user restricts it
     schedule: emptySchedule(),
-  }));
+  };
+}
+
+export function defaultTaskTypes(): TaskType[] {
+  return DEFAULT_TASK_TYPES.map(freshTaskType);
+}
+
+/**
+ * Where a missing predefined type goes in a list the user has reordered: right
+ * after the nearest default predecessor that is still there, else right before
+ * the nearest default successor (so a high-priority type does not land last),
+ * else at the end.
+ */
+function insertionIndex(list: TaskType[], defIndex: number): number {
+  for (let i = defIndex - 1; i >= 0; i--) {
+    const pos = list.findIndex((t) => t.id === DEFAULT_TASK_TYPES[i].id);
+    if (pos >= 0) return pos + 1;
+  }
+  for (let i = defIndex + 1; i < DEFAULT_TASK_TYPES.length; i++) {
+    const pos = list.findIndex((t) => t.id === DEFAULT_TASK_TYPES[i].id);
+    if (pos >= 0) return pos;
+  }
+  return list.length;
+}
+
+/**
+ * Add predefined types the stored list does not have yet, each at its place in
+ * the default order, and leave everything else — order, active, schedules —
+ * untouched.
+ *
+ * Why: the store seeds the defaults only when it is EMPTY, so a type added
+ * later (Security, req-014) would never show up in an installation that was
+ * seeded before. Returns the same array instance when nothing was missing, so
+ * callers can tell "unchanged" without comparing.
+ */
+export function withMissingDefaults(stored: TaskType[]): TaskType[] {
+  const known = new Set(stored.map((t) => t.id));
+  const missing = DEFAULT_TASK_TYPES.filter((t) => !known.has(t.id));
+  if (missing.length === 0) return stored;
+
+  const next = [...stored];
+  for (const def of missing) {
+    const defIndex = DEFAULT_TASK_TYPES.findIndex((t) => t.id === def.id);
+    next.splice(insertionIndex(next, defIndex), 0, freshTaskType(def));
+  }
+  return next;
 }
 
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
