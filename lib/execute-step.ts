@@ -33,7 +33,15 @@ import {
   recurringPrompt,
   runClaude,
   securityPrompt,
+  testFixPrompt,
 } from "./claude-runner";
+import {
+  GATE_RED_MESSAGE,
+  STACK_FILE,
+  runTestGate,
+  testGateNote,
+  type TestGateResult,
+} from "./test-gate";
 import { REPORT_DIR, reportContent, reportPath } from "./review-report";
 import {
   DOC_SITE_FILE,
@@ -100,6 +108,11 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // req-015 carries the .md name out to the caller, so the run log can store it
 // on the entry and the Verlauf can name the file a run worked off — the same
 // information the Aktivität tab shows while the step is still running.
+//
+// req-019 puts a gate in front of done/: a file-driven .md is only filed as
+// finished after the repo's full test suite has actually run and come back
+// green. A red suite gets one repair attempt in the same run; what stays red is
+// not finished, so its .md is parked under failed/ like any other failure.
 
 export type StepDecision =
   | { kind: "skip" }
@@ -125,6 +138,8 @@ export type ExecuteDeps = {
   repoPathExists: typeof repoPathExists;
   /** Photograph the app's dev environment into the docs folder (req-017). */
   captureScreenshots: (dir: string, baseUrl: string | null) => Promise<ShotResult>;
+  /** Run the target repo's full test suite before anything is called done (req-019). */
+  runTestGate: (dir: string, stack: string | null) => Promise<TestGateResult>;
   /** Publish the .md this step works on (req-008). */
   setCurrentMd: typeof setCurrentMd;
   /** Publish the live Claude output tail of this step (req-008). */
@@ -145,6 +160,7 @@ const defaultDeps = (): ExecuteDeps => ({
   readRepoFile,
   repoPathExists,
   captureScreenshots: (dir, baseUrl) => captureDocScreenshots(dir, baseUrl),
+  runTestGate: (dir, stack) => runTestGate(dir, stack),
   setCurrentMd,
   setCurrentOutput,
   now: () => new Date(),
@@ -280,17 +296,22 @@ export async function executeStep(
 
   // Live output: the tail arrives while Claude runs, so the status writes are
   // queued instead of awaited (a slow write must not stall the process). The
-  // queue is drained before the step ends, so nothing is still in flight when
-  // the loop clears the running status.
+  // queue is drained before each run returns, so nothing is still in flight when
+  // the loop clears the running status. Wrapped in one helper because a step can
+  // start Claude twice: once for the work, once to repair a red suite (req-019).
   let outputWrites: Promise<void> = Promise.resolve();
-  const outcome = await d.runClaude(dir, prompt, {
-    onOutput: (tail) => {
-      outputWrites = outputWrites
-        .then(() => d.setCurrentOutput(tail))
-        .catch(() => {});
-    },
-  });
-  await outputWrites;
+  const claude = async (text: string) => {
+    const res = await d.runClaude(dir, text, {
+      onOutput: (tail) => {
+        outputWrites = outputWrites
+          .then(() => d.setCurrentOutput(tail))
+          .catch(() => {});
+      },
+    });
+    await outputWrites;
+    return res;
+  };
+  const outcome = await claude(prompt);
 
   if (!outcome.ok) {
     // Park the .md under failed/ and push that move (file-driven only), so the
@@ -385,6 +406,39 @@ export async function executeStep(
     };
   }
 
+  // The test gate (req-019). A file-driven requirement is finished when the
+  // repo's FULL test suite is green — never because the change looked like pure
+  // text or documentation, because that judgement is exactly what let a red
+  // suite into done/ last time. So the gate sits here, in front of the move to
+  // done/ and in front of the commit, and it runs for every file-driven step.
+  //
+  // Red gets one repair attempt in the same run. What is still red afterwards is
+  // NOT finished: its .md is parked under failed/ (same mechanics as a failed
+  // Claude run, bug-002) and the Verlauf carries the cause.
+  let gateNote = "";
+  if (src.kind === "file" && src.base && mdRel && mdName) {
+    const stack = await d.readRepoFile(dir, STACK_FILE).catch(() => null);
+    let gate = await testGate(d, dir, stack);
+    if (gate.status === "red") {
+      const fix = await claude(testFixPrompt(mdRel, gate.reason));
+      gate = fix.ok
+        ? await testGate(d, dir, stack)
+        : {
+            ...gate,
+            reason: `${gate.reason} — Reparaturversuch fehlgeschlagen: ${fix.summary}`,
+          };
+    }
+    if (gate.status === "red") {
+      const parked = await parkFailed(d, dir, src.base, mdName, token);
+      return {
+        kind: "error",
+        message: `${GATE_RED_MESSAGE}: ${gate.reason}${parked}`,
+        md: runMd(),
+      };
+    }
+    gateNote = testGateNote(gate);
+  }
+
   // Success: for file-driven, move in-progress -> done before committing.
   if (src.base && mdRel && mdName) {
     try {
@@ -411,9 +465,28 @@ export async function executeStep(
   const note = reportRel ? ` (Bericht: ${reportRel})` : "";
   return {
     kind: "success",
-    message: `${outcome.summary} — ${push.detail}${note}`,
+    message: `${outcome.summary} — ${push.detail}${gateNote}${note}`,
     md: runMd(),
   };
+}
+
+/**
+ * The test gate as the step sees it (req-019): the dep's answer, or a red gate
+ * when asking itself blew up. "We could not check" must never end up reading
+ * like "it passed" — that is the whole point of the gate.
+ */
+async function testGate(
+  d: ExecuteDeps,
+  dir: string,
+  stack: string | null,
+): Promise<TestGateResult> {
+  return d.runTestGate(dir, stack).catch(
+    (err: unknown): TestGateResult => ({
+      status: "red",
+      command: null,
+      reason: `Test-Lauf abgebrochen: ${String(err)}`,
+    }),
+  );
 }
 
 /**

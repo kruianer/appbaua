@@ -18,6 +18,13 @@ import {
   type ShotResult,
 } from "./doc-screenshots";
 import { NO_CHANGES_DETAIL } from "./workspace";
+import {
+  GATE_GREEN_MESSAGE,
+  GATE_RED_MESSAGE,
+  NO_TEST_COMMAND_MESSAGE,
+  STACK_FILE,
+  type TestGateResult,
+} from "./test-gate";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
@@ -59,6 +66,20 @@ const DEVOPS_MD = [
  */
 const noShots = (): ShotResult => ({ shot: [], missing: [] });
 
+/** Default for the test-gate dep (req-019): the suite ran and passed. */
+const green = (): TestGateResult => ({
+  status: "green",
+  command: "npm test",
+  reason: "",
+});
+
+/** A gate that came back red, with the cause the Verlauf has to carry. */
+const red = (reason: string): TestGateResult => ({
+  status: "red",
+  command: "npm test",
+  reason,
+});
+
 /**
  * Folder-aware fake for listReady: a step looks into in-progress/ (leftovers of
  * a crashed run, req-008) and ready/ (the actual work), so the fake has to tell
@@ -96,6 +117,9 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
     }),
     repoPathExists: vi.fn(async (_dir: string, _rel: string) => true),
     captureScreenshots: vi.fn(async (_dir: string, _url: string | null) => noShots()),
+    // Green by default (req-019), so every test that predates the gate keeps
+    // asserting what it always asserted. The req-019 tests say what they want.
+    runTestGate: vi.fn(async (_dir: string, _stack: string | null) => green()),
     setCurrentMd: vi.fn(async (_md: string | null) => {}),
     setCurrentOutput: vi.fn(async (_text: string | null) => {}),
     ...over,
@@ -1753,5 +1777,290 @@ describe("executeStep — Doku-Screenshots (req-017)", () => {
       }),
     );
     expect(captureScreenshots).not.toHaveBeenCalled();
+  });
+});
+
+// req-019: nothing reaches done/ on a red suite. A file-driven .md is only
+// filed as finished after the repo's FULL test suite has run and come back
+// green — one repair attempt in the same run, and what stays red goes to
+// failed/ with its cause in the Verlauf.
+describe("executeStep — Test-Gate vor done/ (req-019)", () => {
+  /** The one .md this repo has waiting. */
+  const ready = () => folders({ ready: ["req-001.md"] });
+  const DONE = "delivery/bugs/done/req-001.md";
+  const FAILED = "delivery/bugs/failed/req-001.md";
+
+  /** A gate that is red on the first ask and green on every one after it. */
+  function redThenGreen() {
+    let asked = 0;
+    return vi.fn(async (_dir: string, _stack: string | null) => {
+      asked += 1;
+      return asked === 1 ? red("npm test: FAIL lib/foo.test.ts") : green();
+    });
+  }
+
+  it("AC: green suite -> the .md lands in done/", async () => {
+    const moveMd = vi.fn(async () => {});
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), moveMd, runTestGate }),
+    );
+    expect(d.kind).toBe("success");
+    expect(runTestGate).toHaveBeenCalledTimes(1);
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+  });
+
+  it("AC: red, then repaired in the same run -> the .md still lands in done/", async () => {
+    const moveMd = vi.fn(async () => {});
+    const runTestGate = redThenGreen();
+    const prompts: string[] = [];
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      prompts.push(prompt);
+      return { ok: true, summary: "erledigt", report: "" };
+    });
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), moveMd, runTestGate, runClaude }),
+    );
+    expect(d.kind).toBe("success");
+    expect(runTestGate).toHaveBeenCalledTimes(2); // checked again after the repair
+    expect(prompts).toHaveLength(2); // work run + repair run
+    expect(prompts[1]).toContain("FAIL lib/foo.test.ts"); // the cause reaches Claude
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+  });
+
+  it("AC: still red after the repair -> failed/, NOT done/, and the Verlauf names the cause", async () => {
+    const moveMd = vi.fn(async (_dir: string, _from: string, _to: string) => {});
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: vi.fn(async () => red("npm test: FAIL lib/foo.test.ts > kaputt")),
+        moveMd,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain(GATE_RED_MESSAGE);
+    expect(d.message).toContain("FAIL lib/foo.test.ts > kaputt");
+    expect(d.message).toContain("req-001.md nach failed/ verschoben");
+    expect(d.md).toBe("req-001.md");
+    // parked exactly like a failed Claude run (bug-002): out of ready/, so the
+    // commit carries both halves of the move
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/req-001.md",
+      FAILED,
+    );
+    expect(moveMd.mock.calls.map((c) => c[2])).not.toContain(DONE);
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md fehlgeschlagen",
+      "tok",
+    );
+  });
+
+  it("AC: the gate runs before anything is moved to done/ or committed", async () => {
+    // A gate after the commit would report on a state that is already on dev.
+    const order: string[] = [];
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: vi.fn(async () => {
+          order.push("gate");
+          return green();
+        }),
+        moveMd: vi.fn(async (_dir: string, _from: string, to: string) => {
+          if (to === DONE) order.push("done");
+        }),
+        commitAndPush: vi.fn(async () => {
+          order.push("push");
+          return { pushed: true, detail: "auf dev gepusht" };
+        }),
+      }),
+    );
+    expect(order).toEqual(["gate", "done", "push"]);
+  });
+
+  it("AC: no exception for a change the run considers pure text or docs", async () => {
+    // Nothing in the step may look at WHAT was changed — the gate is
+    // unconditional for every file-driven run.
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate,
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "nur ein Tippfehler in der README, keine Tests nötig",
+          report: "",
+        })),
+      }),
+    );
+    expect(runTestGate).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC: a missing runtime dependency has to reach the package.json, not just this container", async () => {
+    // The repair prompt is the only place that can rule out "installed here, so
+    // it is green here" — the gate itself only sees red.
+    const prompts: string[] = [];
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      prompts.push(prompt);
+      return { ok: true, summary: "erledigt", report: "" };
+    });
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: redThenGreen(),
+        runClaude,
+      }),
+    );
+    expect(prompts[1]).toContain("package.json");
+    expect(prompts[1]).toContain("frischer Checkout");
+    expect(prompts[1]).toContain("Lockfile");
+    expect(prompts[1]).toContain("KEINEN Test"); // no green by deleting tests
+  });
+
+  it("the test command is looked up in the repo's own delivery/stack.md", async () => {
+    const STACK = "## Commands\n\n- Test: `npm test`";
+    const readRepoFile = vi.fn(async (_dir: string, rel: string) =>
+      rel === STACK_FILE ? STACK : null,
+    );
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), readRepoFile, runTestGate }),
+    );
+    expect(runTestGate).toHaveBeenCalledWith("/work/appbaua", STACK);
+  });
+
+  it("a repair run that itself fails leaves the gate red", async () => {
+    const runTestGate = vi.fn(async () => red("npm test: FAIL"));
+    let call = 0;
+    const runClaude = vi.fn(async () => {
+      call += 1;
+      return call === 1
+        ? { ok: true, summary: "erledigt", report: "" }
+        : { ok: false, summary: "Timeout", report: "" };
+    });
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), runTestGate, runClaude }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Reparaturversuch fehlgeschlagen");
+    expect(d.message).toContain("Timeout");
+    expect(runTestGate).toHaveBeenCalledTimes(1); // no second check to be had
+  });
+
+  it("a gate that crashes is red, not green", async () => {
+    // "Could not check" must never pass for "checked and fine".
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: vi.fn(async () => {
+          throw new Error("npm weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Test-Lauf abgebrochen");
+    expect(d.message).toContain("npm weg");
+  });
+
+  it("a repo that declares no test command still finishes, and the Verlauf says so", async () => {
+    const moveMd = vi.fn(async () => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        moveMd,
+        runTestGate: vi.fn(async () => ({
+          status: "no-command" as const,
+          command: null,
+          reason: NO_TEST_COMMAND_MESSAGE,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(NO_TEST_COMMAND_MESSAGE);
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+  });
+
+  it("a green gate is visible in the Verlauf", async () => {
+    const d = await executeStep(repo, bug, [], deps({ listReady: ready() }));
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(GATE_GREEN_MESSAGE);
+    expect(d.message).toContain("npm test");
+  });
+
+  it("a failed Claude run is parked without ever asking the gate", async () => {
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate,
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(runTestGate).not.toHaveBeenCalled();
+  });
+
+  it("the recurring types keep their behaviour — no gate, no done/ (out of scope)", async () => {
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    for (const type of [review, ideen, security, doku]) {
+      await executeStep(repo, type, [], deps({ runTestGate }));
+    }
+    expect(runTestGate).not.toHaveBeenCalled();
   });
 });
