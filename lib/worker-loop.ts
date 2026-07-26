@@ -78,6 +78,7 @@ export async function runOnce(
       taskType: null,
       status: "idle",
       message: "nichts zu tun gefunden",
+      md: null, // no step ran, so there is no file to name (req-015)
     });
     return 0;
   }
@@ -134,6 +135,8 @@ export async function runOnce(
       // Last stop before the message becomes a durable, UI-visible log row: no
       // credential gets past here, whichever tool put one into it (bug-003).
       message: redact(decision.message),
+      // The .md the step worked off, so the Verlauf can name it (req-015).
+      md: decision.md ?? null,
     });
     // Only success is progress. Counting errors here would keep the loop from
     // ever pausing while a step fails on every single pass (bug-002).

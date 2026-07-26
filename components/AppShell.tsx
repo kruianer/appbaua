@@ -247,8 +247,11 @@ export function AppShell({
 
   return (
     <div style={appStyle}>
-      {/* App bar */}
+      {/* App bar — its accent tint lives in nocturne.css (.app-bar), the app's
+          source of truth for the look (req-015). */}
       <div
+        className="app-bar"
+        data-app-bar
         style={{
           flexShrink: 0,
           padding: "12px 16px 6px",
@@ -266,22 +269,17 @@ export function AppShell({
             minWidth: 0,
           }}
         >
+          {/* Free-standing line logo — no tile, no box (req-015). */}
           <div
+            data-logo
             style={{
-              width: 36,
-              height: 36,
               flex: "none",
-              borderRadius: 11,
               display: "grid",
               placeItems: "center",
-              color: "#fff",
-              background:
-                "linear-gradient(140deg, var(--color-accent-400), var(--color-accent-700))",
-              boxShadow:
-                "0 4px 14px color-mix(in srgb, var(--color-accent) 45%, transparent), inset 0 1px 0 color-mix(in srgb, #fff 30%, transparent)",
+              color: "var(--color-accent)",
             }}
           >
-            <Icon name="brand" size={20} />
+            <Icon name="brand" size={30} sw={1.6} />
           </div>
           <div
             style={{

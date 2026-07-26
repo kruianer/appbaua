@@ -49,10 +49,17 @@ CREATE TABLE IF NOT EXISTS run_log (
   repo       TEXT,
   task_type  TEXT,
   status     TEXT NOT NULL,
-  message    TEXT NOT NULL DEFAULT ''
+  message    TEXT NOT NULL DEFAULT '',
+  md         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS run_log_started_idx ON run_log (started_at DESC);
+
+-- Added with req-015; keep existing deployments in step. md: the .md the run
+-- worked off, '' for a recurring type that has none. NULL means the name was
+-- never recorded (rows from before req-015) — the Verlauf then shows no second
+-- line rather than a made-up placeholder, so this column has no DEFAULT.
+ALTER TABLE run_log ADD COLUMN IF NOT EXISTS md TEXT;
 
 -- Live worker status (req-005). Single row keyed "worker". Holds the currently
 -- running step (repo/task_type/started_at) while it runs, and pause_until while

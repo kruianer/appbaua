@@ -1,8 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
-import { executeStep, type ExecuteDeps } from "./execute-step";
+import {
+  executeStep,
+  type ExecuteDeps,
+  type StepDecision,
+} from "./execute-step";
 import { defaultTaskTypes } from "./task-types";
 import type { Repo } from "./repos";
-import type { RunLogEntry } from "./run-log";
+import { type RunLogEntry, RECURRING_MD } from "./run-log";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
@@ -127,6 +131,68 @@ describe("executeStep (req-006)", () => {
     const d = await executeStep(repo, review, [], deps({ runClaude }));
     expect(d.kind).toBe("success");
     expect(runClaude).toHaveBeenCalled();
+  });
+});
+
+// req-015: the decision carries the .md out, so the loop can put it on the log
+// entry and the Verlauf can name the file the run worked off.
+describe("executeStep — .md für den Verlauf (req-015)", () => {
+  /** The md of a decision that is not a skip. */
+  const mdOf = (d: StepDecision) => (d.kind === "skip" ? undefined : d.md);
+
+  it("AC: a file-driven step names the .md it worked off", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: folders({ ready: ["bug-002.md", "bug-001.md"] }) }),
+    );
+    expect(d.kind).toBe("success");
+    expect(mdOf(d)).toBe("bug-001.md"); // the oldest one, the one it claimed
+  });
+
+  it("AC: a recurring step reports that it has no .md", async () => {
+    const d = await executeStep(repo, review, [], deps());
+    expect(d.kind).toBe("success");
+    expect(mdOf(d)).toBe(RECURRING_MD);
+  });
+
+  it("the Ideen and the Security task report it the same way", async () => {
+    const idea = await executeStep(repo, ideen, [], deps());
+    expect(mdOf(idea)).toBe(RECURRING_MD);
+
+    const sec = await executeStep(repo, security, [], deps());
+    expect(mdOf(sec)).toBe(RECURRING_MD);
+  });
+
+  it("a failed run still names the .md it tried", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(mdOf(d)).toBe("bug-001.md");
+  });
+
+  it("a file-driven step that broke off before claiming names no file", async () => {
+    // Nothing was worked on, so the Verlauf must not claim otherwise.
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: vi.fn(async () => {
+          throw new Error("Repo weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(mdOf(d)).toBeNull();
   });
 });
 

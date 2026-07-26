@@ -1,6 +1,6 @@
 import type { Repo } from "./repos";
 import type { TaskType } from "./task-types";
-import type { RunLogEntry } from "./run-log";
+import { type RunLogEntry, RECURRING_MD } from "./run-log";
 import {
   IDEA_DIRECTION_FILE,
   doneDir,
@@ -66,11 +66,16 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // the repo against delivery/security.md. It changes no code — whatever the run
 // touched is discarded — and it files a report in delivery/security/ only when
 // it found something; a clean check leaves nothing behind but a log line.
+//
+// req-015 carries the .md name out to the caller, so the run log can store it
+// on the entry and the Verlauf can name the file a run worked off — the same
+// information the Aktivität tab shows while the step is still running.
 
 export type StepDecision =
   | { kind: "skip" }
-  | { kind: "success"; message: string }
-  | { kind: "error"; message: string };
+  /** `md`: the .md worked off, RECURRING_MD when the type has none (req-015). */
+  | { kind: "success"; message: string; md?: string | null }
+  | { kind: "error"; message: string; md?: string | null };
 
 export type ExecuteDeps = {
   prepareRepo: typeof prepareRepo;
@@ -116,8 +121,25 @@ export async function executeStep(
   const d: ExecuteDeps = { ...defaultDeps(), ...deps };
   const src = sourceFor(taskType.id);
 
+  // The work item, claimed further below. Declared up here so every decision
+  // can report it (req-015) — including the ones taken before a claim happens.
+  let mdName: string | null = null;
+  let mdRel: string | null = null;
+  /**
+   * What this run should be filed under in the Verlauf (req-015): the claimed
+   * .md for a file-driven type, the recurring marker for every other type, and
+   * null while a file-driven step has not claimed anything yet — an aborted
+   * step names no file, because it worked on none.
+   */
+  const runMd = (): string | null =>
+    src.kind === "file" ? mdName : RECURRING_MD;
+
   if (!d.token) {
-    return { kind: "error", message: "Kein GitHub-Token für Push konfiguriert" };
+    return {
+      kind: "error",
+      message: "Kein GitHub-Token für Push konfiguriert",
+      md: runMd(),
+    };
   }
   // Bound once, so every git helper below gets the credential it needs without
   // reaching for the environment again (bug-003).
@@ -135,12 +157,14 @@ export async function executeStep(
   try {
     dir = await d.prepareRepo(repo.url, token);
   } catch (err) {
-    return { kind: "error", message: `Repo vorbereiten fehlgeschlagen: ${String(err)}` };
+    return {
+      kind: "error",
+      message: `Repo vorbereiten fehlgeschlagen: ${String(err)}`,
+      md: runMd(),
+    };
   }
 
   // Pick the work item and claim it by moving it into in-progress/ (req-008).
-  let mdName: string | null = null;
-  let mdRel: string | null = null;
   if (src.kind === "file" && src.base) {
     await requeueStale(d, dir, src.base);
 
@@ -156,6 +180,7 @@ export async function executeStep(
       return {
         kind: "error",
         message: `${md} konnte nicht nach in-progress verschoben werden: ${String(err)}`,
+        md: runMd(),
       };
     }
     await d.setCurrentMd(md);
@@ -202,7 +227,11 @@ export async function executeStep(
       src.base && mdName
         ? await parkFailed(d, dir, src.base, mdName, token)
         : "";
-    return { kind: "error", message: `${outcome.summary}${parked}` };
+    return {
+      kind: "error",
+      message: `${outcome.summary}${parked}`,
+      md: runMd(),
+    };
   }
 
   // The Ideen task is done when a new idea file exists — or honestly done when
@@ -214,7 +243,7 @@ export async function executeStep(
       // Nothing was proposed, so nothing of this run belongs on dev — whatever
       // it touched along the way is dropped rather than committed.
       await d.discardChanges(dir).catch(() => {});
-      return { kind: "success", message: NO_IDEA_MESSAGE };
+      return { kind: "success", message: NO_IDEA_MESSAGE, md: runMd() };
     }
     const push = await d.commitAndPush(
       dir,
@@ -224,6 +253,7 @@ export async function executeStep(
     return {
       kind: "success",
       message: `Neue Idee: ${created.join(", ")} — ${push.detail}`,
+      md: runMd(),
     };
   }
 
@@ -234,7 +264,7 @@ export async function executeStep(
   if (src.kind === "security") {
     await d.discardChanges(dir).catch(() => {});
     if (!hasSecurityFindings(outcome.report)) {
-      return { kind: "success", message: SECURITY_OK_MESSAGE };
+      return { kind: "success", message: SECURITY_OK_MESSAGE, md: runMd() };
     }
     const rel = await fileReport(
       d,
@@ -253,6 +283,7 @@ export async function executeStep(
     return {
       kind: "success",
       message: `${outcome.summary} — ${push.detail}${where}`,
+      md: runMd(),
     };
   }
 
@@ -283,6 +314,7 @@ export async function executeStep(
   return {
     kind: "success",
     message: `${outcome.summary} — ${push.detail}${note}`,
+    md: runMd(),
   };
 }
 

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -178,5 +180,53 @@ describe("Einstellungen — System-Kacheln (req-009)", () => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
 
     expect(systemCalls).toBe(afterLeaving);
+  });
+});
+
+// req-015: the header used to sit in the plain body colour, with the logo in a
+// gradient tile. Now the bar carries a light accent tint and the logo stands
+// free next to the wordmark.
+describe("Kopfzeile (req-015)", () => {
+  /** One rule of the design stylesheet, from its selector to the closing brace. */
+  function cssRule(selector: string): string {
+    const css = readFileSync(
+      path.join(process.cwd(), "app", "nocturne.css"),
+      "utf8",
+    );
+    const start = css.indexOf(`${selector} {`);
+    expect(start).toBeGreaterThan(-1);
+    return css.slice(start, css.indexOf("}", start));
+  }
+
+  it("AC: the header bar is tinted with the accent, not left in the body colour", async () => {
+    const { container } = renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const bar = container.querySelector<HTMLElement>("[data-app-bar]")!;
+    expect(bar).toHaveClass("app-bar");
+    expect(bar.textContent).toContain("appbaua"); // it really is the header
+
+    // The tint itself lives in the design stylesheet: the accent mixed OVER the
+    // background, so the bar stays distinguishable from the body in both themes.
+    const rule = cssRule(".app-bar");
+    expect(rule).toMatch(/background:\s*color-mix\(/);
+    expect(rule).toContain("--color-accent");
+    expect(rule).toContain("--color-bg");
+  });
+
+  it("AC: the logo stands free — no tile, no coloured box around it", async () => {
+    const { container } = renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const logo = container.querySelector<HTMLElement>("[data-logo]")!;
+    expect(logo.querySelector("svg")).not.toBeNull();
+    expect(logo.style.background).toBe("");
+    expect(logo.style.backgroundImage).toBe("");
+    expect(logo.style.borderRadius).toBe("");
+    expect(logo.style.boxShadow).toBe("");
+    expect(logo.style.border).toBe("");
+
+    // …and it sits right next to the wordmark.
+    expect(logo.parentElement?.textContent).toContain("appbaua");
   });
 });

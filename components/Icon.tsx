@@ -25,7 +25,11 @@ export const ICONS = {
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
   // "Auf appbaua umstellen/aktualisieren" (req-012).
   sync: '<path d="M20 11a8 8 0 0 0-13.7-5.7L4 7.6"/><path d="M4 4.1v3.5h3.5"/><path d="M4 13a8 8 0 0 0 13.7 5.7L20 16.4"/><path d="M20 19.9v-3.5h-3.5"/>',
-  brand: '<path d="M6.5 8l4 4-4 4"/><path d="M12.5 17h6"/>',
+  // App logo (req-015): a gear with a check — the worker does the work, and it
+  // is done. Same thin, even line style as the icons above, so it sits in the
+  // header without a tile behind it.
+  brand:
+    '<circle cx="12" cy="12" r="6.2"/><path d="M12 3.6v2.2"/><path d="M12 18.2v2.2"/><path d="M3.6 12h2.2"/><path d="M18.2 12h2.2"/><path d="M7.6 7.6L6.1 6.1"/><path d="M16.4 16.4l1.5 1.5"/><path d="M16.4 7.6l1.5-1.5"/><path d="M7.6 16.4l-1.5 1.5"/><path d="M8.8 12.2l2.3 2.3 4.1-4.5"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;

@@ -14,6 +14,7 @@ import {
   type RunLogStore,
 } from "./run-log-store";
 import { defaultTaskTypes } from "./task-types";
+import { RECURRING_MD, mdLabel } from "./run-log";
 import type { Repo } from "./repos";
 import type { StepDecision } from "./execute-step";
 
@@ -259,5 +260,72 @@ describe("worker loop — keine Credentials im Verlauf (bug-003)", () => {
     await runOnce({ n: 0 }, deps({ runStep }));
     const [row] = await logStore.list(0, 1);
     expect(row.message).toBe("bug-003.md abgearbeitet — auf dev gepusht");
+  });
+});
+
+// req-015: the Verlauf names the .md a run worked off. The loop is where that
+// name becomes durable — it is written onto the log entry, not derived later.
+describe("worker loop — .md am Verlaufs-Eintrag (req-015)", () => {
+  beforeEach(() => {
+    setStore(createMemoryStore([repos[0]]));
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+  });
+
+  /** A step that always returns the same decision. */
+  const step = (decision: StepDecision) => async () => decision;
+
+  it("AC: the .md the step worked off is stored on its entry", async () => {
+    await runOnce(
+      { n: 0 },
+      deps({
+        runStep: step({
+          kind: "success",
+          message: "ok",
+          md: "req-020-beispiel.md",
+        }),
+      }),
+    );
+    const [row] = await logStore.list(0, 1);
+    expect(row.md).toBe("req-020-beispiel.md");
+    expect(mdLabel(row)).toBe("req-020-beispiel.md");
+  });
+
+  it("AC: a recurring step is stored as such, not as a filename", async () => {
+    await runOnce(
+      { n: 0 },
+      deps({ runStep: step({ kind: "success", message: "ok", md: RECURRING_MD }) }),
+    );
+    const [row] = await logStore.list(0, 1);
+    expect(mdLabel(row)).toBe("wiederkehrende Aufgabe");
+  });
+
+  it("a failed step keeps the name of the .md it tried", async () => {
+    await runOnce(
+      { n: 0 },
+      deps({
+        runStep: step({ kind: "error", message: "Timeout", md: "bug-001.md" }),
+      }),
+    );
+    const [row] = await logStore.list(0, 1);
+    expect(row.status).toBe("error");
+    expect(row.md).toBe("bug-001.md");
+  });
+
+  it("a step that names no file leaves the entry without a second line", async () => {
+    await runOnce(
+      { n: 0 },
+      deps({ runStep: step({ kind: "success", message: "ok" }) }),
+    );
+    const [row] = await logStore.list(0, 1);
+    expect(row.md).toBeNull();
+    expect(mdLabel(row)).toBeNull();
+  });
+
+  it("the 'nichts zu tun' row names no file — no step ran", async () => {
+    setStore(createMemoryStore([{ ...repos[0], active: false }]));
+    await runOnce({ n: 0 }, deps());
+    const [row] = await logStore.list(0, 1);
+    expect(row.status).toBe("idle");
+    expect(mdLabel(row)).toBeNull();
   });
 });
