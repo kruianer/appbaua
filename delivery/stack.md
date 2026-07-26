@@ -31,7 +31,11 @@ Der Worker führt diese aus; halte sie copy-paste-fähig und aktuell.
   ersten UI-Flow, der E2E braucht). Als Bibliothek ist Playwright aber
   schon da: `playwright-core` treibt die Doku-Screenshots des Workers
   (req-017). Es bringt keinen eigenen Browser mit — der kommt aus dem
-  Image (`CHROMIUM_PATH`, siehe Dockerfile.worker).
+  Image (`CHROMIUM_PATH`, siehe Dockerfile.worker). Der Treiber ist eine
+  optionale Laufzeit-Abhängigkeit: `lib/doc-screenshots.ts` lädt ihn erst,
+  wenn ein Doku-Lauf einen Browser will, und sein Name steht in keinem
+  Import. Fehlt er, entstehen keine Screenshots — Test, Typecheck und
+  Build laufen ohne ihn durch (bug-006).
 - Lint:    `npm run lint` (ESLint via `next lint`)
 - Format:  Prettier noch nicht eingerichtet; Formatierung folgt bei Bedarf
 - Types:   `npm run typecheck` (`tsc --noEmit`)

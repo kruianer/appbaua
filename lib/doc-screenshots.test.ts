@@ -1,13 +1,20 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import {
   MAX_SHOTS,
   NO_DEV_URL_MESSAGE,
+  NO_DRIVER_MESSAGE,
+  PAGE_TIMEOUT_MS,
+  PLAYWRIGHT_PACKAGE,
   SCREENSHOT_DIR,
+  VIEWPORT,
   captureDocScreenshots,
   devUrlFrom,
   internalPaths,
+  openChromium,
   screenshotNote,
   shotTarget,
+  type PlaywrightModule,
   type ShotDriver,
 } from "./doc-screenshots";
 
@@ -338,5 +345,182 @@ describe("screenshotNote (req-017)", () => {
 
   it("says nothing when nothing was attempted", () => {
     expect(screenshotNote({ shot: [], missing: [] })).toBe("");
+  });
+});
+
+// bug-006: the browser driver is an OPTIONAL package — only the Doku task ever
+// drives a browser, and only the worker image carries a Chromium for it. This
+// module hangs under the worker loop, so a driver named in a plain import took
+// three unrelated test files down with it the moment it was not installed. What
+// is pinned here: the name reaches no import the tools resolve while they process
+// the file, and a driver that cannot be loaded costs pictures and nothing else.
+
+describe("the browser driver is optional (bug-006)", () => {
+  /** The module as it stands on disk — the import statements are the thing under test. */
+  const SOURCE = readFileSync(new URL("./doc-screenshots.ts", import.meta.url), "utf8");
+
+  it("repro: names the driver in no import that vitest, tsc or Next can resolve", () => {
+    // Each of these three resolves the specifier while it PROCESSES the file,
+    // whether or not the code ever runs — which is what made a missing optional
+    // package an unloadable module.
+    for (const form of [
+      `from\\s*["'\`]${PLAYWRIGHT_PACKAGE}`,
+      `import\\s*\\(\\s*["'\`]${PLAYWRIGHT_PACKAGE}`,
+      `require\\s*\\(\\s*["'\`]${PLAYWRIGHT_PACKAGE}`,
+    ]) {
+      expect(SOURCE).not.toMatch(new RegExp(form));
+    }
+  });
+
+  it("keeps the driver's name, so a run can still load it", () => {
+    expect(PLAYWRIGHT_PACKAGE).toBe("playwright-core");
+    expect(SOURCE).toContain("PLAYWRIGHT_PACKAGE");
+  });
+
+  it("a driver that is not installed says so instead of quoting the resolver", async () => {
+    await expect(
+      openChromium(async () => {
+        throw new Error("Cannot find package 'playwright-core' imported from /app/lib");
+      }),
+    ).rejects.toThrow(NO_DRIVER_MESSAGE);
+  });
+
+  it("a package without a launcher counts as no driver either", async () => {
+    await expect(openChromium(async () => ({}) as PlaywrightModule)).rejects.toThrow(
+      NO_DRIVER_MESSAGE,
+    );
+  });
+
+  it("AC: no driver means no pictures — the Doku run itself carries on", async () => {
+    const res = await captureDocScreenshots("/work/appbaua", "https://dev.appbaua.com", {
+      openDriver: () =>
+        openChromium(async () => {
+          throw new Error("Cannot find package 'playwright-core'");
+        }),
+      ensureDir: async () => {},
+    });
+    expect(res.shot).toEqual([]);
+    expect(res.missing).toEqual([{ page: "/", reason: NO_DRIVER_MESSAGE }]);
+    expect(screenshotNote(res)).toContain(NO_DRIVER_MESSAGE);
+  });
+});
+
+describe("openChromium (req-017)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  /** Anchor stand-ins: the extractor reads nothing off them but the href. */
+  function anchors(hrefs: string[]): Element[] {
+    return hrefs.map((h) => ({ getAttribute: () => h })) as unknown as Element[];
+  }
+
+  /**
+   * Playwright stand-in, so the launch path is testable on a machine with neither
+   * the package nor a browser — which is every machine but the worker image.
+   */
+  function fakePlaywright(page: { ok?: boolean; status?: number; hrefs?: string[] } = {}) {
+    const seen = {
+      launch: null as { executablePath?: string; args: string[] } | null,
+      viewport: null as unknown,
+      goto: [] as { url: string; waitUntil: string; timeout: number }[],
+      shots: [] as string[],
+      selector: "",
+      pagesClosed: 0,
+      browserClosed: 0,
+    };
+    const mod: PlaywrightModule = {
+      chromium: {
+        launch: async (opts) => {
+          seen.launch = opts;
+          return {
+            newContext: async ({ viewport }) => {
+              seen.viewport = viewport;
+              return {
+                newPage: async () => ({
+                  goto: async (url, o) => {
+                    seen.goto.push({ url, ...o });
+                    return { ok: () => page.ok ?? true, status: () => page.status ?? 200 };
+                  },
+                  screenshot: async ({ path }) => {
+                    seen.shots.push(path);
+                  },
+                  $$eval: async (selector, fn) => {
+                    seen.selector = selector;
+                    return fn(anchors(page.hrefs ?? []));
+                  },
+                  close: async () => {
+                    seen.pagesClosed++;
+                  },
+                }),
+              };
+            },
+            close: async () => {
+              seen.browserClosed++;
+            },
+          };
+        },
+      },
+    };
+    return { mod, seen };
+  }
+
+  it("writes the picture and hands back the page's links", async () => {
+    const { mod, seen } = fakePlaywright({ hrefs: ["/verlauf", "https://example.com/x"] });
+    const driver = await openChromium(async () => mod);
+
+    const hrefs = await driver.shoot("https://dev.appbaua.com/", "/tmp/start.png");
+
+    expect(seen.shots).toEqual(["/tmp/start.png"]);
+    expect(hrefs).toEqual(["/verlauf", "https://example.com/x"]);
+    expect(seen.selector).toBe("a[href]");
+    expect(seen.goto).toEqual([
+      {
+        url: "https://dev.appbaua.com/",
+        waitUntil: "load",
+        timeout: PAGE_TIMEOUT_MS,
+      },
+    ]);
+    expect(seen.viewport).toEqual(VIEWPORT);
+    expect(seen.pagesClosed).toBe(1); // no page left open per shot
+  });
+
+  it("takes the browser out of the image and starts it without a sandbox", async () => {
+    vi.stubEnv("CHROMIUM_PATH", "/usr/bin/chromium-browser");
+    const { mod, seen } = fakePlaywright();
+
+    await openChromium(async () => mod);
+
+    expect(seen.launch?.executablePath).toBe("/usr/bin/chromium-browser");
+    expect(seen.launch?.args).toEqual(["--no-sandbox", "--disable-dev-shm-usage"]);
+  });
+
+  it("lets Playwright pick the browser when the image names none", async () => {
+    vi.stubEnv("CHROMIUM_PATH", "");
+    const { mod, seen } = fakePlaywright();
+
+    await openChromium(async () => mod);
+
+    expect(seen.launch?.executablePath).toBeUndefined();
+  });
+
+  it("a broken page is no illustration", async () => {
+    const { mod, seen } = fakePlaywright({ ok: false, status: 500 });
+    const driver = await openChromium(async () => mod);
+
+    await expect(driver.shoot("https://dev.appbaua.com/", "/tmp/start.png")).rejects.toThrow(
+      "HTTP 500",
+    );
+    expect(seen.shots).toEqual([]); // nothing written for a page that failed
+    expect(seen.pagesClosed).toBe(1); // and the tab is gone all the same
+  });
+
+  it("closes the browser when the run is over", async () => {
+    const { mod, seen } = fakePlaywright();
+    const driver = await openChromium(async () => mod);
+
+    await driver.close();
+
+    expect(seen.browserClosed).toBe(1);
   });
 });

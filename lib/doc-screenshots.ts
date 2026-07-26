@@ -18,6 +18,11 @@ import { USER_DOCS_DIR } from "./doc-site";
 // unreachable dev environment, a page that wants a login or is simply broken —
 // each of those costs its own picture and nothing else. Every failure comes back
 // as an entry in `missing`, never as a thrown error.
+//
+// bug-006 extends that promise from the run to the LOAD: not having the browser
+// driver installed costs pictures too, and nothing more. This module hangs under
+// the worker loop, so every test file that touches the loop loads it — naming an
+// optional package in a plain import made a missing driver unload half the suite.
 
 /**
  * The repo file that names the app's dev environment. Its `## Environments`
@@ -52,6 +57,15 @@ export const NO_DEV_URL_MESSAGE = "keine dev-URL hinterlegt";
 
 /** Reason noted when the run failed with nothing more specific to say. */
 export const NOT_REACHABLE_MESSAGE = "nicht erreichbar";
+
+/**
+ * The npm package that drives the browser. A name in a constant and nowhere in an
+ * import statement: see `loadPlaywright` for why (bug-006).
+ */
+export const PLAYWRIGHT_PACKAGE = "playwright-core";
+
+/** Reason noted when the browser driver is not installed on this machine. */
+export const NO_DRIVER_MESSAGE = `Browser-Treiber nicht installiert (${PLAYWRIGHT_PACKAGE})`;
 
 /** One picture that was taken: which page it shows and where it lies in the repo. */
 export type ShotTarget = {
@@ -257,9 +271,11 @@ export async function captureDocScreenshots(
   if (maxShots <= 0) return { shot, missing };
   const base = baseUrl.replace(/\/+$/, "");
 
+  const openDriver = deps.openDriver ?? (() => openChromium());
+
   let driver: ShotDriver;
   try {
-    driver = await (deps.openDriver ?? openChromium)();
+    driver = await openDriver();
   } catch (err) {
     // No browser at all: every page stays without a picture, and the run says so
     // once instead of repeating the same reason for each page.
@@ -294,16 +310,92 @@ export async function captureDocScreenshots(
 }
 
 /**
- * The real browser: headless Chromium via Playwright. `playwright-core` ships no
- * browser of its own, so the executable comes from the image (CHROMIUM_PATH);
- * without one the launch throws — which is a run without pictures, not a failed
- * Doku run.
+ * What this module uses of the browser driver, and not a line more. Spelled out
+ * here instead of imported from the package, so `tsc`, ESLint and the Next build
+ * get by without it — the same reason its name never appears in an import
+ * (bug-006). Only `launch` is ours to get right; the rest is Playwright's.
+ */
+export type PlaywrightModule = {
+  chromium: {
+    launch: (opts: {
+      executablePath?: string;
+      args: string[];
+    }) => Promise<LaunchedBrowser>;
+  };
+};
+
+type LaunchedBrowser = {
+  newContext: (opts: { viewport: typeof VIEWPORT }) => Promise<LaunchedContext>;
+  close: () => Promise<void>;
+};
+
+type LaunchedContext = { newPage: () => Promise<LaunchedPage> };
+
+type LaunchedPage = {
+  goto: (
+    url: string,
+    opts: { waitUntil: "load"; timeout: number },
+  ) => Promise<{ ok: () => boolean; status: () => number } | null>;
+  screenshot: (opts: { path: string }) => Promise<unknown>;
+  $$eval: (
+    selector: string,
+    fn: (elements: Element[]) => string[],
+  ) => Promise<string[]>;
+  close: () => Promise<void>;
+};
+
+/**
+ * How the driver package gets here. Injectable, so the launch path can be tested
+ * on a machine that has neither the package nor a browser.
+ */
+export type PlaywrightLoader = () => Promise<PlaywrightModule>;
+
+/**
+ * The driver package, fetched at run time through a specifier the tools cannot
+ * see (bug-006).
  *
- * Imported dynamically, because the web app has no business loading a browser
+ * Vitest, tsc and the Next build all resolve a module specifier that stands
+ * literally in an import while they process this file — and they do it whether or
+ * not the code ever runs. The driver is optional though: only the Doku task drives
+ * a browser, and only the worker image carries a Chromium for it. Naming it
+ * literally therefore turned "the driver is not installed" into "doc-screenshots,
+ * execute-step and worker-loop no longer load at all". Through the constant the
+ * name is resolved when a Doku run asks for a browser, and not a moment earlier.
+ */
+async function loadPlaywright(): Promise<PlaywrightModule> {
+  const spec = PLAYWRIGHT_PACKAGE;
+  const mod = await import(/* webpackIgnore: true */ /* @vite-ignore */ spec);
+  return mod as PlaywrightModule;
+}
+
+/**
+ * The launcher, or one short reason. A driver that is simply not installed is the
+ * normal case outside the worker image, and the Verlauf should say so in words
+ * instead of quoting a module resolver at the user.
+ */
+async function launcherFrom(
+  load: PlaywrightLoader,
+): Promise<PlaywrightModule["chromium"]> {
+  const mod = await load().catch((err: unknown) => {
+    throw new Error(NO_DRIVER_MESSAGE, { cause: err });
+  });
+  if (typeof mod?.chromium?.launch !== "function") throw new Error(NO_DRIVER_MESSAGE);
+  return mod.chromium;
+}
+
+/**
+ * The real browser: headless Chromium via Playwright. The driver ships no browser
+ * of its own, so the executable comes from the image (CHROMIUM_PATH); without one
+ * the launch throws — which is a run without pictures, not a failed Doku run. A
+ * driver that is not installed at all lands in exactly the same place (bug-006).
+ *
+ * Loaded on the way in, because the web app has no business loading a browser
  * driver: only the Doku task ever gets here.
  */
-export async function openChromium(): Promise<ShotDriver> {
-  const { chromium } = await import("playwright-core");
+export async function openChromium(
+  load: PlaywrightLoader = loadPlaywright,
+): Promise<ShotDriver> {
+  const chromium = await launcherFrom(load);
   const browser = await chromium.launch({
     executablePath: process.env.CHROMIUM_PATH || undefined,
     // No sandbox and no /dev/shm: the worker runs as an unprivileged user in a
