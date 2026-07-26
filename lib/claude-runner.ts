@@ -5,7 +5,8 @@ import { SECURITY_OK_MESSAGE } from "./security-report";
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
 // CLI runs non-interactively with permissions skipped so it never asks. Auth is
 // the user's Anthropic subscription (via `claude login`, mounted into the
-// container) — NOT an API key, so no usage costs. Coding always uses Opus. A
+// container) — NOT an API key, so no usage costs. Coding uses Sonnet (5) to be
+// easier on the operator's rate limits. A
 // run is capped at CLAUDE_TIMEOUT_MS; on timeout or a missing CLI it returns a
 // clean failure (never throws), so the worker logs "Fehler" and moves on.
 //
@@ -16,7 +17,7 @@ import { SECURITY_OK_MESSAGE } from "./security-report";
 // stream's final "result" event, so the Fazit stays what it was (req-004).
 
 export const CLAUDE_TIMEOUT_MS = 60 * 60_000; // 60 minutes
-export const CLAUDE_MODEL = "opus";
+export const CLAUDE_MODEL = "sonnet";
 
 /** How much of the running output is published live, and how often (req-008). */
 export const LIVE_TAIL_LINES = 50;
