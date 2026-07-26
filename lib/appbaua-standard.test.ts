@@ -4,6 +4,7 @@ import {
   COMMIT_MESSAGE,
   FALLBACK_CLAUDE_MD,
   GITKEEP,
+  SITE_DIR,
   applyAppbauaStandard,
   queueAppbauaStandard,
   skillNames,
@@ -22,6 +23,9 @@ import { NO_CHANGES_DETAIL } from "./workspace";
 // happens in prepareRepoOnDevOrDefault (workspace.test.ts); here it arrives as
 // the branch prepareTarget reports, and what matters is that the push and the
 // result message follow it.
+//
+// req-018 adds the `site/` structure to the rollout, by the same rules as
+// `delivery/` — read at runtime, empty, existing content untouched.
 
 const SRC = "/work/appbaua";
 const TGT = "/work/leer-repo";
@@ -46,6 +50,13 @@ const STRUCTURE = [
   "delivery/requirements",
   "delivery/requirements/done",
   "delivery/requirements/ready",
+];
+
+/** The site folders of the source — the web outputs of req-016/017 (req-018). */
+const SITE_STRUCTURE = [
+  "site/user-docs",
+  "site/user-docs/assets",
+  "site/user-docs/assets/screenshots",
 ];
 
 /**
@@ -110,6 +121,10 @@ function appbauaSource(): Fake {
   src.write(".claude/skills/capture-bug/references/beispiel.md", "Beispiel");
   src.write(".claude/templates/CLAUDE.md", "# <Projektname>\n\nStarter.\n");
   for (const dir of STRUCTURE) src.mkdir(dir);
+  for (const dir of SITE_STRUCTURE) src.mkdir(dir);
+  // appbaua's own Benutzer-Doku: structure travels, pages do not (req-018).
+  src.write("site/user-docs/index.html", "<h1>appbaua-Doku</h1>");
+  src.write("site/user-docs/assets/screenshots/start.png", "PNG");
   // Instruction files in the delivery root and appbaua's own work items: never
   // copied, so a target repo cannot inherit appbaua's stack or requirements.
   src.write("delivery/stack.md", "appbaua-Stack");
@@ -171,6 +186,8 @@ async function convert(
   message: string;
   skills: number;
   folders: number;
+  siteFolders: number;
+  siteFoldersCreated: number;
   branch: string;
 }> {
   const res = await applyAppbauaStandard(TARGET_URL, deps(src, tgt, over));
@@ -180,6 +197,8 @@ async function convert(
     message: res.message,
     skills: res.summary.skills,
     folders: res.summary.folders,
+    siteFolders: res.summary.siteFolders,
+    siteFoldersCreated: res.summary.siteFoldersCreated,
     branch: res.summary.branch,
   };
 }
@@ -308,6 +327,8 @@ describe("Rückmeldung am Button (req-012)", () => {
     const base = {
       skills: 1,
       folders: 3,
+      siteFolders: 2,
+      siteFoldersCreated: 0,
       claudeMd: "angelegt" as const,
       branch: "dev",
       pushDetail: "auf dev gepusht",
@@ -317,6 +338,131 @@ describe("Rückmeldung am Button (req-012)", () => {
     expect(summaryMessage({ ...base, foldersCreated: 2 })).toContain(
       "3 delivery-Ordner (2 neu)",
     );
+    expect(
+      summaryMessage({ ...base, foldersCreated: 0, siteFoldersCreated: 2 }),
+    ).toContain("2 site-Ordner (2 neu)");
+    // Ohne site/ in der Quelle steht auch nichts darüber in der Meldung.
+    expect(
+      summaryMessage({ ...base, foldersCreated: 0, siteFolders: 0 }),
+    ).not.toContain("site-Ordner");
+  });
+});
+
+describe("site-Struktur der Umstellung (req-018)", () => {
+  it("AC: ein Zielrepo ohne site/ bekommt die leere site-Struktur von appbaua", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    await convert(src, tgt);
+
+    for (const dir of SITE_STRUCTURE) expect(tgt.dirs.has(dir)).toBe(true);
+    expect(tgt.dirs.has(SITE_DIR)).toBe(true);
+    // Leer heißt leer: nur der Platzhalter im Blattordner, sonst keine Datei.
+    expect(tgt.files.has(`site/user-docs/assets/screenshots/${GITKEEP}`)).toBe(true);
+    expect(
+      [...tgt.files.keys()].filter(
+        (f) => f.startsWith(`${SITE_DIR}/`) && !f.endsWith(GITKEEP),
+      ),
+    ).toEqual([]);
+  });
+
+  it("AC: die Inhalte der appbaua-site werden nicht mitkopiert", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    await convert(src, tgt);
+
+    expect(tgt.files.has("site/user-docs/index.html")).toBe(false);
+    expect(tgt.files.has("site/user-docs/assets/screenshots/start.png")).toBe(false);
+  });
+
+  it("AC: ein neuer Ordner site/www in appbaua rollt mit, ohne fest verdrahtet zu sein", async () => {
+    const src = appbauaSource();
+    src.mkdir("site/www");
+    src.mkdir("site/www/de");
+    const tgt = fakeFs();
+    const listTree = vi.fn(async (dir: string, rel: string) =>
+      (dir === SRC ? src : tgt).tree(rel),
+    );
+
+    const res = await convert(src, tgt, { listTree });
+
+    // Gelesen wird zur Laufzeit — genau daher kennt der Lauf site/www überhaupt.
+    expect(listTree).toHaveBeenCalledWith(SRC, SITE_DIR);
+    expect(tgt.dirs.has("site/www")).toBe(true);
+    expect(tgt.dirs.has("site/www/de")).toBe(true);
+    expect(tgt.files.has(`site/www/de/${GITKEEP}`)).toBe(true);
+    expect(res.siteFolders).toBe(SITE_STRUCTURE.length + 2);
+  });
+
+  it("AC: eine vorhandene Doku-Datei im Zielrepo bleibt erhalten", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+    tgt.write("site/user-docs/index.html", "meine fertige Doku");
+
+    const res = await convert(src, tgt);
+
+    expect(tgt.files.get("site/user-docs/index.html")).toBe("meine fertige Doku");
+    // Ein Ordner mit Inhalt braucht keinen Platzhalter und bekommt keinen.
+    expect(tgt.files.has(`site/user-docs/${GITKEEP}`)).toBe(false);
+    // Vorhanden waren site/ und site/user-docs -> es fehlten zwei.
+    expect(res.siteFolders).toBe(3);
+    expect(res.siteFoldersCreated).toBe(2);
+  });
+
+  it("AC: der Skill setup-doc-site kommt über die bestehende Skill-Ausrollung mit", async () => {
+    const src = appbauaSource();
+    src.write(".claude/skills/setup-doc-site/SKILL.md", "# setup-doc-site");
+    const tgt = fakeFs();
+
+    const res = await convert(src, tgt);
+
+    expect(tgt.files.get(".claude/skills/setup-doc-site/SKILL.md")).toBe(
+      "# setup-doc-site",
+    );
+    // Kein Sonderfall: der neue Skill zählt einfach mit.
+    expect(res.skills).toBe(SKILLS.length + 1);
+  });
+
+  it("ein zweiter Lauf legt die site-Struktur nicht erneut an", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    await convert(src, tgt);
+    const afterFirst = tgt.snapshot();
+    const res = await convert(src, tgt);
+
+    expect(tgt.snapshot()).toBe(afterFirst);
+    expect(res.siteFoldersCreated).toBe(0);
+  });
+
+  it("eine Quelle ohne site/ legt auch im Ziel keins an", async () => {
+    const src = appbauaSource();
+    for (const dir of [...SITE_STRUCTURE, SITE_DIR]) src.dirs.delete(dir);
+    src.files.delete("site/user-docs/index.html");
+    src.files.delete("site/user-docs/assets/screenshots/start.png");
+    const tgt = fakeFs();
+
+    const res = await convert(src, tgt);
+
+    // Ein Ordner, den die Quelle nicht hat, gehört nicht zum Standard — das Ziel
+    // bekommt kein leeres site/ mit Platzhalter untergeschoben.
+    expect(res.siteFolders).toBe(0);
+    expect(tgt.dirs.has(SITE_DIR)).toBe(false);
+    expect(tgt.files.has(`${SITE_DIR}/${GITKEEP}`)).toBe(false);
+    // Die delivery-Ausrollung läuft davon unberührt weiter.
+    expect(res.folders).toBe(STRUCTURE.length);
+  });
+
+  it("die Meldung nennt die site-Ordner neben den delivery-Ordnern", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    const res = await convert(src, tgt);
+
+    expect(res.siteFolders).toBe(3);
+    expect(res.message).toContain("5 delivery-Ordner");
+    expect(res.message).toContain("3 site-Ordner (3 neu)");
   });
 });
 

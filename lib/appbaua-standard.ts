@@ -24,8 +24,8 @@ import {
 // never asked for. The result message names the branch that was actually used.
 //
 // The source is the appbaua repo itself, freshly fetched on every run, and it is
-// READ at runtime: which skills and which delivery folders exist is whatever the
-// source has that day, never a list baked into this file. Add a skill or a
+// READ at runtime: which skills and which delivery/site folders exist is whatever
+// the source has that day, never a list baked into this file. Add a skill or a
 // folder to appbaua and the next rollout carries it along.
 //
 // What lands in the target:
@@ -33,14 +33,19 @@ import {
 //      that exist only in the target left alone (nothing is ever deleted);
 //   2. the delivery folder structure as EMPTY folders — missing ones created,
 //      existing ones including their content untouched;
-//   3. a CLAUDE.md, but only when the target has none yet.
+//   3. the site folder structure (req-018), by exactly the same rules — a
+//      converted repo has the doc task, so it needs the place that task writes
+//      to (site/user-docs/ and whatever else appbaua puts under site/). As long
+//      as appbaua has no site/ of its own, nothing of it is rolled out;
+//   4. a CLAUDE.md, but only when the target has none yet.
 //
 // The instruction files in the delivery root (devops.md, stack.md, vision.md,
 // idea-direction.md, deploy-setup.md) are neither copied nor overwritten: they
 // differ per repo and are maintained there. Since only folders are created from
 // `delivery/` and no files, that follows from the rollout rules above rather
 // than from an exclusion list — a new instruction file in appbaua cannot start
-// leaking into other repos.
+// leaking into other repos. The same holds for `site/`: appbaua's own doc pages
+// stay in appbaua, only their folders travel.
 //
 // The whole rollout is built in the local working copy first and pushed in ONE
 // commit at the end, so a step that fails leaves the target untouched: nothing
@@ -51,6 +56,12 @@ import {
 export const SKILLS_DIR = ".claude/skills";
 /** The folder whose structure is rolled out (its files are NOT). */
 export const DELIVERY_DIR = "delivery";
+/**
+ * The web output folder (req-018) — `site/user-docs/` today, plus whatever
+ * appbaua adds later. Rolled out as structure only, exactly like DELIVERY_DIR:
+ * a repo that gets the doc task needs the place that task writes to.
+ */
+export const SITE_DIR = "site";
 export const CLAUDE_MD = "CLAUDE.md";
 /**
  * The starter CLAUDE.md, read from the source repo so it can be edited without
@@ -64,7 +75,7 @@ export const GITKEEP = ".gitkeep";
 export const DEFAULT_SOURCE_REPO = "github.com/kruianer/appbaua";
 
 export const COMMIT_MESSAGE =
-  "appbaua: Standard ausgerollt (Skills + delivery-Struktur)";
+  "appbaua: Standard ausgerollt (Skills + delivery- und site-Struktur)";
 
 /**
  * Safety net for a source repo without a CLAUDE.md template. Kept short on
@@ -99,6 +110,10 @@ export type ConvertSummary = {
   folders: number;
   /** How many of those the target was still missing before this run. */
   foldersCreated: number;
+  /** site folders the target now has — same rules as `folders` (req-018). */
+  siteFolders: number;
+  /** How many of those the target was still missing before this run. */
+  siteFoldersCreated: number;
   claudeMd: ClaudeMdOutcome;
   /** The branch the rollout actually used — the target's `dev` or its default. */
   branch: string;
@@ -185,11 +200,21 @@ export function skillNames(dirs: string[]): string[] {
 /** The short result the button shows after a successful rollout. */
 export function summaryMessage(s: ConvertSummary): string {
   const skills = `${s.skills} ${s.skills === 1 ? "Skill" : "Skills"} kopiert`;
-  const created = s.foldersCreated > 0 ? ` (${s.foldersCreated} neu)` : "";
-  return (
-    `${skills} · ${s.folders} delivery-Ordner${created}` +
-    ` · CLAUDE.md ${s.claudeMd} · Ziel-Branch: ${s.branch} — ${s.pushDetail}`
+  // Both structures are reported the same way, because they are rolled out the
+  // same way (req-018) — "(n neu)" only when this run actually created folders.
+  const folders = (total: number, created: number, label: string) =>
+    `${total} ${label}-Ordner${created > 0 ? ` (${created} neu)` : ""}`;
+  const parts = [skills, folders(s.folders, s.foldersCreated, "delivery")];
+  // As long as the source has no site/, there is nothing to report about it —
+  // better than a "0 site-Ordner" nobody can act on.
+  if (s.siteFolders > 0) {
+    parts.push(folders(s.siteFolders, s.siteFoldersCreated, "site"));
+  }
+  parts.push(
+    `CLAUDE.md ${s.claudeMd}`,
+    `Ziel-Branch: ${s.branch} — ${s.pushDetail}`,
   );
+  return parts.join(" · ");
 }
 
 /**
@@ -234,7 +259,11 @@ export async function applyAppbauaStandard(
   }
 
   const skills = await d.listTree(sourceDir, SKILLS_DIR);
-  const deliveryDirs = (await d.listTree(sourceDir, DELIVERY_DIR)).dirs;
+  // Both structures are read the same way and at runtime (req-018): a site/www
+  // added to appbaua tomorrow rolls out the day after, without a line of code
+  // changing here.
+  const delivery = await readStructure(d, sourceDir, DELIVERY_DIR);
+  const site = await readStructure(d, sourceDir, SITE_DIR);
 
   // 2. The target, on the branch this rollout belongs on: its `dev` if it has
   // one, else its default branch (req-013). Nothing is created here — a repo
@@ -253,7 +282,7 @@ export async function applyAppbauaStandard(
   // is thrown away instead of pushed.
   let summary: Omit<ConvertSummary, "branch" | "pushDetail">;
   try {
-    summary = await rollOut(d, sourceDir, targetDir, skills, deliveryDirs);
+    summary = await rollOut(d, sourceDir, targetDir, skills, delivery, site);
   } catch (err) {
     await d.discardChanges(targetDir).catch(() => {});
     return fail(`Umstellung abgebrochen, nichts gepusht: ${String(err)}`);
@@ -279,7 +308,7 @@ export async function applyAppbauaStandard(
 }
 
 /**
- * Write skills, folder structure and (if absent) CLAUDE.md into the target
+ * Write skills, both folder structures and (if absent) CLAUDE.md into the target
  * working copy. Throws on the first failure, which the caller turns into an
  * aborted rollout.
  */
@@ -288,36 +317,19 @@ async function rollOut(
   sourceDir: string,
   targetDir: string,
   skills: { dirs: string[]; files: string[] },
-  deliveryDirs: string[],
+  delivery: Structure,
+  site: Structure,
 ): Promise<Omit<ConvertSummary, "branch" | "pushDetail">> {
   // Skills: file by file, overwriting same-named ones. Files the target has and
   // the source does not — a skill of its own, an extra reference file — are not
-  // touched, so nothing of the target's is ever lost.
+  // touched, so nothing of the target's is ever lost. A skill added to appbaua
+  // (setup-doc-site, say) needs no rule of its own: it is simply among the files.
   for (const rel of skills.files) {
     await d.copyFile(sourceDir, rel, targetDir, rel);
   }
 
-  // delivery structure. Which folders were missing has to be settled BEFORE any
-  // of them is created: creating delivery/bugs/ready also creates delivery/bugs,
-  // so a check interleaved with the creating would undercount.
-  const missing = new Set<string>();
-  for (const rel of deliveryDirs) {
-    if (!(await d.pathExists(targetDir, rel))) missing.add(rel);
-  }
-  // delivery/ itself is the parent of the structure, not part of it: it is
-  // ensured so an empty source still leaves a delivery/ behind, but it is not
-  // counted among "alle Ordner unter delivery/".
-  await d.ensureDir(targetDir, DELIVERY_DIR);
-  for (const rel of deliveryDirs) await d.ensureDir(targetDir, rel);
-
-  // git cannot carry an empty folder, so each one that has nothing in it gets a
-  // .gitkeep. Done as a second pass, after every folder exists: a parent like
-  // delivery/requirements holds its subfolders by then and needs no placeholder,
-  // and a folder that already has content (req-012 AC) keeps it and stays as is.
-  for (const rel of [DELIVERY_DIR, ...deliveryDirs]) {
-    const entries = await d.listEntries(targetDir, rel);
-    if (entries.length === 0) await d.writeFile(targetDir, `${rel}/${GITKEEP}`, "");
-  }
+  const deliveryOut = await rollOutStructure(d, targetDir, delivery);
+  const siteOut = await rollOutStructure(d, targetDir, site);
 
   // CLAUDE.md only when the target has none — an existing one is the repo's own
   // and is never overwritten.
@@ -331,10 +343,87 @@ async function rollOut(
 
   return {
     skills: skillNames(skills.dirs).length,
-    folders: deliveryDirs.length,
-    foldersCreated: missing.size,
+    folders: deliveryOut.folders,
+    foldersCreated: deliveryOut.created,
+    siteFolders: siteOut.folders,
+    siteFoldersCreated: siteOut.created,
     claudeMd,
   };
+}
+
+/** One rolled-out folder structure of the source: `delivery/` or `site/`. */
+type Structure = {
+  root: string;
+  /** Every folder below the root, as repo-relative paths. */
+  dirs: string[];
+  /** Does the source have the root at all? A folder it lacks is not standard. */
+  present: boolean;
+};
+
+/**
+ * The structure the source offers below `root`, read at runtime (req-018).
+ * `delivery/` and `site/` are read the same way, so neither can drift away from
+ * the other — and a root the source does not have yields nothing at all rather
+ * than a lone empty folder in every target repo.
+ */
+async function readStructure(
+  d: ConvertDeps,
+  sourceDir: string,
+  root: string,
+): Promise<Structure> {
+  return {
+    root,
+    dirs: (await d.listTree(sourceDir, root)).dirs,
+    present: await d.pathExists(sourceDir, root),
+  };
+}
+
+/**
+ * Roll ONE folder structure out into the target: every folder the source has
+ * below the root is created where it is missing, and every folder that ends up
+ * empty gets a `.gitkeep`. Folders the target already has keep their content —
+ * nothing here ever deletes or empties anything.
+ *
+ * `delivery/` and `site/` go through this same function on purpose (req-018):
+ * the two really do follow identical rules, and one of them cannot drift away
+ * from the other by accident. Returns how many folders the structure has and how
+ * many of them this run had to create.
+ */
+async function rollOutStructure(
+  d: ConvertDeps,
+  targetDir: string,
+  structure: Structure,
+): Promise<{ folders: number; created: number }> {
+  // A root the source does not have is not part of the standard, so the target
+  // does not grow an empty one either. `site/` starts travelling with the first
+  // web output appbaua itself puts there.
+  if (!structure.present) return { folders: 0, created: 0 };
+  const { root, dirs } = structure;
+
+  // Which folders were missing has to be settled BEFORE any of them is created:
+  // creating delivery/bugs/ready also creates delivery/bugs, so a check
+  // interleaved with the creating would undercount.
+  const missing = new Set<string>();
+  for (const rel of dirs) {
+    if (!(await d.pathExists(targetDir, rel))) missing.add(rel);
+  }
+  // The root itself is the parent of the structure, not part of it: it is
+  // ensured so a source root without subfolders still leaves its folder behind,
+  // but it is not counted among "alle Ordner unter delivery/".
+  await d.ensureDir(targetDir, root);
+  for (const rel of dirs) await d.ensureDir(targetDir, rel);
+
+  // git cannot carry an empty folder, so each one that has nothing in it gets a
+  // .gitkeep. Done as a second pass, after every folder exists: a parent like
+  // delivery/requirements holds its subfolders by then and needs no placeholder,
+  // and a folder that already has content (req-012/req-018 AC) keeps it and
+  // stays as is.
+  for (const rel of [root, ...dirs]) {
+    const entries = await d.listEntries(targetDir, rel);
+    if (entries.length === 0) await d.writeFile(targetDir, `${rel}/${GITKEEP}`, "");
+  }
+
+  return { folders: dirs.length, created: missing.size };
 }
 
 /**

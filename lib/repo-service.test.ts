@@ -127,6 +127,8 @@ describe("convertRepoToAppbaua (req-012)", () => {
     skills: 6,
     folders: 5,
     foldersCreated: 5,
+    siteFolders: 3,
+    siteFoldersCreated: 3,
     claudeMd: "angelegt" as const,
     branch: "dev",
     pushDetail: "auf dev gepusht",
