@@ -16,6 +16,14 @@ export type TodayMetrics = { done: number; errors: number };
 
 export interface RunLogStore {
   append(entry: NewRunLogEntry): Promise<RunLogEntry>;
+  /**
+   * Record an idle ("Leerlauf") pass without flooding the log (req-029/req-021):
+   * if the newest entry is already an idle-summary row, only its endedAt ("last
+   * checked") moves forward; otherwise a fresh summary row is appended. Real work
+   * in between is a normal entry and breaks the summary, so the next idle pass
+   * starts a new one. Returns the row that now leads the log.
+   */
+  upsertIdle(entry: NewRunLogEntry): Promise<RunLogEntry>;
   /** Newest first, paginated. */
   list(offset: number, limit: number): Promise<RunLogEntry[]>;
   count(): Promise<number>;
@@ -29,6 +37,11 @@ export interface RunLogStore {
    * the automatic retention above is unaffected.
    */
   clear(): Promise<void>;
+}
+
+/** Marks the single collapsed idle-summary row (req-021). */
+export function isIdleSummary(e: RunLogEntry): boolean {
+  return e.status === "idle" && e.repo === null && e.taskType === null;
 }
 
 /** Drop entries older than the cutoff, then keep only the newest maxRows. */
@@ -74,6 +87,26 @@ export function createFileRunLogStore(): RunLogStore {
         new Date(entry.endedAt),
       );
       await writeAll(pruned);
+      return full;
+    },
+    async upsertIdle(entry) {
+      const all = await readAll(); // oldest-first
+      const last = all[all.length - 1];
+      if (last && isIdleSummary(last)) {
+        // Keep the run's start ("seit …"); move only the "last checked" end and
+        // the message forward. Same id, so the Verlauf shows one growing row.
+        const merged: RunLogEntry = {
+          ...last,
+          endedAt: entry.endedAt,
+          message: entry.message,
+        };
+        all[all.length - 1] = merged;
+        await writeAll(applyRetention(all, new Date(entry.endedAt)));
+        return merged;
+      }
+      const nextId = all.length ? all[all.length - 1].id + 1 : 1;
+      const full: RunLogEntry = { ...entry, id: nextId };
+      await writeAll(applyRetention([...all, full], new Date(entry.endedAt)));
       return full;
     },
     async list(offset, limit) {
@@ -128,6 +161,25 @@ export function createMemoryRunLogStore(
   let seq = entries.length;
   return {
     async append(entry) {
+      seq += 1;
+      const full: RunLogEntry = { ...entry, id: seq };
+      entries = applyRetention([...entries, full], new Date(entry.endedAt));
+      return full;
+    },
+    async upsertIdle(entry) {
+      const last = entries[entries.length - 1];
+      if (last && isIdleSummary(last)) {
+        const merged: RunLogEntry = {
+          ...last,
+          endedAt: entry.endedAt,
+          message: entry.message,
+        };
+        entries = applyRetention(
+          [...entries.slice(0, -1), merged],
+          new Date(entry.endedAt),
+        );
+        return merged;
+      }
       seq += 1;
       const full: RunLogEntry = { ...entry, id: seq };
       entries = applyRetention([...entries, full], new Date(entry.endedAt));

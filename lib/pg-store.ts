@@ -13,7 +13,7 @@ import {
   LOG_MAX_AGE_DAYS,
   LOG_MAX_ROWS,
 } from "./run-log";
-import type { RunLogStore } from "./run-log-store";
+import { type RunLogStore, isIdleSummary } from "./run-log-store";
 import {
   type WorkerStatus,
   type WorkerStatusStore,
@@ -253,6 +253,24 @@ export function createPgRunLogStore(): RunLogStore {
         [LOG_MAX_ROWS],
       );
       return toEntry(res.rows[0]);
+    },
+    async upsertIdle(entry: NewRunLogEntry): Promise<RunLogEntry> {
+      await ensureSchema();
+      // Is the newest row already an idle-summary? Then only move its end
+      // ("last checked") and message forward (req-021), keeping its start.
+      const newest = await getPool().query<Row>(
+        `SELECT ${COLUMNS} FROM run_log ORDER BY id DESC LIMIT 1`,
+      );
+      const last = newest.rows[0] ? toEntry(newest.rows[0]) : null;
+      if (last && isIdleSummary(last)) {
+        const upd = await getPool().query<Row>(
+          `UPDATE run_log SET ended_at = $1, message = $2 WHERE id = $3
+           RETURNING ${COLUMNS}`,
+          [entry.endedAt, entry.message, last.id],
+        );
+        return toEntry(upd.rows[0]);
+      }
+      return this.append(entry);
     },
     async list(offset: number, limit: number): Promise<RunLogEntry[]> {
       await ensureSchema();

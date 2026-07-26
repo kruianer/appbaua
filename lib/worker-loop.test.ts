@@ -70,6 +70,28 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     expect(row.status).toBe("idle");
   });
 
+  it("req-021: many idle passes collapse into ONE growing row", async () => {
+    setStore(
+      createMemoryStore([
+        { ...repos[0], active: false },
+        { ...repos[1], active: false },
+      ]),
+    );
+    let clock = new Date(2026, 6, 22, 18, 0, 0).getTime();
+    const d = deps({ now: () => new Date(clock) });
+    await runOnce({ n: 0 }, d);
+    clock += 5 * 60_000;
+    await runOnce({ n: 0 }, d);
+    clock += 5 * 60_000;
+    await runOnce({ n: 0 }, d);
+    // Three empty passes, one row (req-021) — not three "nichts zu tun" lines.
+    expect(await logStore.count()).toBe(1);
+    const [row] = await logStore.list(0, 1);
+    expect(row.status).toBe("idle");
+    expect(row.message).toContain("seit"); // it grew into a summary
+    expect(row.message).toContain("zuletzt geprüft");
+  });
+
   it("AC: order is repo outer, task-type inner; success entries (bug-008)", async () => {
     setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 2))); // Bugs, Requirements
     const done = await runOnce({ n: 0 }, deps());

@@ -4,7 +4,7 @@ import type { RunLogEntry } from "./run-log";
 import { listRepos } from "./repo-service";
 import { listTaskTypes } from "./task-service";
 import { getWorkerState } from "./worker-state";
-import { getRunLogStore } from "./run-log-store";
+import { getRunLogStore, isIdleSummary } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
 import { executeStep, type StepDecision } from "./execute-step";
 import { redact } from "./redact";
@@ -39,6 +39,23 @@ export const RATE_LIMIT_PAUSE_PREFIX = "Pause wegen Rate-Limit bis";
  * loop should wait until then instead of the usual empty pause (req-029).
  */
 export type PassResult = { succeeded: number; rateLimitUntil?: number };
+
+/** "DD.MM. HH:MM" for the idle-summary message (req-021). */
+function stampDe(iso: string): string {
+  const d = new Date(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}. ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * The single idle-summary line (req-021): shows since when there has been
+ * nothing to do and when it was last checked. When start and last check are the
+ * same first pass, it reads as a plain "nichts zu tun".
+ */
+export function idleSummaryMessage(sinceIso: string, lastIso: string): string {
+  if (sinceIso === lastIso) return `Leerlauf — nichts zu tun (${stampDe(lastIso)})`;
+  return `Leerlauf — nichts zu tun seit ${stampDe(sinceIso)} (zuletzt geprüft ${stampDe(lastIso)})`;
+}
 
 export type LoopDeps = {
   sleep: (ms: number) => Promise<void>;
@@ -172,15 +189,24 @@ export async function runOnce(
   // is what req-020 is about: say so once. This covers both ways a pass can end
   // up empty — nothing was due at all, and every step that was due had nothing
   // to do. A rate-limited pass already wrote its own row, so it is not silent.
+  //
+  // req-021: consecutive idle passes collapse into ONE growing row instead of a
+  // new "nichts zu tun" line every 5 minutes. The row keeps the phase's start
+  // ("seit …") and moves its "zuletzt geprüft" forward; upsertIdle does the
+  // merge, so a real entry in between breaks the summary and the next idle pass
+  // starts a fresh one.
   if (logged === 0 && rateLimitUntilMs === null) {
     const at = deps.now().toISOString();
-    await log.append({
-      startedAt: at,
+    const [newest] = await log.list(0, 1);
+    const since =
+      newest && isIdleSummary(newest) ? newest.startedAt : at;
+    await log.upsertIdle({
+      startedAt: since,
       endedAt: at,
       repo: null,
       taskType: null,
       status: "idle",
-      message: "nichts zu tun gefunden",
+      message: idleSummaryMessage(since, at),
       md: null, // no step ran, so there is no file to name (req-015)
     });
   }

@@ -31,6 +31,48 @@ describe("applyRetention", () => {
   });
 });
 
+describe("upsertIdle (req-021)", () => {
+  const idle = (min: number) => ({
+    startedAt: new Date(2026, 6, 24, 12, 0).toISOString(),
+    endedAt: new Date(2026, 6, 24, 12, min).toISOString(),
+    repo: null,
+    taskType: null,
+    status: "idle" as const,
+    message: `checked at 12:${min}`,
+    md: null,
+  });
+
+  it("collapses consecutive idle passes into one growing row", async () => {
+    const store = createMemoryRunLogStore();
+    await store.upsertIdle(idle(0));
+    await store.upsertIdle(idle(5));
+    await store.upsertIdle(idle(10));
+    expect(await store.count()).toBe(1); // one row, not three
+    const [row] = await store.list(0, 1);
+    expect(row.startedAt).toBe(idle(0).startedAt); // start kept ("seit")
+    expect(row.endedAt).toBe(idle(10).endedAt); // last-checked moved forward
+    expect(row.message).toBe("checked at 12:10");
+  });
+
+  it("real work between idle passes breaks the summary — a new one starts", async () => {
+    const store = createMemoryRunLogStore();
+    await store.upsertIdle(idle(0));
+    await store.append({
+      startedAt: new Date(2026, 6, 24, 12, 2).toISOString(),
+      endedAt: new Date(2026, 6, 24, 12, 2).toISOString(),
+      repo: "appbaua",
+      taskType: "Bugs",
+      status: "success",
+      message: "done",
+    });
+    await store.upsertIdle(idle(5));
+    expect(await store.count()).toBe(3); // idle, work, NEW idle
+    const rows = await store.list(0, 3);
+    expect(rows[0].status).toBe("idle"); // newest is the fresh idle summary
+    expect(rows[1].status).toBe("success");
+  });
+});
+
 describe("memory run-log store", () => {
   it("lists newest first and paginates", async () => {
     const store = createMemoryRunLogStore();
