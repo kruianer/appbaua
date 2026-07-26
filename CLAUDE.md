@@ -39,4 +39,4 @@ ergänzt.
   req-003, req-012, req-013)
 - **Worker-Ausführung** — Laufzeitverhalten des Workers: das Durchgehen
   von Repos × Task-Typen, Protokollierung der Schritte und deren Anzeige.
-  (req-004)
+  (req-004, req-014)
