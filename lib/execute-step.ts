@@ -1,6 +1,6 @@
 import type { Repo } from "./repos";
 import type { TaskType } from "./task-types";
-import type { RunLogEntry } from "./run-log";
+import { type RunLogEntry, RECURRING_MD } from "./run-log";
 import {
   IDEA_DIRECTION_FILE,
   doneDir,
@@ -14,22 +14,48 @@ import {
   sourceFor,
 } from "./task-source";
 import {
+  NO_CHANGES_DETAIL,
   commitAndPush,
   discardChanges,
   headCommit,
   listReady,
   moveMd,
   prepareRepo,
+  readRepoFile,
+  repoPathExists,
   writeRepoFile,
 } from "./workspace";
 import {
   NO_IDEA_MESSAGE,
+  docPrompt,
   fileTaskPrompt,
   ideaPrompt,
   recurringPrompt,
   runClaude,
+  securityPrompt,
 } from "./claude-runner";
-import { reportContent, reportPath } from "./review-report";
+import { REPORT_DIR, reportContent, reportPath } from "./review-report";
+import {
+  DOC_SITE_FILE,
+  DOC_UNCHANGED_MESSAGE,
+  DONE_REQUIREMENTS_DIR,
+  NO_DESIGN_MESSAGE,
+  USER_DOCS_DIR,
+  designDirFrom,
+} from "./doc-site";
+import {
+  DEVOPS_FILE,
+  captureDocScreenshots,
+  devUrlFrom,
+  screenshotNote,
+  type ShotResult,
+} from "./doc-screenshots";
+import {
+  SECURITY_OK_MESSAGE,
+  SECURITY_POLICY_FILE,
+  SECURITY_REPORT_DIR,
+  hasSecurityFindings,
+} from "./security-report";
 import { setCurrentMd, setCurrentOutput } from "./worker-status";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
@@ -54,11 +80,32 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // exactly one new idea as a file in delivery/idea/. Whether that happened is
 // decided by comparing the folder before and after the run, not by reading
 // Claude's answer — so "keine neue Idee gefunden" is a fact, not a phrasing.
+//
+// req-014 adds the Security task: once per repo and calendar day, Claude checks
+// the repo against delivery/security.md. It changes no code — whatever the run
+// touched is discarded — and it files a report in delivery/security/ only when
+// it found something; a clean check leaves nothing behind but a log line.
+//
+// req-016 adds the Doku task: once per repo and calendar day, Claude updates
+// the multi-page user documentation under site/user-docs/. It runs only when the
+// repo's delivery/doc-site.md points at a design template that actually exists —
+// without one the step does nothing at all and says so in the Verlauf.
+//
+// req-017 gives that documentation pictures: right before Claude starts, the
+// worker photographs the app's running dev environment into the docs folder and
+// hands the resulting list over in the prompt. A picture that could not be taken
+// costs its illustration and nothing else — the docs are built either way, and
+// the Verlauf names every page that stayed without one.
+//
+// req-015 carries the .md name out to the caller, so the run log can store it
+// on the entry and the Verlauf can name the file a run worked off — the same
+// information the Aktivität tab shows while the step is still running.
 
 export type StepDecision =
   | { kind: "skip" }
-  | { kind: "success"; message: string }
-  | { kind: "error"; message: string };
+  /** `md`: the .md worked off, RECURRING_MD when the type has none (req-015). */
+  | { kind: "success"; message: string; md?: string | null }
+  | { kind: "error"; message: string; md?: string | null };
 
 export type ExecuteDeps = {
   prepareRepo: typeof prepareRepo;
@@ -72,6 +119,12 @@ export type ExecuteDeps = {
   headCommit: typeof headCommit;
   /** Write the report file into the repo working copy (req-010). */
   writeRepoFile: typeof writeRepoFile;
+  /** Read the repo's doc-site spec (req-016). */
+  readRepoFile: typeof readRepoFile;
+  /** Is the design template the spec names actually there (req-016)? */
+  repoPathExists: typeof repoPathExists;
+  /** Photograph the app's dev environment into the docs folder (req-017). */
+  captureScreenshots: (dir: string, baseUrl: string | null) => Promise<ShotResult>;
   /** Publish the .md this step works on (req-008). */
   setCurrentMd: typeof setCurrentMd;
   /** Publish the live Claude output tail of this step (req-008). */
@@ -89,6 +142,9 @@ const defaultDeps = (): ExecuteDeps => ({
   discardChanges,
   headCommit,
   writeRepoFile,
+  readRepoFile,
+  repoPathExists,
+  captureScreenshots: (dir, baseUrl) => captureDocScreenshots(dir, baseUrl),
   setCurrentMd,
   setCurrentOutput,
   now: () => new Date(),
@@ -104,8 +160,25 @@ export async function executeStep(
   const d: ExecuteDeps = { ...defaultDeps(), ...deps };
   const src = sourceFor(taskType.id);
 
+  // The work item, claimed further below. Declared up here so every decision
+  // can report it (req-015) — including the ones taken before a claim happens.
+  let mdName: string | null = null;
+  let mdRel: string | null = null;
+  /**
+   * What this run should be filed under in the Verlauf (req-015): the claimed
+   * .md for a file-driven type, the recurring marker for every other type, and
+   * null while a file-driven step has not claimed anything yet — an aborted
+   * step names no file, because it worked on none.
+   */
+  const runMd = (): string | null =>
+    src.kind === "file" ? mdName : RECURRING_MD;
+
   if (!d.token) {
-    return { kind: "error", message: "Kein GitHub-Token für Push konfiguriert" };
+    return {
+      kind: "error",
+      message: "Kein GitHub-Token für Push konfiguriert",
+      md: runMd(),
+    };
   }
   // Bound once, so every git helper below gets the credential it needs without
   // reaching for the environment again (bug-003).
@@ -123,12 +196,39 @@ export async function executeStep(
   try {
     dir = await d.prepareRepo(repo.url, token);
   } catch (err) {
-    return { kind: "error", message: `Repo vorbereiten fehlgeschlagen: ${String(err)}` };
+    return {
+      kind: "error",
+      message: `Repo vorbereiten fehlgeschlagen: ${String(err)}`,
+      md: runMd(),
+    };
+  }
+
+  // The Doku task stands or falls with the repo's design template (req-016):
+  // without one it does NOTHING — no Claude run, no file, no commit — and the
+  // Verlauf says why. Checked before anything else happens, so a repo that has
+  // not been set up yet costs a clone and not an hour of Claude.
+  let designDir: string | null = null;
+  /** What this run photographed; stays empty for every type but Doku (req-017). */
+  let shots: ShotResult = { shot: [], missing: [] };
+  if (src.kind === "doc") {
+    designDir = await docDesignDir(d, dir);
+    if (!designDir) {
+      return { kind: "success", message: NO_DESIGN_MESSAGE, md: runMd() };
+    }
+    // Pictures first, prompt second: Claude can only place images that are
+    // already lying in the working copy (req-017). Where the app runs comes out
+    // of the repo's own devops.md — screenshots are taken against dev, never
+    // against prod and never against a locally started app.
+    const devops = await d.readRepoFile(dir, DEVOPS_FILE).catch(() => null);
+    shots = await d
+      .captureScreenshots(dir, devUrlFrom(devops))
+      .catch((err): ShotResult => ({
+        shot: [],
+        missing: [{ page: "/", reason: `Screenshot-Lauf abgebrochen: ${String(err)}` }],
+      }));
   }
 
   // Pick the work item and claim it by moving it into in-progress/ (req-008).
-  let mdName: string | null = null;
-  let mdRel: string | null = null;
   if (src.kind === "file" && src.base) {
     await requeueStale(d, dir, src.base);
 
@@ -144,6 +244,7 @@ export async function executeStep(
       return {
         kind: "error",
         message: `${md} konnte nicht nach in-progress verschoben werden: ${String(err)}`,
+        md: runMd(),
       };
     }
     await d.setCurrentMd(md);
@@ -162,6 +263,16 @@ export async function executeStep(
       ideaDir: src.base,
       doneDir: doneDir(src.base),
       directionFile: IDEA_DIRECTION_FILE,
+    });
+  } else if (src.kind === "security") {
+    prompt = securityPrompt({ policyFile: SECURITY_POLICY_FILE });
+  } else if (src.kind === "doc" && designDir) {
+    prompt = docPrompt({
+      designDir,
+      docSiteFile: DOC_SITE_FILE,
+      docsDir: USER_DOCS_DIR,
+      doneRequirementsDir: DONE_REQUIREMENTS_DIR,
+      screenshots: shots.shot,
     });
   } else {
     prompt = recurringPrompt(taskType.label);
@@ -188,7 +299,11 @@ export async function executeStep(
       src.base && mdName
         ? await parkFailed(d, dir, src.base, mdName, token)
         : "";
-    return { kind: "error", message: `${outcome.summary}${parked}` };
+    return {
+      kind: "error",
+      message: `${outcome.summary}${parked}`,
+      md: runMd(),
+    };
   }
 
   // The Ideen task is done when a new idea file exists — or honestly done when
@@ -200,7 +315,7 @@ export async function executeStep(
       // Nothing was proposed, so nothing of this run belongs on dev — whatever
       // it touched along the way is dropped rather than committed.
       await d.discardChanges(dir).catch(() => {});
-      return { kind: "success", message: NO_IDEA_MESSAGE };
+      return { kind: "success", message: NO_IDEA_MESSAGE, md: runMd() };
     }
     const push = await d.commitAndPush(
       dir,
@@ -210,6 +325,63 @@ export async function executeStep(
     return {
       kind: "success",
       message: `Neue Idee: ${created.join(", ")} — ${push.detail}`,
+      md: runMd(),
+    };
+  }
+
+  // The Security task checks, it does not change (req-014). Whatever the run
+  // touched along the way is dropped first, so the only thing that can reach
+  // dev is the report written right after — and a check without findings files
+  // nothing at all.
+  if (src.kind === "security") {
+    await d.discardChanges(dir).catch(() => {});
+    if (!hasSecurityFindings(outcome.report)) {
+      return { kind: "success", message: SECURITY_OK_MESSAGE, md: runMd() };
+    }
+    const rel = await fileReport(
+      d,
+      dir,
+      repo,
+      taskType,
+      outcome.report,
+      SECURITY_REPORT_DIR,
+    );
+    const push = await d.commitAndPush(
+      dir,
+      `worker: ${taskType.label}-Bericht abgelegt`,
+      token,
+    );
+    const where = rel ? ` (Bericht: ${rel})` : "";
+    return {
+      kind: "success",
+      message: `${outcome.summary} — ${push.detail}${where}`,
+      md: runMd(),
+    };
+  }
+
+  // The Doku task's result IS the site (req-016): whatever the run left under
+  // site/user-docs/ gets committed and pushed, which is what triggers the dev
+  // deploy. It files no report — the pages are the report. A run that found
+  // nothing to add changes nothing, and that is a normal day, not a failure.
+  if (src.kind === "doc") {
+    // Whatever happened to the pictures belongs in the Verlauf of THIS run, so a
+    // page that stayed without one is visible instead of silently absent
+    // (req-017) — no matter whether the run changed anything else.
+    const note = screenshotNote(shots);
+    const push = await d.commitAndPush(dir, "worker: Doku aktualisiert", token);
+    if (push.detail === NO_CHANGES_DETAIL) {
+      return {
+        kind: "success",
+        message: `${DOC_UNCHANGED_MESSAGE}${note ? ` (${note})` : ""}`,
+        md: runMd(),
+      };
+    }
+    return {
+      kind: "success",
+      message: `${outcome.summary} — ${push.detail} (Doku: ${USER_DOCS_DIR}${
+        note ? `, ${note}` : ""
+      })`,
+      md: runMd(),
     };
   }
 
@@ -240,6 +412,7 @@ export async function executeStep(
   return {
     kind: "success",
     message: `${outcome.summary} — ${push.detail}${note}`,
+    md: runMd(),
   };
 }
 
@@ -287,10 +460,35 @@ async function parkFailed(
 }
 
 /**
- * Write Claude's full report into delivery/reviews/ of the working copy and
- * return its repo-relative path (req-010). Best effort: a report that cannot be
- * written must not turn a successful review into a failed step — the analysis
- * itself did happen, and the log message then simply names no file.
+ * Where the repo's design template lies, or null when the Doku task must not run
+ * (req-016). Null covers all three ways there can be none: no
+ * delivery/doc-site.md at all, a doc-site.md that names no usable location (an
+ * unfilled template placeholder is one), and a location that is not actually in
+ * the repo — a spec pointing at a folder nobody uploaded is no design template
+ * either, and generating a doc "so far as possible like" a template that does
+ * not exist would mean inventing one.
+ *
+ * A read that throws counts as "none": the task doing nothing is the documented
+ * behaviour for a repo without a template, and it is the safe answer here.
+ */
+async function docDesignDir(
+  d: ExecuteDeps,
+  dir: string,
+): Promise<string | null> {
+  const spec = await d.readRepoFile(dir, DOC_SITE_FILE).catch(() => null);
+  const rel = designDirFrom(spec);
+  if (!rel) return null;
+  const there = await d.repoPathExists(dir, rel).catch(() => false);
+  return there ? rel : null;
+}
+
+/**
+ * Write Claude's full report into `folder` of the working copy — delivery/
+ * reviews/ for a recurring analysis (req-010), delivery/security/ for the
+ * Security task (req-014) — and return its repo-relative path. Best effort: a
+ * report that cannot be written must not turn a successful review into a failed
+ * step — the analysis itself did happen, and the log message then simply names
+ * no file.
  */
 async function fileReport(
   d: ExecuteDeps,
@@ -298,6 +496,7 @@ async function fileReport(
   repo: Repo,
   taskType: TaskType,
   report: string,
+  folder: string = REPORT_DIR,
 ): Promise<string | null> {
   try {
     const ref = {
@@ -306,7 +505,7 @@ async function fileReport(
       commit: await d.headCommit(dir),
       now: d.now(),
     };
-    const rel = reportPath(ref);
+    const rel = reportPath(ref, folder);
     await d.writeRepoFile(
       dir,
       rel,

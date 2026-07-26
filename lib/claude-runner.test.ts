@@ -2,13 +2,16 @@ import { describe, it, expect } from "vitest";
 import {
   createActivityStream,
   createLiveTail,
+  docPrompt,
   ideaPrompt,
   lastLines,
   recurringPrompt,
   runClaude,
+  securityPrompt,
   LIVE_TAIL_LINES,
   NO_IDEA_MESSAGE,
 } from "./claude-runner";
+import { SECURITY_OK_MESSAGE } from "./security-report";
 import type { run } from "./workspace";
 
 // Live output of a running Claude step (req-008): only the last ~50 lines, and
@@ -164,6 +167,150 @@ describe("ideaPrompt (req-011)", () => {
 
   it("asks for no report — the idea file IS the result", () => {
     expect(p).not.toContain("Bericht");
+  });
+});
+
+// req-014: the Security task asks for a report only when there IS something to
+// report — and it must not change the repo. Both, plus the four areas and the
+// shape of a finding, can only be stated here.
+describe("securityPrompt (req-014)", () => {
+  const p = securityPrompt({ policyFile: "delivery/security.md" });
+
+  it("AC: reads the repo's security policy as the target state", () => {
+    expect(p).toContain("delivery/security.md");
+    expect(p).toContain("SOLL");
+  });
+
+  it("AC: falls back to best practices and says so in the report", () => {
+    expect(p).toContain("Best-Practices");
+    expect(p).toContain("keine repo-spezifische Vorgabe vorlag");
+  });
+
+  it("AC: names all four areas that get checked", () => {
+    expect(p).toContain("Zugriff & Erreichbarkeit");
+    expect(p).toContain("Datenschutz & Datenhaltung");
+    expect(p).toContain("Backup & Wiederherstellung");
+    expect(p).toContain("Abhängigkeiten & bekannte Lücken");
+  });
+
+  it("AC: asks for a summary, a severity, a recommendation and live-vs-derived", () => {
+    expect(p).toContain("Kurz-Zusammenfassung");
+    expect(p).toContain("hoch/mittel/niedrig");
+    expect(p).toContain("Empfehlung");
+    expect(p).toContain("live verifiziert");
+  });
+
+  it("AC: no finding -> no report, fixed answer", () => {
+    expect(p).toContain("KEINEN Bericht");
+    expect(p).toContain(SECURITY_OK_MESSAGE);
+  });
+
+  it("changes nothing and leaves committing to the worker", () => {
+    expect(p).toContain("Ändere NICHTS im Repo");
+    expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+});
+
+// req-016: the Doku task produces a website, not a report. Following the design
+// template, writing only into site/user-docs/ and — above all — UPDATING the
+// existing pages instead of rebuilding them are things nothing but this prompt
+// can ask for, so each of them is pinned here.
+describe("docPrompt (req-016)", () => {
+  const p = docPrompt({
+    designDir: "delivery/doc-design",
+    docSiteFile: "delivery/doc-site.md",
+    docsDir: "site/user-docs",
+    doneRequirementsDir: "delivery/requirements/done",
+  });
+
+  it("AC: reads the design template and follows it as far as possible", () => {
+    expect(p).toContain("delivery/doc-design/");
+    expect(p).toContain("Handover-Markdown");
+    expect(p).toContain("SO WEIT WIE MÖGLICH");
+    expect(p).toContain("Orientierung, kein");
+  });
+
+  it("AC: derives the content from the shipped requirements and the code", () => {
+    expect(p).toContain("delivery/requirements/done/");
+    expect(p).toContain("Code");
+    expect(p).toContain("Sicht der Nutzer");
+  });
+
+  it("AC: updates incrementally instead of rebuilding the site", () => {
+    expect(p).toContain("INKREMENTELL");
+    expect(p).toContain("vorhandenen Seiten in site/user-docs/");
+    expect(p).toContain("NICHT bei jedem Lauf neu");
+    expect(p).toContain("nicht bei jedem Lauf anders aussehen");
+  });
+
+  it("asks for a multi-page site under the shared web root", () => {
+    expect(p).toContain("mehrseitige");
+    expect(p).toContain("site/user-docs/");
+  });
+
+  it("touches nothing outside the docs folder and leaves the push to the worker", () => {
+    expect(p).toContain("Ändere sonst NICHTS im Repo");
+    expect(p).toContain("Committe/pushe NICHT selbst");
+  });
+
+  it("asks for no report — the pages ARE the result", () => {
+    expect(p).not.toContain("Bericht");
+  });
+});
+
+// req-017: the pictures the worker already took are handed over as a CLOSED
+// list. Where they go is Claude's decision; which of them exist is not — a page
+// pointing at a screenshot that was never taken is exactly the broken image the
+// requirement rules out.
+describe("docPrompt — Screenshots (req-017)", () => {
+  const withShots = docPrompt({
+    designDir: "delivery/doc-design",
+    docSiteFile: "delivery/doc-site.md",
+    docsDir: "site/user-docs",
+    doneRequirementsDir: "delivery/requirements/done",
+    screenshots: [
+      { page: "/", rel: "site/user-docs/assets/screenshots/start.png" },
+      { page: "/verlauf", rel: "site/user-docs/assets/screenshots/verlauf.png" },
+    ],
+  });
+  const withoutShots = docPrompt({
+    designDir: "delivery/doc-design",
+    docSiteFile: "delivery/doc-site.md",
+    docsDir: "site/user-docs",
+    doneRequirementsDir: "delivery/requirements/done",
+    screenshots: [],
+  });
+
+  it("AC: names every available picture and what it shows", () => {
+    expect(withShots).toContain("site/user-docs/assets/screenshots/start.png");
+    expect(withShots).toContain("site/user-docs/assets/screenshots/verlauf.png");
+    expect(withShots).toContain("zeigt /verlauf");
+  });
+
+  it("AC: asks for them to be placed where the docs talk about that page", () => {
+    expect(withShots).toContain("Binde jeden davon dort ein");
+    expect(withShots).toContain("alt-Text");
+  });
+
+  it("AC: allows no picture beyond the ones that exist", () => {
+    expect(withShots).toContain("AUSSCHLIESSLICH diese Bilder");
+    expect(withShots).toContain("keine Bild-Datei, die es nicht gibt");
+  });
+
+  it("AC: without pictures it asks for a doc without images, not for broken ones", () => {
+    expect(withoutShots).toContain("KEINE neuen Screenshots");
+    expect(withoutShots).toContain("ohne neue Bilder");
+    expect(withoutShots).toContain("KEINE Bild-Datei, die es nicht gibt");
+  });
+
+  it("defaults to the no-pictures wording when nobody says otherwise", () => {
+    const noKey = docPrompt({
+      designDir: "delivery/doc-design",
+      docSiteFile: "delivery/doc-site.md",
+      docsDir: "site/user-docs",
+      doneRequirementsDir: "delivery/requirements/done",
+    });
+    expect(noKey).toContain("KEINE neuen Screenshots");
   });
 });
 

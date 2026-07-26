@@ -1,5 +1,6 @@
 import { run, type RunResult } from "./workspace";
 import { describeEvent, finalResultText } from "./claude-events";
+import { SECURITY_OK_MESSAGE } from "./security-report";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
 // CLI runs non-interactively with permissions skipped so it never asks. Auth is
@@ -149,6 +150,118 @@ export function ideaPrompt(paths: {
     `"${NO_IDEA_MESSAGE}".`,
     `Ändere sonst nichts im Repo — kein Code, keine anderen Dateien.`,
     `Committe/pushe NICHT selbst. Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
+ * The prompt for the Security task (req-014). Like a recurring task it answers
+ * with a report — but only when it actually found something, because a run
+ * without findings files no file at all. The four areas, the severity, the
+ * recommendation and the live-vs-derived marking are pinned here, because this
+ * prompt is the only place that can ask for them.
+ */
+export function securityPrompt(paths: { policyFile: string }): string {
+  return [
+    `Führe einen Sicherheits-Check für dieses Repo durch, autonom und ohne Rückfragen.`,
+    `Lies zuerst — falls vorhanden — die Sicherheits-Vorgaben ${paths.policyFile}`,
+    `(Erreichbarkeit, HTTPS-Pflicht, Zugriffskreis, Backup-Erwartung, Datenschutz)`,
+    `sowie die CLAUDE.md dieses Repos. Sie sind das SOLL, gegen das du das IST prüfst.`,
+    `Fehlt ${paths.policyFile}, prüfe nach allgemeinen Sicherheits-Best-Practices und`,
+    `vermerke im Bericht ausdrücklich, dass keine repo-spezifische Vorgabe vorlag.`,
+    `Prüfe diese vier Bereiche, so tief dein Zugriff reicht`,
+    `(Requirements/Code/Config immer; Infrastruktur/SSH nur, wo Zugang hinterlegt ist):`,
+    `1. Zugriff & Erreichbarkeit (passt die tatsächliche Erreichbarkeit zur Vorgabe:`,
+    `nur WLAN vs. von außen, HTTPS erzwungen, Auth/Login vorhanden, wer darf zugreifen),`,
+    `2. Datenschutz & Datenhaltung (Secrets/Passwörter/Tokens im Repo, Umgang mit`,
+    `personenbezogenen/sensiblen Daten),`,
+    `3. Backup & Wiederherstellung (Abgleich mit der Backup-Erwartung),`,
+    `4. Abhängigkeiten & bekannte Lücken (veraltete/verwundbare Dependencies,`,
+    `unsichere Default-Konfiguration).`,
+    `Ändere NICHTS im Repo — kein Code, keine Config, keine Dateien; dies ist eine`,
+    `reine Prüfung. Committe/pushe NICHT selbst.`,
+    `Hast du mindestens ein Finding, gib deinen vollständigen Bericht als finale`,
+    `Antwort in Markdown aus — er wird als Datei im Repo abgelegt. Der Bericht`,
+    `beginnt mit einer Kurz-Zusammenfassung; danach folgt jedes Finding mit`,
+    `Schweregrad (hoch/mittel/niedrig), einer konkreten Empfehlung und der Angabe,`,
+    `ob es live verifiziert oder nur aus Code/Config erschlossen wurde.`,
+    `Findest du keine Auffälligkeit, gib KEINEN Bericht aus und antworte genau`,
+    `"${SECURITY_OK_MESSAGE}".`,
+    `Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
+ * The prompt for the Doku task (req-016). Its result is neither code nor a
+ * report but a multi-page user documentation under `docsDir`, so this prompt is
+ * the only place that can pin the three things req-016 asks for and nothing else
+ * can enforce: follow the design template as far as possible, derive the content
+ * from the shipped requirements and the code, and UPDATE the existing pages
+ * instead of rebuilding the site — a doc that looks different after every run is
+ * exactly what the requirement rules out.
+ *
+ * `screenshots` are the pictures the worker already took of the running dev
+ * environment (req-017). They are handed over as a closed list on purpose: the
+ * placement is Claude's decision, but WHICH images exist is not — a page must
+ * never point at a picture that was never taken.
+ */
+export function docPrompt(paths: {
+  designDir: string;
+  docSiteFile: string;
+  docsDir: string;
+  doneRequirementsDir: string;
+  screenshots?: { page: string; rel: string }[];
+}): string {
+  return [
+    `Pflege die Benutzer-Dokumentation dieses Repos als mehrseitige Website,`,
+    `autonom und ohne Rückfragen.`,
+    `Lies zuerst die Design-Vorgabe in ${paths.designDir}/ (HTML/CSS-Vorlage plus`,
+    `Handover-Markdown) sowie ${paths.docSiteFile} und die CLAUDE.md dieses Repos.`,
+    `Halte dich SO WEIT WIE MÖGLICH an die Design-Vorlage — Kopf, Farben,`,
+    `Typografie und Navigation folgen ihr erkennbar. Sie ist Orientierung, kein`,
+    `starres Template: wo sie nichts vorgibt, entscheide im Sinne der Vorlage.`,
+    `Den Inhalt leitest du aus den umgesetzten Requirements in`,
+    `${paths.doneRequirementsDir}/ und aus dem Code ab, und beschreibst ihn aus`,
+    `Sicht der Nutzer der App (was kann ich damit tun, wie geht das) — nicht`,
+    `technisch und nicht als Requirement-Liste.`,
+    `Lies VOR jeder Änderung die vorhandenen Seiten in ${paths.docsDir}/ und`,
+    `aktualisiere sie INKREMENTELL: ergänze neue Inhalte, passe Seiten an, deren`,
+    `Thema sich geändert hat, und lass jede Seite, deren Thema unverändert ist,`,
+    `inhaltlich stehen. Baue die Doku NICHT bei jedem Lauf neu auf und ändere`,
+    `weder Struktur noch Aussehen ohne Anlass — die Seite soll nicht bei jedem`,
+    `Lauf anders aussehen. Gibt es noch keine Doku, lege sie neu an.`,
+    screenshotInstruction(paths.screenshots ?? []),
+    `Schreibe alles, was zur Doku gehört (HTML, CSS, Assets), ausschließlich`,
+    `nach ${paths.docsDir}/. Ändere sonst NICHTS im Repo — keinen Code, keine`,
+    `Requirements, keine Konfiguration.`,
+    `Committe/pushe NICHT selbst — das übernimmt der Worker.`,
+    `Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
+ * What the Doku prompt says about this run's screenshots (req-017). Two cases,
+ * and the second one matters as much as the first: a run whose screenshots
+ * failed must produce a doc WITHOUT pictures rather than one with broken images,
+ * because a page whose image is missing must still show its content.
+ */
+function screenshotInstruction(shots: { page: string; rel: string }[]): string {
+  if (shots.length === 0) {
+    return [
+      `Für diesen Lauf stehen KEINE neuen Screenshots der App zur Verfügung.`,
+      `Schreibe die Doku ohne neue Bilder und verweise auf KEINE Bild-Datei, die`,
+      `es nicht gibt — eine Seite ohne Bild ist besser als eine mit kaputtem Bild.`,
+      `Bereits eingebundene Bilder, deren Datei noch vorhanden ist, lässt du stehen.`,
+    ].join(" ");
+  }
+  const list = shots.map((s) => `${s.rel} (zeigt ${s.page})`).join(", ");
+  return [
+    `Von der laufenden dev-Umgebung der App liegen bereits Screenshots im Repo:`,
+    `${list}.`,
+    `Binde jeden davon dort ein, wo die Doku über die gezeigte Seite spricht`,
+    `(relativer Pfad von der jeweiligen Doku-Seite aus, mit beschreibendem`,
+    `alt-Text). Verwende AUSSCHLIESSLICH diese Bilder, erzeuge selbst keine`,
+    `weiteren Bild-Dateien und verweise auf keine Bild-Datei, die es nicht gibt —`,
+    `eine Seite ohne Bild ist besser als eine mit kaputtem Bild.`,
   ].join(" ");
 }
 

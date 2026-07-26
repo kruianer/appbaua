@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { RunLogEntry } from "@/lib/run-log";
+import { type RunLogEntry, mdLabel } from "@/lib/run-log";
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
@@ -80,6 +80,9 @@ export function RunLog() {
         >
           {entries.map((e) => {
             const s = STATUS_META[e.status];
+            // Second line: the .md this run worked off (req-015). Absent on
+            // entries that never recorded one — they get no line at all.
+            const md = mdLabel(e);
             return (
               <div
                 key={e.id}
@@ -113,6 +116,18 @@ export function RunLog() {
                     {s.label}
                   </span>
                 </div>
+                {md && (
+                  <div
+                    style={{
+                      fontSize: 13,
+                      lineHeight: 1.3,
+                      color: muted(60),
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {md}
+                  </div>
+                )}
                 <div style={{ fontSize: 12, color: muted(55) }}>
                   {fmt(e.startedAt)} – {fmt(e.endedAt)}
                 </div>

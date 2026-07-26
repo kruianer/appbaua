@@ -1,14 +1,63 @@
 import { describe, it, expect, vi } from "vitest";
-import { executeStep, type ExecuteDeps } from "./execute-step";
+import {
+  executeStep,
+  type ExecuteDeps,
+  type StepDecision,
+} from "./execute-step";
 import { defaultTaskTypes } from "./task-types";
 import type { Repo } from "./repos";
-import type { RunLogEntry } from "./run-log";
+import { type RunLogEntry, RECURRING_MD } from "./run-log";
+import {
+  DOC_UNCHANGED_MESSAGE,
+  NO_DESIGN_MESSAGE,
+  USER_DOCS_DIR,
+} from "./doc-site";
+import {
+  NO_DEV_URL_MESSAGE,
+  SCREENSHOT_DIR,
+  type ShotResult,
+} from "./doc-screenshots";
+import { NO_CHANGES_DETAIL } from "./workspace";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
+const security = defaultTaskTypes().find((t) => t.id === "security")!;
+const doku = defaultTaskTypes().find((t) => t.id === "doku")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
+
+/**
+ * A repo that HAS a design template (req-016): doc-site.md names one and the
+ * folder is there. The default deps below use it, so a Doku test only says so
+ * when it wants the other case.
+ */
+const DOC_SITE_MD = [
+  "# Doku-Site-Vorgaben",
+  "",
+  "## Design-Vorlage",
+  "",
+  "- Ort: delivery/doc-design/",
+].join("\n");
+
+/** The repo's devops.md, which is where the Doku task reads the dev URL (req-017). */
+const DEVOPS_MD = [
+  "# DevOps Convention",
+  "",
+  "## Environments",
+  "",
+  "| Environment | Branch | URL                     |",
+  "|-------------|--------|-------------------------|",
+  "| dev         | dev    | https://dev.appbaua.com |",
+  "| prod        | main   | https://app.appbaua.com |",
+].join("\n");
+
+/**
+ * Default for the screenshot dep: a run that photographed nothing at all, so the
+ * tests that predate req-017 keep seeing exactly the messages they asserted.
+ * Every req-017 test says what it wants instead.
+ */
+const noShots = (): ShotResult => ({ shot: [], missing: [] });
 
 /**
  * Folder-aware fake for listReady: a step looks into in-progress/ (leftovers of
@@ -40,6 +89,13 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
     discardChanges: vi.fn(async (_dir: string) => {}),
     headCommit: vi.fn(async (_dir: string) => "282a765"),
     writeRepoFile: writerFake(),
+    readRepoFile: vi.fn(async (_dir: string, rel: string) => {
+      if (rel === "delivery/doc-site.md") return DOC_SITE_MD;
+      if (rel === "delivery/devops.md") return DEVOPS_MD;
+      return null;
+    }),
+    repoPathExists: vi.fn(async (_dir: string, _rel: string) => true),
+    captureScreenshots: vi.fn(async (_dir: string, _url: string | null) => noShots()),
     setCurrentMd: vi.fn(async (_md: string | null) => {}),
     setCurrentOutput: vi.fn(async (_text: string | null) => {}),
     ...over,
@@ -126,6 +182,71 @@ describe("executeStep (req-006)", () => {
     const d = await executeStep(repo, review, [], deps({ runClaude }));
     expect(d.kind).toBe("success");
     expect(runClaude).toHaveBeenCalled();
+  });
+});
+
+// req-015: the decision carries the .md out, so the loop can put it on the log
+// entry and the Verlauf can name the file the run worked off.
+describe("executeStep — .md für den Verlauf (req-015)", () => {
+  /** The md of a decision that is not a skip. */
+  const mdOf = (d: StepDecision) => (d.kind === "skip" ? undefined : d.md);
+
+  it("AC: a file-driven step names the .md it worked off", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: folders({ ready: ["bug-002.md", "bug-001.md"] }) }),
+    );
+    expect(d.kind).toBe("success");
+    expect(mdOf(d)).toBe("bug-001.md"); // the oldest one, the one it claimed
+  });
+
+  it("AC: a recurring step reports that it has no .md", async () => {
+    const d = await executeStep(repo, review, [], deps());
+    expect(d.kind).toBe("success");
+    expect(mdOf(d)).toBe(RECURRING_MD);
+  });
+
+  it("the Ideen, Security and Doku tasks report it the same way", async () => {
+    const idea = await executeStep(repo, ideen, [], deps());
+    expect(mdOf(idea)).toBe(RECURRING_MD);
+
+    const sec = await executeStep(repo, security, [], deps());
+    expect(mdOf(sec)).toBe(RECURRING_MD);
+
+    const doc = await executeStep(repo, doku, [], deps());
+    expect(mdOf(doc)).toBe(RECURRING_MD);
+  });
+
+  it("a failed run still names the .md it tried", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(mdOf(d)).toBe("bug-001.md");
+  });
+
+  it("a file-driven step that broke off before claiming names no file", async () => {
+    // Nothing was worked on, so the Verlauf must not claim otherwise.
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: vi.fn(async () => {
+          throw new Error("Repo weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(mdOf(d)).toBeNull();
   });
 });
 
@@ -863,5 +984,774 @@ describe("executeStep — Ideen-Task (req-011)", () => {
     expect(d.kind).toBe("success");
     if (d.kind !== "success") return;
     expect(d.message).toContain("push failed: keine Rechte");
+  });
+});
+
+// req-014: the Security task. Once per repo and calendar day it checks the repo
+// against delivery/security.md, changes nothing, and files a report in
+// delivery/security/ — but only when it found something.
+describe("executeStep — Security-Task (req-014)", () => {
+  const FINDINGS = [
+    "## Zusammenfassung",
+    "",
+    "Zwei Abweichungen von den Vorgaben.",
+    "",
+    "### 1. Port 3000 von außen erreichbar (Schweregrad: hoch)",
+    "",
+    "Empfehlung: Firewall-Regel auf das WLAN begrenzen. Live verifiziert.",
+  ].join("\n");
+  const REPORT_FILE = "delivery/security/2026-07-24-security-appbaua-282a765.md";
+
+  /** A check that came back with findings. */
+  function found(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
+    return deps({
+      runClaude: vi.fn(async () => ({
+        ok: true,
+        summary: "2 Findings",
+        report: FINDINGS,
+      })),
+      ...over,
+    });
+  }
+
+  it("AC: a finding lands as a new file in delivery/security/ and is pushed on dev", async () => {
+    const writeRepoFile = writerFake();
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      found({ writeRepoFile, commitAndPush }),
+    );
+    expect(d.kind).toBe("success");
+    expect(writeRepoFile).toHaveBeenCalledTimes(1);
+    const [dir, rel, content] = writeRepoFile.mock.calls[0];
+    expect(dir).toBe("/work/appbaua");
+    expect(rel).toBe(REPORT_FILE);
+    expect(content).toContain(FINDINGS); // summary + findings verbatim
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: Security-Bericht abgelegt",
+      "tok",
+    );
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("auf dev gepusht");
+    expect(d.message).toContain(REPORT_FILE); // findable from the Verlauf
+  });
+
+  it("AC: the filename names type, date and repo", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(repo, security, [], found({ writeRepoFile }));
+    const rel = writeRepoFile.mock.calls[0][1];
+    expect(rel).toContain("security"); // Typ
+    expect(rel).toContain("2026-07-24"); // Datum
+    expect(rel).toContain("appbaua"); // Repo
+  });
+
+  it("AC: a second run on the same calendar day is skipped", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 20).toISOString(),
+        repo: "appbaua",
+        taskType: "Security",
+        status: "success",
+        message: "Security-Check ok",
+      },
+    ];
+    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const d = await executeStep(repo, security, ranToday, deps({ prepareRepo }));
+    expect(d.kind).toBe("skip");
+    expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
+  });
+
+  it("AC: no finding -> no report file, and the log says 'Security-Check ok'", async () => {
+    const writeRepoFile = writerFake();
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Security-Check ok",
+          report: "Security-Check ok",
+        })),
+        writeRepoFile,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe("Security-Check ok");
+    expect(writeRepoFile).not.toHaveBeenCalled();
+    expect(commitAndPush).not.toHaveBeenCalled();
+  });
+
+  it("AC: the security policy of the repo reaches the check", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "ok", report: "Security-Check ok" };
+    });
+    await executeStep(repo, security, [], deps({ runClaude }));
+    expect(seenPrompt).toContain("delivery/security.md");
+    expect(seenPrompt).toContain("Zugriff & Erreichbarkeit");
+    expect(seenPrompt).toContain("keine repo-spezifische Vorgabe vorlag");
+  });
+
+  it("changes no code: everything the run touched is dropped before the report", async () => {
+    const order: string[] = [];
+    await executeStep(
+      repo,
+      security,
+      [],
+      found({
+        discardChanges: vi.fn(async (_dir: string) => {
+          order.push("discard");
+        }),
+        writeRepoFile: vi.fn(async (_d: string, _r: string, _c: string) => {
+          order.push("write");
+        }),
+        commitAndPush: vi.fn(async () => {
+          order.push("push");
+          return { pushed: true, detail: "auf dev gepusht" };
+        }),
+      }),
+    );
+    expect(order).toEqual(["discard", "write", "push"]);
+  });
+
+  it("an empty-handed check still uses up the day", async () => {
+    const clean = await executeStep(repo, security, [], deps());
+    expect(clean.kind).toBe("success");
+    if (clean.kind !== "success") return;
+    const log: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: now.toISOString(),
+        endedAt: now.toISOString(),
+        repo: "appbaua",
+        taskType: "Security",
+        status: "success",
+        message: clean.message,
+      },
+    ];
+    expect((await executeStep(repo, security, log, deps())).kind).toBe("skip");
+  });
+
+  it("files nothing under delivery/reviews/ — Security has its own folder", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(repo, security, [], found({ writeRepoFile }));
+    expect(writeRepoFile.mock.calls[0][1]).not.toContain("delivery/reviews");
+  });
+
+  it("claims no .md — the Security task has no work-item queue", async () => {
+    const listReady = folders();
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    await executeStep(
+      repo,
+      security,
+      [],
+      found({ listReady, moveMd, setCurrentMd }),
+    );
+    expect(listReady).not.toHaveBeenCalled();
+    expect(moveMd).not.toHaveBeenCalled();
+    expect(setCurrentMd).not.toHaveBeenCalled();
+  });
+
+  it("a failed Claude run stays an error and files nothing", async () => {
+    const writeRepoFile = writerFake();
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "Timeout",
+          report: "",
+        })),
+        writeRepoFile,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Timeout");
+    expect(writeRepoFile).not.toHaveBeenCalled();
+    expect(commitAndPush).not.toHaveBeenCalled();
+  });
+
+  it("a failing write never turns a clean run into an error", async () => {
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      found({
+        writeRepoFile: vi.fn(async () => {
+          throw new Error("Platte voll");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).not.toContain("Bericht:");
+  });
+
+  it("the log keeps the short message, not the whole report", async () => {
+    const long = `${"x".repeat(5000)}\nFazit: 2 Findings.`;
+    const d = await executeStep(
+      repo,
+      security,
+      [],
+      found({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Fazit: 2 Findings.",
+          report: long,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).not.toContain(long);
+    expect(d.message.length).toBeLessThan(500);
+  });
+});
+
+// req-016: the Doku task. Once per repo and calendar day it updates the
+// multi-page user documentation under site/user-docs/ and pushes it on dev —
+// but only when the repo points it at a design template that is really there.
+describe("executeStep — Doku-Task (req-016)", () => {
+  /** A doc-site.md whose Design-Vorlage section names no usable location. */
+  const NO_DESIGN_MD = "# Doku-Site-Vorgaben\n\n## Deploy-Ziele\n\n- dev: beelink\n";
+
+  it("AC: the docs are written under site/user-docs/ and pushed on dev", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(repo, doku, [], deps({ commitAndPush }));
+    expect(d.kind).toBe("success");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: Doku aktualisiert",
+      "tok",
+    );
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("auf dev gepusht");
+    expect(d.message).toContain(USER_DOCS_DIR);
+  });
+
+  it("AC: no design template -> nothing happens and the Verlauf says why", async () => {
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "x", report: "" }));
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        readRepoFile: vi.fn(async () => null), // no delivery/doc-site.md at all
+        runClaude,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe(NO_DESIGN_MESSAGE);
+    expect(runClaude).not.toHaveBeenCalled(); // not even an hour of Claude
+    expect(commitAndPush).not.toHaveBeenCalled();
+  });
+
+  it("a doc-site.md that names no location is no design template either", async () => {
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "x", report: "" }));
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ readRepoFile: vi.fn(async () => NO_DESIGN_MD), runClaude }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe(NO_DESIGN_MESSAGE);
+    expect(runClaude).not.toHaveBeenCalled();
+  });
+
+  it("a location that is not in the repo is no design template either", async () => {
+    // doc-site.md points at delivery/doc-design/, but nobody uploaded it.
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "x", report: "" }));
+    const repoPathExists = vi.fn(async (_dir: string, _rel: string) => false);
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ repoPathExists, runClaude }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe(NO_DESIGN_MESSAGE);
+    expect(repoPathExists).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/doc-design",
+    );
+    expect(runClaude).not.toHaveBeenCalled();
+  });
+
+  it("AC: a second run on the same calendar day is skipped", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 10, 0).toISOString(),
+        repo: "appbaua",
+        taskType: "Doku",
+        status: "success",
+        message: "Doku aktualisiert",
+      },
+    ];
+    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const d = await executeStep(repo, doku, ranToday, deps({ prepareRepo }));
+    expect(d.kind).toBe("skip");
+    expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
+  });
+
+  it("a run without a template still uses up the day", async () => {
+    // Otherwise every pass of the day would clone the repo again just to find
+    // out that there is still no design template.
+    const none = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ readRepoFile: vi.fn(async () => null) }),
+    );
+    expect(none.kind).toBe("success");
+    if (none.kind !== "success") return;
+    const log: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: now.toISOString(),
+        endedAt: now.toISOString(),
+        repo: "appbaua",
+        taskType: "Doku",
+        status: "success",
+        message: none.message,
+      },
+    ];
+    expect((await executeStep(repo, doku, log, deps())).kind).toBe("skip");
+  });
+
+  it("AC: the design template, the docs folder and the done requirements reach Claude", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "Doku aktualisiert", report: "" };
+    });
+    await executeStep(repo, doku, [], deps({ runClaude }));
+    expect(seenPrompt).toContain("delivery/doc-design/"); // from doc-site.md
+    expect(seenPrompt).toContain("delivery/doc-site.md");
+    expect(seenPrompt).toContain("site/user-docs/");
+    expect(seenPrompt).toContain("delivery/requirements/done/");
+  });
+
+  it("AC: the update is incremental — unchanged pages stay as they are", async () => {
+    // Nothing in the worker can rebuild-proof the pages; the prompt is the only
+    // place that can rule a full rebuild out, so that is what is checked.
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "ergänzt", report: "" };
+    });
+    await executeStep(repo, doku, [], deps({ runClaude }));
+    expect(seenPrompt).toContain("INKREMENTELL");
+    expect(seenPrompt).toContain("NICHT bei jedem Lauf neu");
+  });
+
+  it("a run that changed nothing is a normal day, not a failure", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: NO_CHANGES_DETAIL,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe(DOC_UNCHANGED_MESSAGE);
+  });
+
+  it("a push that fails is reported in the log message", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: "push failed: keine Rechte",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("push failed: keine Rechte");
+    expect(d.message).not.toBe(DOC_UNCHANGED_MESSAGE);
+  });
+
+  it("files no report — the pages are the result (delivery/reviews stays empty)", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Doku aktualisiert",
+          report: "# Ein langer Bericht",
+        })),
+        writeRepoFile,
+      }),
+    );
+    expect(writeRepoFile).not.toHaveBeenCalled();
+  });
+
+  it("claims no .md — the Doku task has no work-item queue", async () => {
+    const listReady = folders();
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ listReady, moveMd, setCurrentMd }),
+    );
+    expect(d.kind).toBe("success");
+    expect(listReady).not.toHaveBeenCalled();
+    expect(moveMd).not.toHaveBeenCalled();
+    expect(setCurrentMd).not.toHaveBeenCalled();
+  });
+
+  it("a failed Claude run stays an error and pushes nothing", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Timeout");
+    expect(commitAndPush).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable doc-site.md is treated as 'no template', not as a crash", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        readRepoFile: vi.fn(async () => {
+          throw new Error("Platte weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe(NO_DESIGN_MESSAGE);
+  });
+
+  it("the log keeps the short message, not Claude's whole answer", async () => {
+    const long = `${"x".repeat(5000)}\nFazit: 3 Seiten ergänzt.`;
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Fazit: 3 Seiten ergänzt.",
+          report: long,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).not.toContain(long);
+    expect(d.message.length).toBeLessThan(500);
+  });
+});
+
+// req-017: the Doku task bebildert its pages. Before Claude starts, the worker
+// photographs the app's running dev environment into site/user-docs/ and hands
+// the list over in the prompt. A picture that could not be taken must cost its
+// illustration and NOTHING else — the docs get built either way.
+describe("executeStep — Doku-Screenshots (req-017)", () => {
+  const START = {
+    page: "/",
+    file: "start.png",
+    rel: `${SCREENSHOT_DIR}/start.png`,
+  };
+  const VERLAUF = {
+    page: "/verlauf",
+    file: "verlauf.png",
+    rel: `${SCREENSHOT_DIR}/verlauf.png`,
+  };
+
+  /** A capture that came back with `shot` pictures and `missing` gaps. */
+  function shots(result: ShotResult) {
+    return vi.fn(async (_dir: string, _url: string | null) => result);
+  }
+
+  it("AC: the screenshots are taken against the repo's dev environment", async () => {
+    const captureScreenshots = shots({ shot: [START], missing: [] });
+    await executeStep(repo, doku, [], deps({ captureScreenshots }));
+    expect(captureScreenshots).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "https://dev.appbaua.com", // from delivery/devops.md, never the prod URL
+    );
+  });
+
+  it("AC: the pictures reach Claude, so a doc page can show them", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "Doku aktualisiert", report: "" };
+    });
+    await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude,
+        captureScreenshots: shots({ shot: [START, VERLAUF], missing: [] }),
+      }),
+    );
+    expect(seenPrompt).toContain(START.rel);
+    expect(seenPrompt).toContain(VERLAUF.rel);
+    expect(seenPrompt).toContain("Binde jeden davon dort ein");
+  });
+
+  it("AC: the pictures are there before Claude runs — it can only place existing files", async () => {
+    const order: string[] = [];
+    await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        captureScreenshots: vi.fn(async (_dir: string, _url: string | null) => {
+          order.push("screenshots");
+          return { shot: [START], missing: [] };
+        }),
+        runClaude: vi.fn(async () => {
+          order.push("claude");
+          return { ok: true, summary: "Doku aktualisiert", report: "" };
+        }),
+      }),
+    );
+    expect(order).toEqual(["screenshots", "claude"]);
+  });
+
+  it("AC: the pictures are pushed with the docs", async () => {
+    // They lie inside site/user-docs/, so the same commit carries them.
+    expect(START.rel.startsWith(`${USER_DOCS_DIR}/`)).toBe(true);
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ commitAndPush, captureScreenshots: shots({ shot: [START], missing: [] }) }),
+    );
+    expect(d.kind).toBe("success");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: Doku aktualisiert",
+      "tok",
+    );
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("Screenshots: 1");
+  });
+
+  it("AC: a failed screenshot is noted in the Verlauf and the doc is built anyway", async () => {
+    const runClaude = vi.fn(async () => ({
+      ok: true,
+      summary: "Doku aktualisiert",
+      report: "",
+    }));
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude,
+        commitAndPush,
+        captureScreenshots: shots({
+          shot: [START],
+          missing: [{ page: "/verlauf", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(runClaude).toHaveBeenCalled(); // the doc is built regardless
+    expect(commitAndPush).toHaveBeenCalled();
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("ohne Bild: /verlauf (nicht erreichbar)");
+  });
+
+  it("AC: the dev environment being down does not stop the Doku run", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        captureScreenshots: shots({
+          shot: [],
+          missing: [{ page: "/", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("keine Screenshots");
+    expect(d.message).toContain("ohne Bild: /");
+  });
+
+  it("AC: without pictures Claude is told to reference no image at all", async () => {
+    // That is what keeps a failed screenshot from leaving a broken image behind.
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "Doku aktualisiert", report: "" };
+    });
+    await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude,
+        captureScreenshots: shots({
+          shot: [],
+          missing: [{ page: "/", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(seenPrompt).toContain("KEINE neuen Screenshots");
+    expect(seenPrompt).toContain("KEINE Bild-Datei, die");
+  });
+
+  it("a run that changed nothing still reports its pictures", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: NO_CHANGES_DETAIL,
+        })),
+        captureScreenshots: shots({
+          shot: [START],
+          missing: [{ page: "/verlauf", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(DOC_UNCHANGED_MESSAGE);
+    expect(d.message).toContain("ohne Bild: /verlauf");
+  });
+
+  it("a repo without a dev environment gets no pictures, and the Verlauf says so", async () => {
+    const captureScreenshots = shots({
+      shot: [],
+      missing: [{ page: "/", reason: NO_DEV_URL_MESSAGE }],
+    });
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        // doc-site.md is there, devops.md is not
+        readRepoFile: vi.fn(async (_dir: string, rel: string) =>
+          rel === "delivery/doc-site.md" ? DOC_SITE_MD : null,
+        ),
+        captureScreenshots,
+      }),
+    );
+    expect(captureScreenshots).toHaveBeenCalledWith("/work/appbaua", null);
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(NO_DEV_URL_MESSAGE);
+  });
+
+  it("a crashing screenshot run never fails the Doku step", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        captureScreenshots: vi.fn(async () => {
+          throw new Error("Browser weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("Screenshot-Lauf abgebrochen");
+    expect(d.message).toContain("Browser weg");
+  });
+
+  it("no design template -> not even a browser is started", async () => {
+    // The Doku task does NOTHING without one (req-016); shooting screenshots for
+    // a doc that is never written would be an hour of browser for nothing.
+    const captureScreenshots = shots({ shot: [START], missing: [] });
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ readRepoFile: vi.fn(async () => null), captureScreenshots }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe(NO_DESIGN_MESSAGE);
+    expect(captureScreenshots).not.toHaveBeenCalled();
+  });
+
+  it("no other task type photographs anything", async () => {
+    const captureScreenshots = shots({ shot: [START], missing: [] });
+    await executeStep(repo, review, [], deps({ captureScreenshots }));
+    await executeStep(repo, security, [], deps({ captureScreenshots }));
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        captureScreenshots,
+      }),
+    );
+    expect(captureScreenshots).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,7 @@ import {
   basicAuthHeader,
   commitAndPush,
   prepareRepo,
+  prepareRepoOnDevOrDefault,
   remoteUrl,
   repoDir,
   type RunOptions,
@@ -197,9 +198,10 @@ describe("git-Fehlermeldungen ohne Token (bug-003)", () => {
   });
 });
 
-// req-012 leans on this: the rollout pushes to the TARGET repo's dev branch, and
-// a target that has no dev yet gets one branched off its default branch.
-describe("dev-Branch im Zielrepo (req-012)", () => {
+// The worker's own steps live on dev (delivery/devops.md): prepareRepo checks it
+// out and creates it from the default branch when the repo has none yet. The
+// appbaua rollout no longer uses this path — see req-013 below.
+describe("dev-Branch für die Worker-Schritte (req-006)", () => {
   it("AC: fehlt dev, wird es vom aktuellen HEAD (Default-Branch) abgezweigt", async () => {
     const { runImpl, calls } = fakeGit((args) =>
       args[0] === "ls-remote" ? { ok: false, code: 2 } : undefined,
@@ -223,10 +225,121 @@ describe("dev-Branch im Zielrepo (req-012)", () => {
     ]);
   });
 
-  it("gepusht wird ausschließlich auf dev", async () => {
+  it("ohne genannten Branch geht der Push auf dev", async () => {
     const { runImpl, calls } = fakeGit(dirtyStatus);
-    await commitAndPush(repoDir(FRESH), "appbaua: Standard", PAT, { runImpl });
+    await commitAndPush(repoDir(FRESH), "worker: x", PAT, { runImpl });
 
     expect(sub(calls, "push")?.args).toEqual(["push", "origin", "dev"]);
+  });
+});
+
+// req-013: die Umstellung eines Repos auf den appbaua-Standard darf im Zielrepo
+// keinen neuen dev-Branch anlegen. Sie nimmt dessen dev nur, wenn es ihn schon
+// gibt — sonst den Default-Branch des Zielrepos, wie immer der heißt.
+describe("Ziel-Branch der Umstellung (req-013)", () => {
+  /** A remote that has no `dev` and whose HEAD points at `def`. */
+  const noDevHeadAt = (def: string) => (args: string[]) => {
+    if (args[0] !== "ls-remote") return undefined;
+    return args.includes("--symref")
+      ? { stdout: `ref: refs/heads/${def}\tHEAD\n1234abc\tHEAD\n` }
+      : { ok: false, code: 2 };
+  };
+
+  /** Did any git call try to check out or push `dev`? */
+  const touchesDev = (calls: GitCall[]) =>
+    calls.some(
+      (c) =>
+        (c.args[0] === "checkout" || c.args[0] === "push") &&
+        c.args.includes("dev"),
+    );
+
+  it("AC: hat das Zielrepo nur main, wird auf main gearbeitet — kein dev angelegt", async () => {
+    const { runImpl, calls } = fakeGit(noDevHeadAt("main"));
+
+    const { dir, branch } = await prepareRepoOnDevOrDefault(FRESH, PAT, {
+      runImpl,
+    });
+
+    expect(branch).toBe("main");
+    expect(dir).toBe(repoDir(FRESH));
+    expect(sub(calls, "checkout")?.args).toEqual([
+      "checkout",
+      "-B",
+      "main",
+      "origin/main",
+    ]);
+    expect(touchesDev(calls)).toBe(false);
+  });
+
+  it("AC: der Push eines solchen Zielrepos geht auf main, nicht auf dev", async () => {
+    const { runImpl, calls } = fakeGit(dirtyStatus);
+
+    const res = await commitAndPush(repoDir(FRESH), "appbaua: Standard", PAT, {
+      runImpl,
+      branch: "main",
+    });
+
+    expect(res.pushed).toBe(true);
+    expect(res.detail).toBe("auf main gepusht");
+    expect(sub(calls, "push")?.args).toEqual(["push", "origin", "main"]);
+    expect(touchesDev(calls)).toBe(false);
+  });
+
+  it("AC: hat das Zielrepo ein dev, wird wie bisher dorthin gearbeitet", async () => {
+    const { runImpl, calls } = fakeGit();
+
+    const { branch } = await prepareRepoOnDevOrDefault(FRESH, PAT, { runImpl });
+
+    expect(branch).toBe("dev");
+    expect(sub(calls, "checkout")?.args).toEqual([
+      "checkout",
+      "-B",
+      "dev",
+      "origin/dev",
+    ]);
+    // Der Default-Branch interessiert dann gar nicht mehr.
+    expect(calls.some((c) => c.args.includes("--symref"))).toBe(false);
+  });
+
+  it("AC: heißt der Default-Branch master, wird master genommen — kein main, kein dev", async () => {
+    const { runImpl, calls } = fakeGit(noDevHeadAt("master"));
+
+    const { branch } = await prepareRepoOnDevOrDefault(FRESH, PAT, { runImpl });
+
+    expect(branch).toBe("master");
+    expect(sub(calls, "checkout")?.args).toEqual([
+      "checkout",
+      "-B",
+      "master",
+      "origin/master",
+    ]);
+    expect(touchesDev(calls)).toBe(false);
+    expect(calls.some((c) => c.args.includes("main"))).toBe(false);
+  });
+
+  it("ein unlesbarer Default-Branch bricht ab, statt einen Namen zu raten", async () => {
+    const { runImpl, calls } = fakeGit((args) =>
+      args[0] === "ls-remote" ? { ok: false, code: 2 } : undefined,
+    );
+
+    const err = await prepareRepoOnDevOrDefault(FRESH, PAT, { runImpl }).catch(
+      (e) => e,
+    );
+
+    expect(String(err)).toContain("default branch unknown");
+    expect(calls.some((c) => c.args[0] === "checkout")).toBe(false);
+  });
+
+  it("der Default-Branch wird beglaubigt geholt und verrät den Token nicht", async () => {
+    const { runImpl, calls } = fakeGit(noDevHeadAt("main"));
+
+    await prepareRepoOnDevOrDefault(FRESH, PAT, { runImpl });
+
+    const symref = calls.find((c) => c.args.includes("--symref"));
+    expect(symref?.args).toEqual(["ls-remote", "--symref", "origin", "HEAD"]);
+    expect(symref?.opts.env?.GIT_CONFIG_VALUE_0).toBe(basicAuthHeader(PAT));
+    for (const call of calls) {
+      for (const arg of call.args) expect(arg).not.toContain(PAT);
+    }
   });
 });

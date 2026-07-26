@@ -207,6 +207,15 @@ p {
   outline-offset: 0;
 }
 
+/* — app bar — */
+/* req-015: the header used to sit in the plain body colour and disappeared into
+   it. A thin wash of the accent over the background lifts it into its own band;
+   at this strength the title and the icons keep their own colours and stay
+   readable, in both themes. */
+.app-bar {
+  background: color-mix(in srgb, var(--color-accent) 14%, var(--color-bg));
+}
+
 /* — cards — */
 .card {
   display: flex;

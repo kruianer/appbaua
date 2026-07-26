@@ -8,7 +8,7 @@ import {
 } from "./task-types";
 
 // Application service for req-002. Routes stay thin and call these; tests
-// exercise them directly. The five task types are predefined and seeded by the
+// exercise them directly. The task types are predefined and seeded by the
 // store — there is deliberately no create/delete here.
 
 export async function listTaskTypes(): Promise<TaskType[]> {

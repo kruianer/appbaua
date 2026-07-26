@@ -16,12 +16,13 @@ beforeEach(() => {
 // Each test maps to an acceptance criterion in req-002.
 
 describe("req-002 acceptance criteria", () => {
-  it("AC: first open shows the five types in vision order", async () => {
+  it("AC: first open shows the predefined types in vision order", async () => {
     const types = await listTaskTypes();
     expect(types.map((t) => t.label)).toEqual([
       "Bugs",
       "Requirements",
       "Code-Review",
+      "Security",
       "Doku",
       "Ideen",
     ]);
@@ -136,6 +137,21 @@ describe("req-002 acceptance criteria", () => {
       start: "22:00",
       end: "06:00",
     }); // re-read from the store = it stays
+  });
+
+  // req-014: Security is a task type like any other — switchable and
+  // schedulable.
+  it("AC: the Security type can be switched off and scheduled", async () => {
+    const off = await toggleTaskType("security");
+    expect(off.find((t) => t.id === "security")!.active).toBe(false);
+    const res = await setDaySchedule("security", "sat", {
+      enabled: true,
+      start: "22:00",
+      end: "23:00",
+    });
+    expect(res.ok).toBe(true);
+    const sec = (await getTaskStore().list()).find((t) => t.id === "security")!;
+    expect(sec.schedule.sat.start).toBe("22:00");
   });
 
   it("only-one-side window gets the empty side prefilled (09:00–23:59)", async () => {

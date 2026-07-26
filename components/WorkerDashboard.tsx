@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { DashboardData } from "@/lib/dashboard";
+import { RECURRING_MD_LABEL } from "@/lib/run-log";
 import { Tile } from "./Tile";
 
 const muted = (pct: number) =>
@@ -9,8 +10,12 @@ const muted = (pct: number) =>
 
 const POLL_MS = 5000;
 
-/** Shown instead of a filename for types that are not file-driven (req-008). */
-const RECURRING_LABEL = "wiederkehrende Aufgabe";
+/**
+ * Shown instead of a filename for types that are not file-driven (req-008).
+ * Shared with the Verlauf, which says the same thing about a finished run
+ * (req-015) — the two must not drift apart.
+ */
+const RECURRING_LABEL = RECURRING_MD_LABEL;
 
 function hhmm(iso: string): string {
   const d = new Date(iso);

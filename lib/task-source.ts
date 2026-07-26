@@ -8,7 +8,15 @@ import type { RunLogEntry } from "./run-log";
 // once per repo and calendar day, but its result is neither code nor a review
 // report — it is one new idea file in delivery/idea/ of the target repo.
 
-export type TaskKind = "file" | "recurring" | "idea";
+// req-014 adds the fourth shape, "security": once per repo and calendar day
+// like the recurring types, but it files its report only when the check found
+// something — and it never changes code.
+//
+// req-016 adds the fifth shape, "doc": once per repo and calendar day as well,
+// but its result is a multi-page user documentation under site/user-docs/ — and
+// it only runs at all when the repo points it at a design template.
+
+export type TaskKind = "file" | "recurring" | "idea" | "security" | "doc";
 
 export type TaskTypeSource = {
   /**
@@ -33,10 +41,13 @@ export const TASK_SOURCES: Record<string, TaskTypeSource> = {
   bug: { base: "delivery/bugs", kind: "file" },
   requirement: { base: "delivery/requirements", kind: "file" },
   "code-review": { base: null, kind: "recurring" },
-  doku: { base: null, kind: "recurring" },
+  // No work-item folder either: the Doku task writes the site itself into
+  // USER_DOCS_DIR, and there is no ready/done queue in front of it (req-016).
+  doku: { base: null, kind: "doc" },
   ideen: { base: IDEA_DIR, kind: "idea" },
-  // security-review may be added as a type later; treated as recurring.
-  "security-review": { base: null, kind: "recurring" },
+  // No work-item folder: the Security task reads the repo and writes at most a
+  // report into SECURITY_REPORT_DIR (req-014).
+  security: { base: null, kind: "security" },
 };
 
 export function sourceFor(taskId: string): TaskTypeSource {
@@ -46,7 +57,8 @@ export function sourceFor(taskId: string): TaskTypeSource {
 /**
  * Does this type run at most once per repo and calendar day? Everything that is
  * not driven by a queue of .md files does — there is no work item that would
- * tell it apart from the run it already did today (req-006, req-011).
+ * tell it apart from the run it already did today (req-006, req-011, req-014,
+ * req-016).
  */
 export function runsOncePerDay(src: TaskTypeSource): boolean {
   return src.kind !== "file";

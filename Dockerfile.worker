@@ -9,8 +9,15 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV WORKER_WORKDIR=/work
 
 # git for cloning/committing/pushing; the Claude Code CLI for real execution.
-RUN apk add --no-cache git openssh \
+#
+# chromium: the Doku task photographs the app's running dev environment for the
+# user documentation (req-017). Playwright ships no browser for musl/Alpine, so
+# the browser comes from the distribution and playwright-core is pointed at it
+# via CHROMIUM_PATH; the font packages are what keeps the screenshots from
+# rendering as empty boxes.
+RUN apk add --no-cache git openssh chromium nss freetype harfbuzz ttf-freefont \
   && npm install -g @anthropic-ai/claude-code
+ENV CHROMIUM_PATH=/usr/bin/chromium-browser
 
 # Install ALL deps (tsx is a runtime dep; the loop imports lib/*.ts directly).
 COPY package.json package-lock.json ./

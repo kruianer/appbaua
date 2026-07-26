@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { buildDashboard, derivePhase, startOfTodayIso } from "./dashboard";
 import { EMPTY_STATUS, type WorkerStatus } from "./worker-status";
-import { defaultTaskTypes } from "./task-types";
+import {
+  DEFAULT_TASK_TYPES,
+  defaultTaskTypes,
+  emptySchedule,
+} from "./task-types";
 import type { Repo } from "./repos";
 import type { RunLogEntry } from "./run-log";
 
@@ -64,9 +68,27 @@ describe("buildDashboard tiles", () => {
     expect(off.totalRepos).toBe(3);
   });
 
-  it("counts due task types (all always-on = 5)", () => {
+  // bug-007: the expectation is derived, not a literal that has to be bumped
+  // every time a recurring type joins the list (Security req-014, Doku req-016).
+  it("counts due task types (all always-on -> every predefined type)", () => {
     const d = buildDashboard({ ...base, enabled: true });
-    expect(d.dueTypes).toBe(5);
+    expect(d.dueTypes).toBe(DEFAULT_TASK_TYPES.length);
+  });
+
+  it("leaves out types that are inactive or outside their window", () => {
+    const [bug, requirement, ...rest] = defaultTaskTypes();
+    const morningOnly = emptySchedule();
+    morningOnly.wed = { enabled: true, start: "09:00", end: "12:00" }; // now is Wed 14:30
+    const d = buildDashboard({
+      ...base,
+      enabled: true,
+      taskTypes: [
+        { ...bug, active: false },
+        { ...requirement, always: false, schedule: morningOnly },
+        ...rest,
+      ],
+    });
+    expect(d.dueTypes).toBe(rest.length);
   });
 
   it("passes today's metrics through", () => {

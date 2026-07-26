@@ -4,6 +4,7 @@ import {
   COMMIT_MESSAGE,
   FALLBACK_CLAUDE_MD,
   GITKEEP,
+  SITE_DIR,
   applyAppbauaStandard,
   queueAppbauaStandard,
   skillNames,
@@ -13,9 +14,18 @@ import {
 import { NO_CHANGES_DETAIL } from "./workspace";
 
 // req-012: one click makes a repo "appbaua-fähig" — it gets every skill and the
-// empty delivery folder structure, pushed to its own dev branch. The source is
+// empty delivery folder structure, pushed to its own branch. The source is
 // the appbaua repo, read at runtime, so nothing here may depend on a hardcoded
 // list of skills or folders.
+//
+// req-013 settles which branch that is: the target's `dev` when it has one,
+// otherwise its default branch — and never a freshly created `dev`. Picking it
+// happens in prepareRepoOnDevOrDefault (workspace.test.ts); here it arrives as
+// the branch prepareTarget reports, and what matters is that the push and the
+// result message follow it.
+//
+// req-018 adds the `site/` structure to the rollout, by the same rules as
+// `delivery/` — read at runtime, empty, existing content untouched.
 
 const SRC = "/work/appbaua";
 const TGT = "/work/leer-repo";
@@ -40,6 +50,13 @@ const STRUCTURE = [
   "delivery/requirements",
   "delivery/requirements/done",
   "delivery/requirements/ready",
+];
+
+/** The site folders of the source — the web outputs of req-016/017 (req-018). */
+const SITE_STRUCTURE = [
+  "site/user-docs",
+  "site/user-docs/assets",
+  "site/user-docs/assets/screenshots",
 ];
 
 /**
@@ -104,6 +121,10 @@ function appbauaSource(): Fake {
   src.write(".claude/skills/capture-bug/references/beispiel.md", "Beispiel");
   src.write(".claude/templates/CLAUDE.md", "# <Projektname>\n\nStarter.\n");
   for (const dir of STRUCTURE) src.mkdir(dir);
+  for (const dir of SITE_STRUCTURE) src.mkdir(dir);
+  // appbaua's own Benutzer-Doku: structure travels, pages do not (req-018).
+  src.write("site/user-docs/index.html", "<h1>appbaua-Doku</h1>");
+  src.write("site/user-docs/assets/screenshots/start.png", "PNG");
   // Instruction files in the delivery root and appbaua's own work items: never
   // copied, so a target repo cannot inherit appbaua's stack or requirements.
   src.write("delivery/stack.md", "appbaua-Stack");
@@ -126,7 +147,8 @@ function deps(
   return {
     token: TOKEN,
     sourceUrl: SOURCE_URL,
-    prepareRepo: vi.fn(async (url: string) => (url === SOURCE_URL ? SRC : TGT)),
+    prepareRepo: vi.fn(async (_url: string) => SRC),
+    prepareTarget: vi.fn(async (_url: string) => ({ dir: TGT, branch: "dev" })),
     listTree: vi.fn(async (dir: string, rel: string) => pick(dir).tree(rel)),
     listEntries: vi.fn(async (dir: string, rel: string) => pick(dir).entries(rel)),
     pathExists: vi.fn(async (dir: string, rel: string) => pick(dir).exists(rel)),
@@ -160,7 +182,14 @@ async function convert(
   src: Fake,
   tgt: Fake,
   over: Partial<ConvertDeps> = {},
-): Promise<{ message: string; skills: number; folders: number }> {
+): Promise<{
+  message: string;
+  skills: number;
+  folders: number;
+  siteFolders: number;
+  siteFoldersCreated: number;
+  branch: string;
+}> {
   const res = await applyAppbauaStandard(TARGET_URL, deps(src, tgt, over));
   expect(res.ok).toBe(true);
   if (!res.ok) throw new Error(res.error);
@@ -168,6 +197,9 @@ async function convert(
     message: res.message,
     skills: res.summary.skills,
     folders: res.summary.folders,
+    siteFolders: res.summary.siteFolders,
+    siteFoldersCreated: res.summary.siteFoldersCreated,
+    branch: res.summary.branch,
   };
 }
 
@@ -229,7 +261,9 @@ describe("Umstellung auf appbaua — leeres Repo (req-012)", () => {
     const res = await convert(src, tgt, { commitAndPush });
 
     expect(commitAndPush).toHaveBeenCalledTimes(1);
-    expect(commitAndPush).toHaveBeenCalledWith(TGT, COMMIT_MESSAGE, TOKEN);
+    expect(commitAndPush).toHaveBeenCalledWith(TGT, COMMIT_MESSAGE, TOKEN, {
+      branch: "dev",
+    });
     expect(res.message).toContain("auf dev gepusht");
   });
 
@@ -251,14 +285,16 @@ describe("Umstellung auf appbaua — leeres Repo (req-012)", () => {
     const src = appbauaSource();
     const tgt = fakeFs();
     const before = src.snapshot();
-    const prepareRepo = vi.fn(async (url: string) =>
-      url === SOURCE_URL ? SRC : TGT,
-    );
+    const prepareRepo = vi.fn(async (_url: string) => SRC);
+    const prepareTarget = vi.fn(async (_url: string) => ({
+      dir: TGT,
+      branch: "dev",
+    }));
 
-    await convert(src, tgt, { prepareRepo });
+    await convert(src, tgt, { prepareRepo, prepareTarget });
 
     expect(prepareRepo).toHaveBeenCalledWith(SOURCE_URL, TOKEN);
-    expect(prepareRepo).toHaveBeenCalledWith(TARGET_URL, TOKEN);
+    expect(prepareTarget).toHaveBeenCalledWith(TARGET_URL, TOKEN);
     expect(src.snapshot()).toBe(before);
   });
 });
@@ -291,6 +327,8 @@ describe("Rückmeldung am Button (req-012)", () => {
     const base = {
       skills: 1,
       folders: 3,
+      siteFolders: 2,
+      siteFoldersCreated: 0,
       claudeMd: "angelegt" as const,
       branch: "dev",
       pushDetail: "auf dev gepusht",
@@ -300,6 +338,207 @@ describe("Rückmeldung am Button (req-012)", () => {
     expect(summaryMessage({ ...base, foldersCreated: 2 })).toContain(
       "3 delivery-Ordner (2 neu)",
     );
+    expect(
+      summaryMessage({ ...base, foldersCreated: 0, siteFoldersCreated: 2 }),
+    ).toContain("2 site-Ordner (2 neu)");
+    // Ohne site/ in der Quelle steht auch nichts darüber in der Meldung.
+    expect(
+      summaryMessage({ ...base, foldersCreated: 0, siteFolders: 0 }),
+    ).not.toContain("site-Ordner");
+  });
+});
+
+describe("site-Struktur der Umstellung (req-018)", () => {
+  it("AC: ein Zielrepo ohne site/ bekommt die leere site-Struktur von appbaua", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    await convert(src, tgt);
+
+    for (const dir of SITE_STRUCTURE) expect(tgt.dirs.has(dir)).toBe(true);
+    expect(tgt.dirs.has(SITE_DIR)).toBe(true);
+    // Leer heißt leer: nur der Platzhalter im Blattordner, sonst keine Datei.
+    expect(tgt.files.has(`site/user-docs/assets/screenshots/${GITKEEP}`)).toBe(true);
+    expect(
+      [...tgt.files.keys()].filter(
+        (f) => f.startsWith(`${SITE_DIR}/`) && !f.endsWith(GITKEEP),
+      ),
+    ).toEqual([]);
+  });
+
+  it("AC: die Inhalte der appbaua-site werden nicht mitkopiert", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    await convert(src, tgt);
+
+    expect(tgt.files.has("site/user-docs/index.html")).toBe(false);
+    expect(tgt.files.has("site/user-docs/assets/screenshots/start.png")).toBe(false);
+  });
+
+  it("AC: ein neuer Ordner site/www in appbaua rollt mit, ohne fest verdrahtet zu sein", async () => {
+    const src = appbauaSource();
+    src.mkdir("site/www");
+    src.mkdir("site/www/de");
+    const tgt = fakeFs();
+    const listTree = vi.fn(async (dir: string, rel: string) =>
+      (dir === SRC ? src : tgt).tree(rel),
+    );
+
+    const res = await convert(src, tgt, { listTree });
+
+    // Gelesen wird zur Laufzeit — genau daher kennt der Lauf site/www überhaupt.
+    expect(listTree).toHaveBeenCalledWith(SRC, SITE_DIR);
+    expect(tgt.dirs.has("site/www")).toBe(true);
+    expect(tgt.dirs.has("site/www/de")).toBe(true);
+    expect(tgt.files.has(`site/www/de/${GITKEEP}`)).toBe(true);
+    expect(res.siteFolders).toBe(SITE_STRUCTURE.length + 2);
+  });
+
+  it("AC: eine vorhandene Doku-Datei im Zielrepo bleibt erhalten", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+    tgt.write("site/user-docs/index.html", "meine fertige Doku");
+
+    const res = await convert(src, tgt);
+
+    expect(tgt.files.get("site/user-docs/index.html")).toBe("meine fertige Doku");
+    // Ein Ordner mit Inhalt braucht keinen Platzhalter und bekommt keinen.
+    expect(tgt.files.has(`site/user-docs/${GITKEEP}`)).toBe(false);
+    // Vorhanden waren site/ und site/user-docs -> es fehlten zwei.
+    expect(res.siteFolders).toBe(3);
+    expect(res.siteFoldersCreated).toBe(2);
+  });
+
+  it("AC: der Skill setup-doc-site kommt über die bestehende Skill-Ausrollung mit", async () => {
+    const src = appbauaSource();
+    src.write(".claude/skills/setup-doc-site/SKILL.md", "# setup-doc-site");
+    const tgt = fakeFs();
+
+    const res = await convert(src, tgt);
+
+    expect(tgt.files.get(".claude/skills/setup-doc-site/SKILL.md")).toBe(
+      "# setup-doc-site",
+    );
+    // Kein Sonderfall: der neue Skill zählt einfach mit.
+    expect(res.skills).toBe(SKILLS.length + 1);
+  });
+
+  it("ein zweiter Lauf legt die site-Struktur nicht erneut an", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    await convert(src, tgt);
+    const afterFirst = tgt.snapshot();
+    const res = await convert(src, tgt);
+
+    expect(tgt.snapshot()).toBe(afterFirst);
+    expect(res.siteFoldersCreated).toBe(0);
+  });
+
+  it("eine Quelle ohne site/ legt auch im Ziel keins an", async () => {
+    const src = appbauaSource();
+    for (const dir of [...SITE_STRUCTURE, SITE_DIR]) src.dirs.delete(dir);
+    src.files.delete("site/user-docs/index.html");
+    src.files.delete("site/user-docs/assets/screenshots/start.png");
+    const tgt = fakeFs();
+
+    const res = await convert(src, tgt);
+
+    // Ein Ordner, den die Quelle nicht hat, gehört nicht zum Standard — das Ziel
+    // bekommt kein leeres site/ mit Platzhalter untergeschoben.
+    expect(res.siteFolders).toBe(0);
+    expect(tgt.dirs.has(SITE_DIR)).toBe(false);
+    expect(tgt.files.has(`${SITE_DIR}/${GITKEEP}`)).toBe(false);
+    // Die delivery-Ausrollung läuft davon unberührt weiter.
+    expect(res.folders).toBe(STRUCTURE.length);
+  });
+
+  it("die Meldung nennt die site-Ordner neben den delivery-Ordnern", async () => {
+    const src = appbauaSource();
+    const tgt = fakeFs();
+
+    const res = await convert(src, tgt);
+
+    expect(res.siteFolders).toBe(3);
+    expect(res.message).toContain("5 delivery-Ordner");
+    expect(res.message).toContain("3 site-Ordner (3 neu)");
+  });
+});
+
+describe("Ziel-Branch der Umstellung (req-013)", () => {
+  /** A rollout whose target repo was checked out on `branch`. */
+  const onBranch = (branch: string) => ({
+    prepareTarget: vi.fn(async () => ({ dir: TGT, branch })),
+    commitAndPush: vi.fn(async () => ({
+      pushed: true,
+      detail: `auf ${branch} gepusht`,
+    })),
+  });
+
+  it("AC: ohne dev-Branch im Zielrepo geht die Umstellung auf dessen main", async () => {
+    const over = onBranch("main");
+
+    const res = await convert(appbauaSource(), fakeFs(), over);
+
+    expect(over.commitAndPush).toHaveBeenCalledWith(
+      TGT,
+      COMMIT_MESSAGE,
+      TOKEN,
+      { branch: "main" },
+    );
+    expect(res.branch).toBe("main");
+    // Kein dev im Spiel: weder wird dorthin gepusht noch wird es genannt.
+    expect(res.message).not.toContain("dev");
+  });
+
+  it("AC: hat das Zielrepo ein dev, wird wie bisher dorthin gepusht", async () => {
+    const over = onBranch("dev");
+
+    const res = await convert(appbauaSource(), fakeFs(), over);
+
+    expect(over.commitAndPush).toHaveBeenCalledWith(
+      TGT,
+      COMMIT_MESSAGE,
+      TOKEN,
+      { branch: "dev" },
+    );
+    expect(res.branch).toBe("dev");
+  });
+
+  it("AC: heißt der Default-Branch master, wird master verwendet", async () => {
+    const over = onBranch("master");
+
+    const res = await convert(appbauaSource(), fakeFs(), over);
+
+    expect(over.commitAndPush).toHaveBeenCalledWith(
+      TGT,
+      COMMIT_MESSAGE,
+      TOKEN,
+      { branch: "master" },
+    );
+    expect(res.branch).toBe("master");
+    expect(res.message).not.toContain("main");
+  });
+
+  it("AC: die Ergebnismeldung nennt den tatsächlich verwendeten Ziel-Branch", async () => {
+    const res = await convert(appbauaSource(), fakeFs(), onBranch("master"));
+
+    expect(res.message).toContain("Ziel-Branch: master");
+    expect(res.message).toContain("auf master gepusht");
+  });
+
+  it("war schon alles auf Stand, nennt die Meldung trotzdem den Ziel-Branch", async () => {
+    const res = await convert(appbauaSource(), fakeFs(), {
+      prepareTarget: vi.fn(async () => ({ dir: TGT, branch: "master" })),
+      commitAndPush: vi.fn(async () => ({
+        pushed: false,
+        detail: NO_CHANGES_DETAIL,
+      })),
+    });
+
+    expect(res.message).toContain("Ziel-Branch: master");
+    expect(res.message).toContain("keine Änderungen nötig");
   });
 });
 
@@ -434,8 +673,7 @@ describe("Abbruch ohne Push (req-012)", () => {
     const res = await applyAppbauaStandard(
       TARGET_URL,
       deps(src, tgt, {
-        prepareRepo: vi.fn(async (url: string) => {
-          if (url === SOURCE_URL) return SRC;
+        prepareTarget: vi.fn(async () => {
           throw new Error("clone failed: repository not found");
         }),
         commitAndPush,
@@ -477,20 +715,20 @@ describe("Abbruch ohne Push (req-012)", () => {
   it("eine unerreichbare Quelle bricht ab, ohne das Zielrepo anzufassen", async () => {
     const src = appbauaSource();
     const tgt = fakeFs();
-    const prepareRepo = vi.fn(async (url: string) => {
-      if (url === SOURCE_URL) throw new Error("fetch failed: no route to host");
-      return TGT;
+    const prepareRepo = vi.fn(async () => {
+      throw new Error("fetch failed: no route to host");
     });
+    const prepareTarget = vi.fn(async () => ({ dir: TGT, branch: "dev" }));
 
     const res = await applyAppbauaStandard(
       TARGET_URL,
-      deps(src, tgt, { prepareRepo }),
+      deps(src, tgt, { prepareRepo, prepareTarget }),
     );
 
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error).toContain("appbaua-Quelle konnte nicht geholt werden");
-    expect(prepareRepo).toHaveBeenCalledTimes(1); // Ziel nie geklont
+    expect(prepareTarget).not.toHaveBeenCalled(); // Ziel nie geklont
   });
 
   it("ein Schreibfehler mitten im Ausrollen pusht nichts und wird verworfen", async () => {
@@ -521,17 +759,19 @@ describe("Abbruch ohne Push (req-012)", () => {
   it("ohne Token wird gar nicht erst geklont", async () => {
     const src = appbauaSource();
     const tgt = fakeFs();
-    const prepareRepo = vi.fn(async () => TGT);
+    const prepareRepo = vi.fn(async () => SRC);
+    const prepareTarget = vi.fn(async () => ({ dir: TGT, branch: "dev" }));
 
     const res = await applyAppbauaStandard(
       TARGET_URL,
-      deps(src, tgt, { token: undefined, prepareRepo }),
+      deps(src, tgt, { token: undefined, prepareRepo, prepareTarget }),
     );
 
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error).toContain("Kein GitHub-Token");
     expect(prepareRepo).not.toHaveBeenCalled();
+    expect(prepareTarget).not.toHaveBeenCalled();
   });
 
   it("appbaua selbst ist die Quelle und wird nicht auf sich umgestellt", async () => {
@@ -555,7 +795,7 @@ describe("Abbruch ohne Push (req-012)", () => {
     const res = await applyAppbauaStandard(
       TARGET_URL,
       deps(src, tgt, {
-        prepareRepo: vi.fn(async () => {
+        prepareTarget: vi.fn(async () => {
           throw new Error(
             `fatal: could not read from 'https://x-access-token:${TOKEN}@github.com/kruianer/leer-repo.git'`,
           );
@@ -578,15 +818,14 @@ describe("Umstellungen laufen nacheinander (req-012)", () => {
 
     const slow = (tgt: Fake, label: string) =>
       deps(src, tgt, {
-        prepareRepo: vi.fn(async (url: string) => {
-          if (url === SOURCE_URL) return SRC;
+        prepareTarget: vi.fn(async () => {
           running += 1;
           maxParallel = Math.max(maxParallel, running);
           order.push(`start ${label}`);
           await new Promise((resolve) => setTimeout(resolve, 5));
           running -= 1;
           order.push(`ende ${label}`);
-          return TGT;
+          return { dir: TGT, branch: "dev" };
         }),
       });
 

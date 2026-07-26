@@ -209,6 +209,7 @@ export function createPgRunLogStore(): RunLogStore {
     task_type: string | null;
     status: string;
     message: string;
+    md: string | null;
   };
   const toEntry = (r: Row): RunLogEntry => ({
     id: Number(r.id),
@@ -218,15 +219,18 @@ export function createPgRunLogStore(): RunLogStore {
     taskType: r.task_type,
     status: r.status as RunStatus,
     message: r.message,
+    // NULL on rows written before req-015 — those show no second line.
+    md: r.md,
   });
+  const COLUMNS = "id, started_at, ended_at, repo, task_type, status, message, md";
 
   return {
     async append(entry: NewRunLogEntry): Promise<RunLogEntry> {
       await ensureSchema();
       const res = await getPool().query<Row>(
-        `INSERT INTO run_log (started_at, ended_at, repo, task_type, status, message)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, started_at, ended_at, repo, task_type, status, message`,
+        `INSERT INTO run_log (started_at, ended_at, repo, task_type, status, message, md)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING ${COLUMNS}`,
         [
           entry.startedAt,
           entry.endedAt,
@@ -234,6 +238,7 @@ export function createPgRunLogStore(): RunLogStore {
           entry.taskType,
           entry.status,
           entry.message,
+          entry.md ?? null,
         ],
       );
       // Retention: drop rows older than the age cutoff, then any beyond max rows.
@@ -252,7 +257,7 @@ export function createPgRunLogStore(): RunLogStore {
     async list(offset: number, limit: number): Promise<RunLogEntry[]> {
       await ensureSchema();
       const res = await getPool().query<Row>(
-        `SELECT id, started_at, ended_at, repo, task_type, status, message
+        `SELECT ${COLUMNS}
          FROM run_log ORDER BY id DESC OFFSET $1 LIMIT $2`,
         [offset, limit],
       );
@@ -282,7 +287,7 @@ export function createPgRunLogStore(): RunLogStore {
     async lastError(): Promise<RunLogEntry | null> {
       await ensureSchema();
       const res = await getPool().query<Row>(
-        `SELECT id, started_at, ended_at, repo, task_type, status, message
+        `SELECT ${COLUMNS}
          FROM run_log WHERE status = 'error' ORDER BY id DESC LIMIT 1`,
       );
       return res.rows.length ? toEntry(res.rows[0]) : null;
