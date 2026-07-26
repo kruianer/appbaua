@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import {
@@ -6,6 +6,7 @@ import {
   basicAuthHeader,
   commitAndPush,
   prepareRepo,
+  prepareRepoOnConvention,
   prepareRepoOnDevOrDefault,
   remoteUrl,
   repoDir,
@@ -338,6 +339,226 @@ describe("Ziel-Branch der Umstellung (req-013)", () => {
     const symref = calls.find((c) => c.args.includes("--symref"));
     expect(symref?.args).toEqual(["ls-remote", "--symref", "origin", "HEAD"]);
     expect(symref?.opts.env?.GIT_CONFIG_VALUE_0).toBe(basicAuthHeader(PAT));
+    for (const call of calls) {
+      for (const arg of call.args) expect(arg).not.toContain(PAT);
+    }
+  });
+});
+
+// req-020: der Worker legt nicht mehr fest auf `dev` ab. Welcher Branch es ist,
+// steht in der devops.md des ZIELREPOS — ein Repo, das bewusst keinen
+// dev-Branch führt, wird auf seinem eigenen Branch bearbeitet statt gar nicht.
+describe("Branch-Konvention des Zielrepos (req-020)", () => {
+  /** A devops.md whose dev environment names `branch`. */
+  const namesBranch = (branch: string) =>
+    [
+      "## Environments",
+      "",
+      "| Environment | Branch | URL |",
+      "|---|---|---|",
+      `| dev | ${branch} | https://dev.example.com |`,
+    ].join("\n");
+
+  /** A devops.md that states a convention instead of a branch name. */
+  const CONVENTION = [
+    "## Environments",
+    "",
+    "| Environment | Branch | URL |",
+    "|---|---|---|",
+    "| dev | aktueller `feature/*`-Branch | https://dev.example.com |",
+    "| prod | main | https://example.com |",
+  ].join("\n");
+
+  const reading = (devops: string | null) => async () => devops;
+
+  /** ls-remote answers: which branches the remote has, and where its HEAD points. */
+  function remote(opts: { branches: string[]; head: string }) {
+    return (args: string[]) => {
+      if (args[0] !== "ls-remote") return undefined;
+      if (args.includes("--symref")) {
+        return { stdout: `ref: refs/heads/${opts.head}\tHEAD\n1234abc\tHEAD\n` };
+      }
+      const wanted = args[args.length - 1].replace("refs/heads/", "");
+      return opts.branches.includes(wanted) ? undefined : { ok: false, code: 2 };
+    };
+  }
+
+  /** What `git rev-parse --abbrev-ref HEAD` says the working copy is on. */
+  const headIs = (branch: string) => (args: string[]) =>
+    args[0] === "rev-parse" && args.includes("--abbrev-ref")
+      ? { stdout: `${branch}\n` }
+      : undefined;
+
+  /** Did any git call try to check out or push `dev`? */
+  const touchesDev = (calls: GitCall[]) =>
+    calls.some(
+      (c) =>
+        (c.args[0] === "checkout" || c.args[0] === "push") &&
+        c.args.includes("dev"),
+    );
+
+  it("AC: nennt die devops.md 'dev', wird wie bisher auf dev gearbeitet", async () => {
+    const { runImpl, calls } = fakeGit(remote({ branches: ["dev"], head: "main" }));
+
+    const { dir, branch } = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading(namesBranch("dev")),
+    });
+
+    expect(branch).toBe("dev");
+    expect(dir).toBe(repoDir(FRESH));
+    expect(sub(calls, "checkout")?.args).toEqual([
+      "checkout",
+      "-B",
+      "dev",
+      "origin/dev",
+    ]);
+    expect(sub(calls, "reset")?.args).toEqual(["reset", "--hard", "origin/dev"]);
+  });
+
+  it("die Konvention wird aus der devops.md des Zielrepos gelesen", async () => {
+    const read = vi.fn(async () => namesBranch("dev"));
+    const { runImpl } = fakeGit(remote({ branches: ["dev"], head: "main" }));
+
+    await prepareRepoOnConvention(FRESH, PAT, { runImpl, readFileImpl: read });
+
+    expect(read).toHaveBeenCalledWith(repoDir(FRESH), "delivery/devops.md");
+  });
+
+  it("AC: bei einer Konvention statt eines Namens bleibt er auf dem ausgecheckten Branch", async () => {
+    const { runImpl, calls } = fakeGit(
+      (args) =>
+        headIs("feature/garten")(args) ??
+        remote({ branches: ["feature/garten", "main"], head: "main" })(args),
+    );
+
+    const { branch } = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading(CONVENTION),
+    });
+
+    expect(branch).toBe("feature/garten");
+    expect(sub(calls, "checkout")?.args).toEqual([
+      "checkout",
+      "-B",
+      "feature/garten",
+      "origin/feature/garten",
+    ]);
+    expect(touchesDev(calls)).toBe(false); // AC: KEIN dev angelegt
+  });
+
+  it("AC: ein nur lokal übrig gebliebenes dev zählt nicht als der Branch des Repos", async () => {
+    // Genau der Zustand, den der alte Worker hinterlassen hat: ein lokales dev,
+    // das die Gegenseite nie gesehen hat. Dann gilt der Default-Branch.
+    const { runImpl, calls } = fakeGit(
+      (args) =>
+        headIs("dev")(args) ?? remote({ branches: ["main"], head: "main" })(args),
+    );
+
+    const { branch } = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading(CONVENTION),
+    });
+
+    expect(branch).toBe("main");
+    expect(touchesDev(calls)).toBe(false);
+  });
+
+  it("nennt die devops.md einen Branch, den es noch nicht gibt, wird er angelegt", async () => {
+    // Das Repo hat ihn selbst benannt — das ist seine Entscheidung, keine unsere.
+    const { runImpl, calls } = fakeGit(remote({ branches: ["main"], head: "main" }));
+
+    const { branch } = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading(namesBranch("develop")),
+    });
+
+    expect(branch).toBe("develop");
+    expect(sub(calls, "checkout")?.args).toEqual(["checkout", "-B", "develop"]);
+    expect(calls.some((c) => c.args[0] === "reset")).toBe(false); // nichts zum Zurücksetzen
+  });
+
+  it("ohne devops.md bleibt es beim bisherigen Verhalten: dev, sonst Default (req-013)", async () => {
+    const withDev = fakeGit(remote({ branches: ["dev", "main"], head: "main" }));
+    const onDev = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl: withDev.runImpl,
+      readFileImpl: reading(null),
+    });
+    expect(onDev.branch).toBe("dev");
+
+    const noDev = fakeGit(remote({ branches: ["master"], head: "master" }));
+    const onDefault = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl: noDev.runImpl,
+      readFileImpl: reading(null),
+    });
+    expect(onDefault.branch).toBe("master");
+    expect(touchesDev(noDev.calls)).toBe(false); // kein dev angelegt
+  });
+
+  it("eine devops.md ohne Environments-Angabe zählt wie keine", async () => {
+    const { runImpl } = fakeGit(remote({ branches: ["dev", "main"], head: "main" }));
+
+    const { branch } = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading("# DevOps\n\n## Deploy Trigger\n\n- Push auf dev\n"),
+    });
+
+    expect(branch).toBe("dev");
+  });
+
+  it("AC: ein fehlgeschlagener Checkout bricht sichtbar ab, statt woanders zu committen", async () => {
+    const { runImpl } = fakeGit((args) =>
+      args[0] === "checkout"
+        ? { ok: false, code: 1, stderr: `pathspec 'origin/dev' did not match; token ${PAT}` }
+        : remote({ branches: ["dev"], head: "main" })(args),
+    );
+
+    const err = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading(namesBranch("dev")),
+    }).catch((e) => e);
+
+    expect(String(err)).toContain("checkout dev failed");
+    expect(String(err)).not.toContain(PAT); // bug-003 gilt weiter
+  });
+
+  it("eine unlesbare devops.md ist keine Angabe, kein Abbruch", async () => {
+    const { runImpl } = fakeGit(remote({ branches: ["dev", "main"], head: "main" }));
+
+    const { branch } = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: async () => {
+        throw new Error("Platte weg");
+      },
+    });
+
+    expect(branch).toBe("dev");
+  });
+
+  it("räumt die Arbeitskopie auf, wie jeder andere Checkout auch (bug-002)", async () => {
+    const { runImpl, calls } = fakeGit(remote({ branches: ["dev"], head: "main" }));
+
+    await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading(namesBranch("dev")),
+    });
+
+    expect(sub(calls, "clean")?.args).toEqual(["clean", "-fd"]);
+  });
+
+  it("kein git-Argument trägt den Token (bug-003)", async () => {
+    const { runImpl, calls } = fakeGit(
+      (args) =>
+        headIs("feature/garten")(args) ??
+        remote({ branches: ["feature/garten"], head: "main" })(args),
+    );
+
+    await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      readFileImpl: reading(CONVENTION),
+    });
+
+    expect(calls.length).toBeGreaterThan(0);
     for (const call of calls) {
       for (const arg of call.args) expect(arg).not.toContain(PAT);
     }

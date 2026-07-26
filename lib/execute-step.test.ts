@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  PREPARE_FAILED_MESSAGE,
+  PUSH_FAILED_MESSAGE,
   executeStep,
   type ExecuteDeps,
   type StepDecision,
@@ -18,6 +20,13 @@ import {
   type ShotResult,
 } from "./doc-screenshots";
 import { NO_CHANGES_DETAIL } from "./workspace";
+import {
+  GATE_GREEN_MESSAGE,
+  GATE_RED_MESSAGE,
+  NO_TEST_COMMAND_MESSAGE,
+  STACK_FILE,
+  type TestGateResult,
+} from "./test-gate";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
@@ -26,6 +35,16 @@ const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
 const security = defaultTaskTypes().find((t) => t.id === "security")!;
 const doku = defaultTaskTypes().find((t) => t.id === "doku")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
+
+/**
+ * What prepareRepo hands back since req-020: the working copy AND the branch
+ * the target repo's own devops.md put the worker on. `dev` here, because that
+ * is what a standard repo says — the req-020 tests below say otherwise.
+ */
+const PREPARED = { dir: "/work/appbaua", branch: "dev" };
+
+/** How every commit of a step is made since req-020: onto that branch. */
+const ON = (branch = "dev") => ({ branch });
 
 /**
  * A repo that HAS a design template (req-016): doc-site.md names one and the
@@ -59,6 +78,20 @@ const DEVOPS_MD = [
  */
 const noShots = (): ShotResult => ({ shot: [], missing: [] });
 
+/** Default for the test-gate dep (req-019): the suite ran and passed. */
+const green = (): TestGateResult => ({
+  status: "green",
+  command: "npm test",
+  reason: "",
+});
+
+/** A gate that came back red, with the cause the Verlauf has to carry. */
+const red = (reason: string): TestGateResult => ({
+  status: "red",
+  command: "npm test",
+  reason,
+});
+
 /**
  * Folder-aware fake for listReady: a step looks into in-progress/ (leftovers of
  * a crashed run, req-008) and ready/ (the actual work), so the fake has to tell
@@ -81,7 +114,7 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
   return {
     token: "tok",
     now: () => now,
-    prepareRepo: vi.fn(async () => "/work/appbaua"),
+    prepareRepo: vi.fn(async () => PREPARED),
     listReady: folders(),
     runClaude: vi.fn(async () => ({ ok: true, summary: "done", report: "" })),
     commitAndPush: vi.fn(async () => ({ pushed: true, detail: "auf dev gepusht" })),
@@ -96,6 +129,9 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
     }),
     repoPathExists: vi.fn(async (_dir: string, _rel: string) => true),
     captureScreenshots: vi.fn(async (_dir: string, _url: string | null) => noShots()),
+    // Green by default (req-019), so every test that predates the gate keeps
+    // asserting what it always asserted. The req-019 tests say what they want.
+    runTestGate: vi.fn(async (_dir: string, _stack: string | null) => green()),
     setCurrentMd: vi.fn(async (_md: string | null) => {}),
     setCurrentOutput: vi.fn(async (_text: string | null) => {}),
     ...over,
@@ -171,7 +207,7 @@ describe("executeStep (req-006)", () => {
         message: "",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, review, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -645,6 +681,7 @@ describe("executeStep — fehlgeschlagene .md wird persistiert (bug-002)", () =>
       "/work/appbaua",
       "worker: bug-001.md fehlgeschlagen",
       "tok", // the push needs the credential handed in now (bug-003)
+      ON(), // …and the repo's own branch since req-020
     );
   });
 
@@ -795,6 +832,7 @@ describe("executeStep — Ideen-Task (req-011)", () => {
       "/work/appbaua",
       "worker: neue Idee dark-mode.md",
       "tok",
+      ON(),
     );
   });
 
@@ -810,7 +848,7 @@ describe("executeStep — Ideen-Task (req-011)", () => {
         message: "Neue Idee: dark-mode.md — auf dev gepusht",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, ideen, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -968,7 +1006,7 @@ describe("executeStep — Ideen-Task (req-011)", () => {
     expect(commitAndPush).not.toHaveBeenCalled();
   });
 
-  it("a push that fails is reported in the log message", async () => {
+  it("a push that fails is an error since req-020, not a quiet success", async () => {
     const d = await executeStep(
       repo,
       ideen,
@@ -981,8 +1019,8 @@ describe("executeStep — Ideen-Task (req-011)", () => {
         })),
       }),
     );
-    expect(d.kind).toBe("success");
-    if (d.kind !== "success") return;
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
     expect(d.message).toContain("push failed: keine Rechte");
   });
 });
@@ -1036,6 +1074,7 @@ describe("executeStep — Security-Task (req-014)", () => {
       "/work/appbaua",
       "worker: Security-Bericht abgelegt",
       "tok",
+      ON(),
     );
     if (d.kind !== "success") return;
     expect(d.message).toContain("auf dev gepusht");
@@ -1063,7 +1102,7 @@ describe("executeStep — Security-Task (req-014)", () => {
         message: "Security-Check ok",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, security, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -1245,6 +1284,7 @@ describe("executeStep — Doku-Task (req-016)", () => {
       "/work/appbaua",
       "worker: Doku aktualisiert",
       "tok",
+      ON(),
     );
     if (d.kind !== "success") return;
     expect(d.message).toContain("auf dev gepusht");
@@ -1317,7 +1357,7 @@ describe("executeStep — Doku-Task (req-016)", () => {
         message: "Doku aktualisiert",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, doku, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -1391,7 +1431,7 @@ describe("executeStep — Doku-Task (req-016)", () => {
     expect(d.message).toBe(DOC_UNCHANGED_MESSAGE);
   });
 
-  it("a push that fails is reported in the log message", async () => {
+  it("a push that fails is an error since req-020, not a quiet success", async () => {
     const d = await executeStep(
       repo,
       doku,
@@ -1403,8 +1443,8 @@ describe("executeStep — Doku-Task (req-016)", () => {
         })),
       }),
     );
-    expect(d.kind).toBe("success");
-    if (d.kind !== "success") return;
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
     expect(d.message).toContain("push failed: keine Rechte");
     expect(d.message).not.toBe(DOC_UNCHANGED_MESSAGE);
   });
@@ -1585,6 +1625,7 @@ describe("executeStep — Doku-Screenshots (req-017)", () => {
       "/work/appbaua",
       "worker: Doku aktualisiert",
       "tok",
+      ON(),
     );
     if (d.kind !== "success") return;
     expect(d.message).toContain("Screenshots: 1");
@@ -1753,5 +1794,524 @@ describe("executeStep — Doku-Screenshots (req-017)", () => {
       }),
     );
     expect(captureScreenshots).not.toHaveBeenCalled();
+  });
+});
+
+// req-019: nothing reaches done/ on a red suite. A file-driven .md is only
+// filed as finished after the repo's FULL test suite has run and come back
+// green — one repair attempt in the same run, and what stays red goes to
+// failed/ with its cause in the Verlauf.
+describe("executeStep — Test-Gate vor done/ (req-019)", () => {
+  /** The one .md this repo has waiting. */
+  const ready = () => folders({ ready: ["req-001.md"] });
+  const DONE = "delivery/bugs/done/req-001.md";
+  const FAILED = "delivery/bugs/failed/req-001.md";
+
+  /** A gate that is red on the first ask and green on every one after it. */
+  function redThenGreen() {
+    let asked = 0;
+    return vi.fn(async (_dir: string, _stack: string | null) => {
+      asked += 1;
+      return asked === 1 ? red("npm test: FAIL lib/foo.test.ts") : green();
+    });
+  }
+
+  it("AC: green suite -> the .md lands in done/", async () => {
+    const moveMd = vi.fn(async () => {});
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), moveMd, runTestGate }),
+    );
+    expect(d.kind).toBe("success");
+    expect(runTestGate).toHaveBeenCalledTimes(1);
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+  });
+
+  it("AC: red, then repaired in the same run -> the .md still lands in done/", async () => {
+    const moveMd = vi.fn(async () => {});
+    const runTestGate = redThenGreen();
+    const prompts: string[] = [];
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      prompts.push(prompt);
+      return { ok: true, summary: "erledigt", report: "" };
+    });
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), moveMd, runTestGate, runClaude }),
+    );
+    expect(d.kind).toBe("success");
+    expect(runTestGate).toHaveBeenCalledTimes(2); // checked again after the repair
+    expect(prompts).toHaveLength(2); // work run + repair run
+    expect(prompts[1]).toContain("FAIL lib/foo.test.ts"); // the cause reaches Claude
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+  });
+
+  it("AC: still red after the repair -> failed/, NOT done/, and the Verlauf names the cause", async () => {
+    const moveMd = vi.fn(async (_dir: string, _from: string, _to: string) => {});
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: vi.fn(async () => red("npm test: FAIL lib/foo.test.ts > kaputt")),
+        moveMd,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain(GATE_RED_MESSAGE);
+    expect(d.message).toContain("FAIL lib/foo.test.ts > kaputt");
+    expect(d.message).toContain("req-001.md nach failed/ verschoben");
+    expect(d.md).toBe("req-001.md");
+    // parked exactly like a failed Claude run (bug-002): out of ready/, so the
+    // commit carries both halves of the move
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/req-001.md",
+      FAILED,
+    );
+    expect(moveMd.mock.calls.map((c) => c[2])).not.toContain(DONE);
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md fehlgeschlagen",
+      "tok",
+      ON(),
+    );
+  });
+
+  it("AC: the gate runs before anything is moved to done/ or committed", async () => {
+    // A gate after the commit would report on a state that is already on dev.
+    const order: string[] = [];
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: vi.fn(async () => {
+          order.push("gate");
+          return green();
+        }),
+        moveMd: vi.fn(async (_dir: string, _from: string, to: string) => {
+          if (to === DONE) order.push("done");
+        }),
+        commitAndPush: vi.fn(async () => {
+          order.push("push");
+          return { pushed: true, detail: "auf dev gepusht" };
+        }),
+      }),
+    );
+    expect(order).toEqual(["gate", "done", "push"]);
+  });
+
+  it("AC: no exception for a change the run considers pure text or docs", async () => {
+    // Nothing in the step may look at WHAT was changed — the gate is
+    // unconditional for every file-driven run.
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate,
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "nur ein Tippfehler in der README, keine Tests nötig",
+          report: "",
+        })),
+      }),
+    );
+    expect(runTestGate).toHaveBeenCalledTimes(1);
+  });
+
+  it("AC: a missing runtime dependency has to reach the package.json, not just this container", async () => {
+    // The repair prompt is the only place that can rule out "installed here, so
+    // it is green here" — the gate itself only sees red.
+    const prompts: string[] = [];
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      prompts.push(prompt);
+      return { ok: true, summary: "erledigt", report: "" };
+    });
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: redThenGreen(),
+        runClaude,
+      }),
+    );
+    expect(prompts[1]).toContain("package.json");
+    expect(prompts[1]).toContain("frischer Checkout");
+    expect(prompts[1]).toContain("Lockfile");
+    expect(prompts[1]).toContain("KEINEN Test"); // no green by deleting tests
+  });
+
+  it("the test command is looked up in the repo's own delivery/stack.md", async () => {
+    const STACK = "## Commands\n\n- Test: `npm test`";
+    const readRepoFile = vi.fn(async (_dir: string, rel: string) =>
+      rel === STACK_FILE ? STACK : null,
+    );
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), readRepoFile, runTestGate }),
+    );
+    expect(runTestGate).toHaveBeenCalledWith("/work/appbaua", STACK);
+  });
+
+  it("a repair run that itself fails leaves the gate red", async () => {
+    const runTestGate = vi.fn(async () => red("npm test: FAIL"));
+    let call = 0;
+    const runClaude = vi.fn(async () => {
+      call += 1;
+      return call === 1
+        ? { ok: true, summary: "erledigt", report: "" }
+        : { ok: false, summary: "Timeout", report: "" };
+    });
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: ready(), runTestGate, runClaude }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Reparaturversuch fehlgeschlagen");
+    expect(d.message).toContain("Timeout");
+    expect(runTestGate).toHaveBeenCalledTimes(1); // no second check to be had
+  });
+
+  it("a gate that crashes is red, not green", async () => {
+    // "Could not check" must never pass for "checked and fine".
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate: vi.fn(async () => {
+          throw new Error("npm weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain("Test-Lauf abgebrochen");
+    expect(d.message).toContain("npm weg");
+  });
+
+  it("a repo that declares no test command still finishes, and the Verlauf says so", async () => {
+    const moveMd = vi.fn(async () => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        moveMd,
+        runTestGate: vi.fn(async () => ({
+          status: "no-command" as const,
+          command: null,
+          reason: NO_TEST_COMMAND_MESSAGE,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(NO_TEST_COMMAND_MESSAGE);
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/req-001.md",
+      DONE,
+    );
+  });
+
+  it("a green gate is visible in the Verlauf", async () => {
+    const d = await executeStep(repo, bug, [], deps({ listReady: ready() }));
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(GATE_GREEN_MESSAGE);
+    expect(d.message).toContain("npm test");
+  });
+
+  it("a failed Claude run is parked without ever asking the gate", async () => {
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: ready(),
+        runTestGate,
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(runTestGate).not.toHaveBeenCalled();
+  });
+
+  it("the recurring types keep their behaviour — no gate, no done/ (out of scope)", async () => {
+    const runTestGate = vi.fn(async (_dir: string, _stack: string | null) => green());
+    for (const type of [review, ideen, security, doku]) {
+      await executeStep(repo, type, [], deps({ runTestGate }));
+    }
+    expect(runTestGate).not.toHaveBeenCalled();
+  });
+});
+
+// req-020: der Worker committet auf dem Branch, den das ZIELREPO nennt — und
+// was beim Vorbereiten oder beim Pushen scheitert, steht als Fehler im Verlauf
+// statt nur auf der Konsole. Beides zusammen ist der Grund, warum ein Repo mit
+// abweichender Branch-Konvention bisher unbearbeitet blieb und der Worker ohne
+// erkennbaren Grund pausierte.
+describe("executeStep — Branch des Zielrepos und sichtbare Fehler (req-020)", () => {
+  /** A repo prepared on `branch` instead of the standard dev. */
+  const preparedOn = (branch: string) =>
+    vi.fn(async () => ({ dir: "/work/appbaua", branch }));
+
+  /** A push that did not happen although there was something to push. */
+  const refused = () =>
+    vi.fn(async () => ({ pushed: false, detail: "push failed: keine Rechte" }));
+
+  /** An idea folder that gained one file during the run (req-011 mechanics). */
+  function proposedIdea(): ExecuteDeps["listReady"] {
+    let asked = 0;
+    return vi.fn(async (_dir: string, rel: string) => {
+      if (rel !== "delivery/idea") return [];
+      asked += 1;
+      return asked === 1 ? [] : ["dark-mode.md"];
+    });
+  }
+
+  it("AC: ein Standard-Repo wird unverändert auf dev committet", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: folders({ ready: ["req-001.md"] }), commitAndPush }),
+    );
+    expect(d.kind).toBe("success");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md abgearbeitet",
+      "tok",
+      ON("dev"),
+    );
+  });
+
+  it("AC: ein Repo ohne dev-Branch wird auf seinem eigenen Branch committet", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf feature/garten gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: preparedOn("feature/garten"),
+        listReady: folders({ ready: ["req-001.md"] }),
+        commitAndPush,
+      }),
+    );
+    // AC: die Arbeit wird tatsächlich bearbeitet, nicht übersprungen
+    expect(d.kind).toBe("success");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md abgearbeitet",
+      "tok",
+      ON("feature/garten"),
+    );
+    // …und nichts davon geht auf dev
+    expect(commitAndPush).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      ON("dev"),
+    );
+  });
+
+  it("auch eine fehlgeschlagene .md wird auf dem Branch des Repos geparkt", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "gepusht" }));
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: preparedOn("feature/garten"),
+        listReady: folders({ ready: ["req-001.md"] }),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+        commitAndPush,
+      }),
+    );
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md fehlgeschlagen",
+      "tok",
+      ON("feature/garten"),
+    );
+  });
+
+  it("jede Aufgabenart committet auf dem Branch des Repos, nicht auf dev", async () => {
+    const cases: { type: typeof bug; listReady: ExecuteDeps["listReady"] }[] = [
+      { type: ideen, listReady: proposedIdea() },
+      { type: security, listReady: folders() },
+      { type: doku, listReady: folders() },
+      { type: review, listReady: folders() },
+    ];
+    for (const { type, listReady } of cases) {
+      const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "gepusht" }));
+      await executeStep(
+        repo,
+        type,
+        [],
+        deps({
+          prepareRepo: preparedOn("feature/garten"),
+          listReady,
+          runClaude: vi.fn(async () => ({
+            ok: true,
+            summary: "fertig",
+            report: "# Befund",
+          })),
+          commitAndPush,
+        }),
+      );
+      expect(commitAndPush).toHaveBeenCalledWith(
+        "/work/appbaua",
+        expect.any(String),
+        "tok",
+        ON("feature/garten"),
+      );
+    }
+  });
+
+  it("AC: scheitert das Vorbereiten, nennt der Verlauf Repo und Grund", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: vi.fn(async () => {
+          throw new Error("fatal: Remote branch dev not found in upstream origin");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain(PREPARE_FAILED_MESSAGE);
+    expect(d.message).toContain(repo.name);
+    expect(d.message).toContain("Remote branch dev not found");
+  });
+
+  it("AC: scheitert der Push, nennt der Verlauf Repo und Grund", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["req-001.md"] }),
+        commitAndPush: refused(),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain(PUSH_FAILED_MESSAGE);
+    expect(d.message).toContain(repo.name);
+    expect(d.message).toContain("keine Rechte");
+    expect(d.md).toBe("req-001.md"); // der Verlauf weiß, woran es lag
+  });
+
+  it("ein gescheiterter Push parkt die .md NICHT unter failed/", async () => {
+    // Die Arbeit war in Ordnung, und committet wurde nichts — der nächste Lauf
+    // findet die .md wieder in ready/ und versucht es erneut.
+    const moveMd = vi.fn(async (_dir: string, _from: string, _to: string) => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["req-001.md"] }),
+        commitAndPush: refused(),
+        moveMd,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(moveMd.mock.calls.map((c) => c[2])).not.toContain(
+      "delivery/bugs/failed/req-001.md",
+    );
+  });
+
+  it("ein Push, der nichts zu committen fand, bleibt ein Erfolg", async () => {
+    // Ein Lauf darf nichts ändern; das ist kein Fehler, sondern ein ruhiger Tag.
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: NO_CHANGES_DETAIL,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+  });
+
+  it("ein gescheiterter Push der Ideen- und Security-Aufgabe ist ebenfalls ein Fehler", async () => {
+    const idea = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({
+        listReady: proposedIdea(),
+        commitAndPush: refused(),
+      }),
+    );
+    expect(idea.kind).toBe("error");
+
+    const sec = await executeStep(
+      repo,
+      security,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "1 Finding",
+          report: "## Zusammenfassung\n\nEin Befund.",
+        })),
+        commitAndPush: refused(),
+      }),
+    );
+    expect(sec.kind).toBe("error");
+    if (sec.kind !== "error") return;
+    expect(sec.message).toContain("delivery/security/"); // Bericht bleibt auffindbar
   });
 });

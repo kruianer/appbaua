@@ -21,6 +21,12 @@ import {
 // again (bug-002). It also writes its live status (running step / pause window,
 // req-005) so the start page can show what it is doing right now. Deps
 // (runStep, now, status mutators, sleep) are injectable for tests.
+//
+// req-020 closes the one hole in that account: a pass that PLANNED steps and
+// then skipped every one of them wrote nothing at all and went to sleep, so a
+// repo whose work the worker never got to looked exactly like a worker with
+// nothing to do. The "idle" row is therefore no longer tied to an empty plan
+// but to an empty RESULT — every pause is preceded by a line saying why.
 
 export const EMPTY_PAUSE_MS = 5 * 60_000;
 
@@ -68,22 +74,9 @@ export async function runOnce(
   const steps = planRun(repos, taskTypes, deps.now());
   const log = getRunLogStore();
 
-  if (steps.length === 0) {
-    const at = deps.now().toISOString();
-    await deps.clearRunningStep();
-    await log.append({
-      startedAt: at,
-      endedAt: at,
-      repo: null,
-      taskType: null,
-      status: "idle",
-      message: "nichts zu tun gefunden",
-      md: null, // no step ran, so there is no file to name (req-015)
-    });
-    return 0;
-  }
-
   let succeeded = 0;
+  /** How many rows this pass wrote — what decides whether it stayed silent. */
+  let logged = 0;
   for (const step of steps) {
     // Stop if the switch was flipped off mid-run (after finishing current step
     // is handled by the loop; here we simply stop starting new steps).
@@ -138,11 +131,29 @@ export async function runOnce(
       // The .md the step worked off, so the Verlauf can name it (req-015).
       md: decision.md ?? null,
     });
+    logged += 1;
     // Only success is progress. Counting errors here would keep the loop from
     // ever pausing while a step fails on every single pass (bug-002).
     if (decision.kind === "success") succeeded += 1;
   }
   await deps.clearRunningStep(); // no step running after the pass
+
+  // A pass that wrote nothing is about to pause, and a pause nobody can explain
+  // is what req-020 is about: say so once. This covers both ways a pass can end
+  // up empty — nothing was due at all, and every step that was due had nothing
+  // to do.
+  if (logged === 0) {
+    const at = deps.now().toISOString();
+    await log.append({
+      startedAt: at,
+      endedAt: at,
+      repo: null,
+      taskType: null,
+      status: "idle",
+      message: "nichts zu tun gefunden",
+      md: null, // no step ran, so there is no file to name (req-015)
+    });
+  }
   return succeeded;
 }
 

@@ -102,6 +102,29 @@ export function fileTaskPrompt(mdRelPath: string): string {
 }
 
 /**
+ * The prompt for the repair attempt a red test gate gets (req-019). It is the
+ * only place that can rule out the cheap way to a green suite — deleting or
+ * skipping the failing test — and the only place that can say what "green" has
+ * to mean here: green in a fresh checkout, so a missing runtime dependency has
+ * to land in the manifest instead of in this container.
+ */
+export function testFixPrompt(mdRelPath: string, failure: string): string {
+  return [
+    `Die vollständige Test-Suite dieses Repos ist ROT, nachdem du ${mdRelPath} umgesetzt hast.`,
+    `Der Lauf meldet:`,
+    `---`,
+    failure,
+    `---`,
+    `Bringe die Test-Suite wieder auf grün, autonom und ohne Rückfragen.`,
+    `Behebe die URSACHE — lösche, überspringe oder schwäche KEINEN Test ab, nur damit er durchläuft.`,
+    `Fehlt eine Laufzeit-Abhängigkeit, deklariere sie in der package.json (samt Lockfile),`,
+    `damit auch ein frischer Checkout mit Installation grün läuft — nur lokal installiert reicht nicht.`,
+    `Halte dich an die CLAUDE.md und delivery/stack.md dieses Repos.`,
+    `Committe NICHT selbst und pushe NICHT — das übernimmt der Worker.`,
+  ].join("\n");
+}
+
+/**
  * The prompt for a recurring task (code-review, doku, ...). Its final answer is
  * filed as a report in the repo (req-010), so the prompt asks for the whole
  * report there instead of a summary.
