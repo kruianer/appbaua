@@ -361,6 +361,9 @@ export async function executeStep(
   let outputWrites: Promise<void> = Promise.resolve();
   const claude = async (text: string) => {
     const res = await d.runClaude(dir, text, {
+      // The repo's own choice of model (req-028) — falls back to the project
+      // default inside runClaude when a repo has none set.
+      model: repo.model,
       onOutput: (tail) => {
         outputWrites = outputWrites
           .then(() => d.setCurrentOutput(tail))

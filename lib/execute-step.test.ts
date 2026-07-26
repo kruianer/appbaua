@@ -28,7 +28,7 @@ import {
   type TestGateResult,
 } from "./test-gate";
 
-const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
+const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
@@ -1829,6 +1829,24 @@ describe("executeStep — Doku-Screenshots (req-017)", () => {
       }),
     );
     expect(captureScreenshots).not.toHaveBeenCalled();
+  });
+});
+
+describe("req-028: the repo's own model is passed to Claude", () => {
+  it("calls runClaude with this repo's model, not the project default", async () => {
+    const runClaude = vi.fn(async () => ({ ok: true, summary: "ok", report: "" }));
+    const opusRepo: Repo = { ...repo, model: "opus" };
+    await executeStep(
+      opusRepo,
+      bug,
+      [],
+      deps({ listReady: folders({ ready: ["bug-001.md"] }), runClaude }),
+    );
+    expect(runClaude).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({ model: "opus" }),
+    );
   });
 });
 

@@ -12,6 +12,10 @@ CREATE TABLE IF NOT EXISTS repos (
 
 CREATE INDEX IF NOT EXISTS repos_position_idx ON repos (position);
 
+-- Added with req-028: the Claude model this repo's runs use. NULL on rows
+-- written before req-028 — the store backfills those to the default (sonnet).
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS model TEXT;
+
 -- Task types (req-002). Predefined types, seeded on first use; the user only
 -- edits priority (position), active and the per-weekday schedule (JSONB:
 -- { mon: {enabled, start, end}, ... }). New types are added via code/seed.

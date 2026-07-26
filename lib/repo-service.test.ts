@@ -6,6 +6,7 @@ import {
   listRepos,
   removeRepo,
   reorderRepos,
+  setRepoModel,
   toggleRepo,
 } from "./repo-service";
 import type { ReachabilityResult } from "./reachability";
@@ -37,6 +38,15 @@ describe("req-001 acceptance criteria", () => {
       expect(res.repo.url).toBe("github.com/kruianer/appbaua");
       expect(res.repo.active).toBe(true);
     }
+  });
+
+  it("req-028: a newly added repo defaults to sonnet", async () => {
+    const res = await addRepo(
+      { url: "https://github.com/kruianer/appbaua.git" },
+      { checkReachable: reachable },
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.repo.model).toBe("sonnet");
   });
 
   it("AC: a repo with no access is rejected as unreachable", async () => {
@@ -96,6 +106,23 @@ describe("req-001 acceptance criteria", () => {
     const after = await toggleRepo(appbaua.id);
     expect(after[0].id).toBe(appbaua.id); // still position 1
     expect(after[0].active).toBe(false); // now inactive
+  });
+
+  it("req-028: setting a repo's model persists it and leaves other repos alone", async () => {
+    await addRepo(
+      { url: "github.com/kruianer/appbaua", name: "appbaua" },
+      { checkReachable: reachable },
+    );
+    await addRepo(
+      { url: "github.com/kruianer/livinggardenkeeper", name: "livinggardenkeeper" },
+      { checkReachable: reachable },
+    );
+    const [appbaua, keeper] = await listRepos();
+    await setRepoModel(keeper.id, "opus");
+
+    const after = await getStore().list(); // re-read: proves persistence
+    expect(after.find((r) => r.id === keeper.id)?.model).toBe("opus");
+    expect(after.find((r) => r.id === appbaua.id)?.model).toBe("sonnet");
   });
 
   it("AC: removing a repo deletes exactly that repo", async () => {

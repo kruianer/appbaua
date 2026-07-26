@@ -8,7 +8,12 @@ import {
   useRef,
   useState,
 } from "react";
-import type { Repo } from "@/lib/repos";
+import {
+  type Repo,
+  type RepoModel,
+  REPO_MODELS,
+  REPO_MODEL_LABELS,
+} from "@/lib/repos";
 import type { TaskType } from "@/lib/task-types";
 import type { GithubRepo } from "@/lib/github-repos";
 import { Icon, type IconName } from "./Icon";
@@ -124,6 +129,20 @@ export function AppShell({
       prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r)),
     );
     const res = await fetch(`/api/repos/${id}`, { method: "PATCH" });
+    if (res.ok) {
+      const data = await res.json();
+      setRepos(data.repos);
+    }
+  }, []);
+
+  const setModel = useCallback(async (id: string, model: RepoModel) => {
+    // optimistic (req-028)
+    setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, model } : r)));
+    const res = await fetch(`/api/repos/${id}/model`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model }),
+    });
     if (res.ok) {
       const data = await res.json();
       setRepos(data.repos);
@@ -553,6 +572,32 @@ export function AppShell({
                             <Icon name="sync" size={15} />
                             {busy ? "Wird umgestellt …" : "Auf appbaua umstellen"}
                           </button>
+                          {/* req-028: which Claude model this repo's runs use.
+                              Persists until changed; a running step finishes
+                              with its own model. */}
+                          <select
+                            aria-label={`${r.name}: Modell`}
+                            value={r.model}
+                            onChange={(e) =>
+                              setModel(r.id, e.target.value as RepoModel)
+                            }
+                            style={{
+                              flex: "none",
+                              fontSize: 12,
+                              padding: "5px 8px",
+                              borderRadius: "var(--radius-sm, 6px)",
+                              background: "var(--color-surface)",
+                              color: "var(--color-text)",
+                              border:
+                                "1px solid color-mix(in srgb, var(--color-text) 20%, transparent)",
+                            }}
+                          >
+                            {REPO_MODELS.map((m) => (
+                              <option key={m} value={m}>
+                                {REPO_MODEL_LABELS[m]}
+                              </option>
+                            ))}
+                          </select>
                           {result && (
                             <span
                               role="status"

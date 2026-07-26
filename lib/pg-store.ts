@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { type PoolConfig, Pool } from "pg";
-import type { Repo } from "./repos";
+import { type Repo, DEFAULT_REPO_MODEL } from "./repos";
 import type { RepoStore } from "./store";
 import { type TaskType, defaultTaskTypes } from "./task-types";
 import type { TaskTypeStore } from "./task-store";
@@ -92,12 +92,15 @@ export function createPgStore(): RepoStore {
         name: string;
         url: string;
         active: boolean;
-      }>("SELECT id, name, url, active FROM repos ORDER BY position ASC");
+        model: string | null;
+      }>("SELECT id, name, url, active, model FROM repos ORDER BY position ASC");
       return res.rows.map((r) => ({
         id: r.id,
         name: r.name,
         url: r.url,
         active: r.active,
+        // Backfill for a row written before req-028 (no model column value yet).
+        model: (r.model as Repo["model"]) || DEFAULT_REPO_MODEL,
       }));
     },
 
@@ -110,8 +113,8 @@ export function createPgStore(): RepoStore {
         for (let i = 0; i < repos.length; i++) {
           const r = repos[i];
           await client.query(
-            "INSERT INTO repos (id, name, url, active, position) VALUES ($1, $2, $3, $4, $5)",
-            [r.id, r.name, r.url, r.active, i],
+            "INSERT INTO repos (id, name, url, active, position, model) VALUES ($1, $2, $3, $4, $5, $6)",
+            [r.id, r.name, r.url, r.active, i, r.model],
           );
         }
         await client.query("COMMIT");

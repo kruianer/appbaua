@@ -299,6 +299,12 @@ export async function runClaude(
     runImpl?: typeof run;
     timeoutMs?: number;
     /**
+     * The model requested via --model (req-028): the repo's own choice, falling
+     * back to the project default when none is given. What actually ran is a
+     * separate question — see onModel below.
+     */
+    model?: string;
+    /**
      * Receives the last ~50 activity lines while the run is still going
      * (req-008; content per bug-001), at most about once per second. Errors from
      * it are swallowed — live output must never break the run.
@@ -316,6 +322,7 @@ export async function runClaude(
 ): Promise<ClaudeOutcome> {
   const runImpl = deps?.runImpl ?? run;
   const timeoutMs = deps?.timeoutMs ?? CLAUDE_TIMEOUT_MS;
+  const model = deps?.model ?? CLAUDE_MODEL;
   const onOutput = deps?.onOutput;
   const onModel = deps?.onModel;
   const activityData = onOutput
@@ -353,7 +360,7 @@ export async function runClaude(
         "-p",
         prompt,
         "--model",
-        CLAUDE_MODEL,
+        model,
         "--dangerously-skip-permissions",
         // One JSON event per line while the session runs, instead of a silent
         // stdout (bug-001). The CLI requires --verbose for stream-json in print

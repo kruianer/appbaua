@@ -135,9 +135,9 @@ describe("isTaskDue with a window over midnight (bug-004)", () => {
 
 describe("planRun", () => {
   const repos: Repo[] = [
-    { id: "r1", name: "appbaua", url: "u1", active: true },
-    { id: "r2", name: "worker", url: "u2", active: true },
-    { id: "r3", name: "aus", url: "u3", active: false },
+    { id: "r1", name: "appbaua", url: "u1", active: true, model: "sonnet" },
+    { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet" },
+    { id: "r3", name: "aus", url: "u3", active: false, model: "sonnet" },
   ];
 
   it("orders repo priority outer, task-type priority inner; skips inactive (bug-008)", () => {
