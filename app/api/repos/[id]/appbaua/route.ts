@@ -2,8 +2,9 @@ import { NextResponse } from "next/server";
 import { convertRepoToAppbaua } from "@/lib/repo-service";
 
 // req-012: the "Auf appbaua umstellen" button of a repo entry. Rolls the appbaua
-// standard out into the repo and pushes it to that repo's dev branch. A failed
-// rollout pushes nothing and answers with the concrete reason.
+// standard out into the repo and pushes it to that repo's own dev branch, or —
+// when it has none — to its default branch (req-013). A failed rollout pushes
+// nothing and answers with the concrete reason.
 
 export async function POST(
   _request: Request,

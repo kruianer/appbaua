@@ -10,6 +10,11 @@ export const NO_CHANGES_DETAIL = "keine Aenderungen";
 // dir using the GitHub token for auth, and ensures the `dev` branch. All git
 // runs shell out; process output is captured for logging.
 //
+// req-013 adds a second way to check a repo out: the appbaua rollout must not
+// leave a `dev` branch behind in a repo that never had one, so it takes the
+// repo's own default branch in that case (prepareRepoOnDevOrDefault). The
+// worker's own steps keep using prepareRepo and stay on `dev` (devops.md).
+//
 // bug-003: the token is never part of the remote URL — it travels as an HTTP
 // Authorization header supplied per call (see authEnv), so it lands neither in
 // `.git/config` nor in the URL git quotes back in its error messages. What git
@@ -140,16 +145,19 @@ export function repoDir(normalizedUrl: string): string {
   return path.join(WORK_ROOT, slug);
 }
 
+/** The branch the worker commits on (delivery/devops.md). */
+export const DEV_BRANCH = "dev";
+
 /**
- * Clone (or fetch+reset) the repo and check out `dev` (creating it from the
- * default branch if it does not exist). Returns the local path or throws.
+ * Clone (or fetch+reset) the repo into its work dir and make it commit-ready.
+ * Which branch is checked out afterwards is left to the caller — that is the
+ * only thing prepareRepo and prepareRepoOnDevOrDefault disagree about.
  */
-export async function prepareRepo(
+async function syncRepo(
   normalizedUrl: string,
   token: string,
-  deps: WorkspaceDeps = {},
-): Promise<string> {
-  const git = deps.runImpl ?? run;
+  git: typeof run,
+): Promise<{ dir: string; auth: Record<string, string> }> {
   const dir = repoDir(normalizedUrl);
   const url = remoteUrl(normalizedUrl);
   const auth = authEnv(token);
@@ -176,22 +184,109 @@ export async function prepareRepo(
   await git("git", ["config", "user.email", "worker@appbaua.local"], { cwd: dir });
   await git("git", ["config", "user.name", "appbaua-worker"], { cwd: dir });
 
+  return { dir, auth };
+}
+
+/**
+ * Does the remote have this BRANCH? Asked as `refs/heads/<name>`, so a tag of
+ * the same name cannot pass for one — the answer decides whether the rollout
+ * may check the branch out, and a wrong yes would end in creating it (req-013).
+ */
+async function remoteHasBranch(
+  git: typeof run,
+  dir: string,
+  auth: Record<string, string>,
+  branch: string,
+): Promise<boolean> {
+  const res = await git(
+    "git",
+    ["ls-remote", "--exit-code", "origin", `refs/heads/${branch}`],
+    { cwd: dir, env: auth },
+  );
+  return res.ok;
+}
+
+/**
+ * Clone (or fetch+reset) the repo and check out `dev` (creating it from the
+ * default branch if it does not exist). Returns the local path or throws.
+ */
+export async function prepareRepo(
+  normalizedUrl: string,
+  token: string,
+  deps: WorkspaceDeps = {},
+): Promise<string> {
+  const git = deps.runImpl ?? run;
+  const { dir, auth } = await syncRepo(normalizedUrl, token, git);
+
   // Check out dev: track origin/dev if present, else create from current HEAD.
-  const hasRemoteDev = await git("git", ["ls-remote", "--exit-code", "origin", "dev"], {
-    cwd: dir,
-    env: auth,
-  });
-  if (hasRemoteDev.ok) {
-    await git("git", ["checkout", "-B", "dev", "origin/dev"], { cwd: dir });
-    await git("git", ["reset", "--hard", "origin/dev"], { cwd: dir });
+  if (await remoteHasBranch(git, dir, auth, DEV_BRANCH)) {
+    await git("git", ["checkout", "-B", DEV_BRANCH, `origin/${DEV_BRANCH}`], {
+      cwd: dir,
+    });
+    await git("git", ["reset", "--hard", `origin/${DEV_BRANCH}`], { cwd: dir });
   } else {
-    await git("git", ["checkout", "-B", "dev"], { cwd: dir });
+    await git("git", ["checkout", "-B", DEV_BRANCH], { cwd: dir });
   }
   // reset --hard restores tracked files but leaves untracked leftovers of an
   // earlier run lying around, where the next `git add -A` would sweep them into
   // an unrelated commit (bug-002). Start every step from a clean working copy.
   await git("git", ["clean", "-fd"], { cwd: dir });
   return dir;
+}
+
+/**
+ * The remote's default branch, read from what its HEAD points at — `main`,
+ * `master`, or whatever the repo actually uses. Throws when it cannot be read:
+ * falling back to a guessed name would create exactly the surprise branch
+ * req-013 does away with.
+ */
+export async function defaultBranch(
+  dir: string,
+  token: string,
+  deps: WorkspaceDeps = {},
+): Promise<string> {
+  const git = deps.runImpl ?? run;
+  const res = await git("git", ["ls-remote", "--symref", "origin", "HEAD"], {
+    cwd: dir,
+    env: authEnv(token),
+  });
+  // "ref: refs/heads/master\tHEAD" — the first symref line is the one for HEAD.
+  const ref = res.stdout.match(/^ref:\s+refs\/heads\/(\S+)/m);
+  if (!res.ok || !ref) {
+    throw new Error(
+      `default branch unknown: ${redact(res.stderr || res.stdout, [token])}`,
+    );
+  }
+  return ref[1];
+}
+
+/**
+ * Clone (or fetch+reset) the repo and check out the branch the appbaua rollout
+ * writes to (req-013): the repo's own `dev` when it has one, otherwise its
+ * default branch. Unlike prepareRepo this NEVER creates a branch — a repo that
+ * only has `main` must not end up with a `dev` its owner never asked for.
+ * Returns the local path and the branch that was checked out, or throws.
+ */
+export async function prepareRepoOnDevOrDefault(
+  normalizedUrl: string,
+  token: string,
+  deps: WorkspaceDeps = {},
+): Promise<{ dir: string; branch: string }> {
+  const git = deps.runImpl ?? run;
+  const { dir, auth } = await syncRepo(normalizedUrl, token, git);
+
+  const branch = (await remoteHasBranch(git, dir, auth, DEV_BRANCH))
+    ? DEV_BRANCH
+    : await defaultBranch(dir, token, deps);
+
+  // Either way the branch already exists on the remote, so both cases are
+  // checked out the same way: track it and reset to it.
+  await git("git", ["checkout", "-B", branch, `origin/${branch}`], { cwd: dir });
+  await git("git", ["reset", "--hard", `origin/${branch}`], { cwd: dir });
+  // Same reason as in prepareRepo: untracked leftovers of an earlier run must
+  // not be swept into this commit (bug-002).
+  await git("git", ["clean", "-fd"], { cwd: dir });
+  return { dir, branch };
 }
 
 /**
@@ -206,18 +301,28 @@ export async function discardChanges(dir: string): Promise<void> {
   await run("git", ["clean", "-fd"], { cwd: dir });
 }
 
+export type PushOptions = WorkspaceDeps & {
+  /**
+   * Which branch to push to. Defaults to `dev`, the branch the worker commits
+   * on; the appbaua rollout passes the branch it checked out (req-013).
+   */
+  branch?: string;
+};
+
 /**
- * Stage everything, commit, push to origin/dev. Returns false if nothing to
- * commit. The token is needed for the push itself: the remote URL no longer
- * carries it, so the credential has to come along per call (bug-003).
+ * Stage everything, commit, push to origin/<branch> (`dev` unless told
+ * otherwise). Returns false if nothing to commit. The token is needed for the
+ * push itself: the remote URL no longer carries it, so the credential has to
+ * come along per call (bug-003).
  */
 export async function commitAndPush(
   dir: string,
   message: string,
   token: string,
-  deps: WorkspaceDeps = {},
+  opts: PushOptions = {},
 ): Promise<{ pushed: boolean; detail: string }> {
-  const git = deps.runImpl ?? run;
+  const git = opts.runImpl ?? run;
+  const branch = opts.branch ?? DEV_BRANCH;
   await git("git", ["add", "-A"], { cwd: dir });
   const status = await git("git", ["status", "--porcelain"], { cwd: dir });
   if (!status.stdout.trim()) {
@@ -227,14 +332,14 @@ export async function commitAndPush(
   if (!commit.ok) {
     return { pushed: false, detail: `commit failed: ${redact(commit.stderr, [token])}` };
   }
-  const push = await git("git", ["push", "origin", "dev"], {
+  const push = await git("git", ["push", "origin", branch], {
     cwd: dir,
     env: authEnv(token),
   });
   if (!push.ok) {
     return { pushed: false, detail: `push failed: ${redact(push.stderr, [token])}` };
   }
-  return { pushed: true, detail: "auf dev gepusht" };
+  return { pushed: true, detail: `auf ${branch} gepusht` };
 }
 
 /**

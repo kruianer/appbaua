@@ -9,13 +9,19 @@ import {
   listReady,
   listTree,
   prepareRepo,
+  prepareRepoOnDevOrDefault,
   readRepoFile,
   repoPathExists,
   writeRepoFile,
 } from "./workspace";
 
 // req-012: bring a target repo up to the appbaua standard and push the result
-// to its `dev` branch — the "Auf appbaua umstellen" button of the repo list.
+// to it — the "Auf appbaua umstellen" button of the repo list.
+//
+// req-013 decides WHERE it lands: a target that already has a `dev` branch gets
+// the rollout there as before, a target without one gets it on its own default
+// branch. No `dev` is created, so a fresh repo does not grow a branch its owner
+// never asked for. The result message names the branch that was actually used.
 //
 // The source is the appbaua repo itself, freshly fetched on every run, and it is
 // READ at runtime: which skills and which delivery folders exist is whatever the
@@ -54,8 +60,6 @@ export const CLAUDE_MD = "CLAUDE.md";
 export const CLAUDE_MD_TEMPLATE = ".claude/templates/CLAUDE.md";
 /** Placeholder that lets git carry an otherwise empty folder. */
 export const GITKEEP = ".gitkeep";
-/** The only branch the rollout ever writes to (see delivery/devops.md). */
-export const TARGET_BRANCH = "dev";
 /** The repo the standard is taken from, overridable per deployment. */
 export const DEFAULT_SOURCE_REPO = "github.com/kruianer/appbaua";
 
@@ -96,6 +100,7 @@ export type ConvertSummary = {
   /** How many of those the target was still missing before this run. */
   foldersCreated: number;
   claudeMd: ClaudeMdOutcome;
+  /** The branch the rollout actually used — the target's `dev` or its default. */
   branch: string;
   /** What the push did, in the user's words. */
   pushDetail: string;
@@ -106,7 +111,16 @@ export type ConvertResult =
   | { ok: false; error: string };
 
 export type ConvertDeps = {
+  /** Fetch the SOURCE repo (appbaua) and hand back its working copy. */
   prepareRepo: (url: string, token: string) => Promise<string>;
+  /**
+   * Fetch the TARGET repo on the branch the rollout writes to (req-013): its
+   * `dev` if it has one, otherwise its default branch. Never creates a branch.
+   */
+  prepareTarget: (
+    url: string,
+    token: string,
+  ) => Promise<{ dir: string; branch: string }>;
   listTree: (
     dir: string,
     rel: string,
@@ -126,6 +140,7 @@ export type ConvertDeps = {
     dir: string,
     message: string,
     token: string,
+    opts?: { branch?: string },
   ) => Promise<{ pushed: boolean; detail: string }>;
   discardChanges: (dir: string) => Promise<void>;
   token: string | undefined;
@@ -136,6 +151,7 @@ export type ConvertDeps = {
 function defaultDeps(): ConvertDeps {
   return {
     prepareRepo,
+    prepareTarget: prepareRepoOnDevOrDefault,
     listTree,
     listEntries: listReady,
     pathExists: repoPathExists,
@@ -177,9 +193,10 @@ export function summaryMessage(s: ConvertSummary): string {
 }
 
 /**
- * Bring `targetUrl` up to the appbaua standard and push it to the target's
- * `dev` branch. Never throws: every failure comes back as `{ ok: false }` with a
- * message the UI can show, scrubbed of credentials (bug-003).
+ * Bring `targetUrl` up to the appbaua standard and push it to the target's own
+ * `dev` branch, or — when it has none — to its default branch (req-013). Never
+ * throws: every failure comes back as `{ ok: false }` with a message the UI can
+ * show, scrubbed of credentials (bug-003).
  */
 export async function applyAppbauaStandard(
   targetUrl: string,
@@ -219,18 +236,22 @@ export async function applyAppbauaStandard(
   const skills = await d.listTree(sourceDir, SKILLS_DIR);
   const deliveryDirs = (await d.listTree(sourceDir, DELIVERY_DIR)).dirs;
 
-  // 2. The target. A missing `dev` is branched off the default branch here and
-  // pushed below, so the rollout also works on a repo that has no dev yet.
+  // 2. The target, on the branch this rollout belongs on: its `dev` if it has
+  // one, else its default branch (req-013). Nothing is created here — a repo
+  // without `dev` keeps not having one.
   let targetDir: string;
+  let branch: string;
   try {
-    targetDir = await d.prepareRepo(target, token);
+    const prepared = await d.prepareTarget(target, token);
+    targetDir = prepared.dir;
+    branch = prepared.branch;
   } catch (err) {
     return fail(`Zielrepo konnte nicht vorbereitet werden: ${String(err)}`);
   }
 
   // 3. Build the whole rollout locally. Anything that goes wrong from here on
   // is thrown away instead of pushed.
-  let summary: Omit<ConvertSummary, "pushDetail">;
+  let summary: Omit<ConvertSummary, "branch" | "pushDetail">;
   try {
     summary = await rollOut(d, sourceDir, targetDir, skills, deliveryDirs);
   } catch (err) {
@@ -239,7 +260,9 @@ export async function applyAppbauaStandard(
   }
 
   // 4. One commit, one push. Until this line the target repo is untouched.
-  const push = await d.commitAndPush(targetDir, COMMIT_MESSAGE, token);
+  const push = await d.commitAndPush(targetDir, COMMIT_MESSAGE, token, {
+    branch,
+  });
   if (!push.pushed && push.detail !== NO_CHANGES_DETAIL) {
     await d.discardChanges(targetDir).catch(() => {});
     return fail(`Nichts gepusht — ${push.detail}`);
@@ -247,8 +270,9 @@ export async function applyAppbauaStandard(
 
   const full: ConvertSummary = {
     ...summary,
+    branch,
     pushDetail: push.pushed
-      ? `auf ${TARGET_BRANCH} gepusht`
+      ? `auf ${branch} gepusht`
       : "keine Änderungen nötig, war bereits auf Stand",
   };
   return { ok: true, summary: full, message: summaryMessage(full) };
@@ -265,7 +289,7 @@ async function rollOut(
   targetDir: string,
   skills: { dirs: string[]; files: string[] },
   deliveryDirs: string[],
-): Promise<Omit<ConvertSummary, "pushDetail">> {
+): Promise<Omit<ConvertSummary, "branch" | "pushDetail">> {
   // Skills: file by file, overwriting same-named ones. Files the target has and
   // the source does not — a skill of its own, an extra reference file — are not
   // touched, so nothing of the target's is ever lost.
@@ -310,7 +334,6 @@ async function rollOut(
     folders: deliveryDirs.length,
     foldersCreated: missing.size,
     claudeMd,
-    branch: TARGET_BRANCH,
   };
 }
 

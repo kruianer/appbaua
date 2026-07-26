@@ -23,7 +23,8 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # git at runtime: "Auf appbaua umstellen" (req-012) clones the appbaua source and
-# the target repo from inside the app and pushes to the target's dev branch.
+# the target repo from inside the app and pushes to the target's dev branch — or
+# to its default branch when it has no dev (req-013).
 RUN apk add --no-cache git
 
 # Where that rollout clones repos (must be writable by the app user).
