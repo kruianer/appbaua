@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createActivityStream,
   createLiveTail,
+  docPrompt,
   ideaPrompt,
   lastLines,
   recurringPrompt,
@@ -207,6 +208,53 @@ describe("securityPrompt (req-014)", () => {
   it("changes nothing and leaves committing to the worker", () => {
     expect(p).toContain("Ändere NICHTS im Repo");
     expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+});
+
+// req-016: the Doku task produces a website, not a report. Following the design
+// template, writing only into site/user-docs/ and — above all — UPDATING the
+// existing pages instead of rebuilding them are things nothing but this prompt
+// can ask for, so each of them is pinned here.
+describe("docPrompt (req-016)", () => {
+  const p = docPrompt({
+    designDir: "delivery/doc-design",
+    docSiteFile: "delivery/doc-site.md",
+    docsDir: "site/user-docs",
+    doneRequirementsDir: "delivery/requirements/done",
+  });
+
+  it("AC: reads the design template and follows it as far as possible", () => {
+    expect(p).toContain("delivery/doc-design/");
+    expect(p).toContain("Handover-Markdown");
+    expect(p).toContain("SO WEIT WIE MÖGLICH");
+    expect(p).toContain("Orientierung, kein");
+  });
+
+  it("AC: derives the content from the shipped requirements and the code", () => {
+    expect(p).toContain("delivery/requirements/done/");
+    expect(p).toContain("Code");
+    expect(p).toContain("Sicht der Nutzer");
+  });
+
+  it("AC: updates incrementally instead of rebuilding the site", () => {
+    expect(p).toContain("INKREMENTELL");
+    expect(p).toContain("vorhandenen Seiten in site/user-docs/");
+    expect(p).toContain("NICHT bei jedem Lauf neu");
+    expect(p).toContain("nicht bei jedem Lauf anders aussehen");
+  });
+
+  it("asks for a multi-page site under the shared web root", () => {
+    expect(p).toContain("mehrseitige");
+    expect(p).toContain("site/user-docs/");
+  });
+
+  it("touches nothing outside the docs folder and leaves the push to the worker", () => {
+    expect(p).toContain("Ändere sonst NICHTS im Repo");
+    expect(p).toContain("Committe/pushe NICHT selbst");
+  });
+
+  it("asks for no report — the pages ARE the result", () => {
+    expect(p).not.toContain("Bericht");
   });
 });
 

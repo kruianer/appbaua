@@ -39,6 +39,20 @@ Best-Practices. Findet er etwas, legt er einen Bericht in
 `delivery/security/` ab; findet er nichts, entsteht keine Datei. Der
 Task ändert keinen Code.
 
+## Doku-Site
+
+Der Worker pflegt die Benutzer-Dokumentation dieses Repos höchstens
+einmal pro Tag als mehrseitige Website (Task-Typ "Doku", req-016). Er
+leitet den Inhalt aus `delivery/requirements/done/` und dem Code ab und
+aktualisiert die Seiten unter `site/user-docs/` inkrementell — er baut
+sie nicht bei jedem Lauf neu. Die Grundvorgaben (Ort der Design-Vorlage,
+Deploy-Ziele für dev und prod) stehen — falls vorhanden — in
+[delivery/doc-site.md](delivery/doc-site.md) (angelegt über den Skill
+`setup-doc-site`). Ohne diese Datei bzw. ohne vorhandene Design-Vorlage
+tut der Doku-Task nichts. Der Push auf `dev` löst den dev-Deploy aus;
+nach prod geht die Doku nur über dasselbe Human-Gate wie der Code
+(siehe [delivery/devops.md](delivery/devops.md)).
+
 ## Areas
 
 Geschäftsfunktions-Bereiche der App, zur Einordnung von Requirements.

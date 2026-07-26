@@ -191,6 +191,47 @@ export function securityPrompt(paths: { policyFile: string }): string {
 }
 
 /**
+ * The prompt for the Doku task (req-016). Its result is neither code nor a
+ * report but a multi-page user documentation under `docsDir`, so this prompt is
+ * the only place that can pin the three things req-016 asks for and nothing else
+ * can enforce: follow the design template as far as possible, derive the content
+ * from the shipped requirements and the code, and UPDATE the existing pages
+ * instead of rebuilding the site — a doc that looks different after every run is
+ * exactly what the requirement rules out.
+ */
+export function docPrompt(paths: {
+  designDir: string;
+  docSiteFile: string;
+  docsDir: string;
+  doneRequirementsDir: string;
+}): string {
+  return [
+    `Pflege die Benutzer-Dokumentation dieses Repos als mehrseitige Website,`,
+    `autonom und ohne Rückfragen.`,
+    `Lies zuerst die Design-Vorgabe in ${paths.designDir}/ (HTML/CSS-Vorlage plus`,
+    `Handover-Markdown) sowie ${paths.docSiteFile} und die CLAUDE.md dieses Repos.`,
+    `Halte dich SO WEIT WIE MÖGLICH an die Design-Vorlage — Kopf, Farben,`,
+    `Typografie und Navigation folgen ihr erkennbar. Sie ist Orientierung, kein`,
+    `starres Template: wo sie nichts vorgibt, entscheide im Sinne der Vorlage.`,
+    `Den Inhalt leitest du aus den umgesetzten Requirements in`,
+    `${paths.doneRequirementsDir}/ und aus dem Code ab, und beschreibst ihn aus`,
+    `Sicht der Nutzer der App (was kann ich damit tun, wie geht das) — nicht`,
+    `technisch und nicht als Requirement-Liste.`,
+    `Lies VOR jeder Änderung die vorhandenen Seiten in ${paths.docsDir}/ und`,
+    `aktualisiere sie INKREMENTELL: ergänze neue Inhalte, passe Seiten an, deren`,
+    `Thema sich geändert hat, und lass jede Seite, deren Thema unverändert ist,`,
+    `inhaltlich stehen. Baue die Doku NICHT bei jedem Lauf neu auf und ändere`,
+    `weder Struktur noch Aussehen ohne Anlass — die Seite soll nicht bei jedem`,
+    `Lauf anders aussehen. Gibt es noch keine Doku, lege sie neu an.`,
+    `Schreibe alles, was zur Doku gehört (HTML, CSS, Assets), ausschließlich`,
+    `nach ${paths.docsDir}/. Ändere sonst NICHTS im Repo — keinen Code, keine`,
+    `Requirements, keine Konfiguration.`,
+    `Committe/pushe NICHT selbst — das übernimmt der Worker.`,
+    `Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
  * Run Claude Code in `dir` with `prompt`. Injectable runner for tests.
  */
 export async function runClaude(
