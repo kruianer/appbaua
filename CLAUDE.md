@@ -74,4 +74,8 @@ ergänzt.
   req-003, req-012, req-013, req-018)
 - **Worker-Ausführung** — Laufzeitverhalten des Workers: das Durchgehen
   von Repos × Task-Typen, Protokollierung der Schritte und deren Anzeige.
-  (req-004, req-014, req-015, req-016, req-017, req-019, req-020)
+  (req-004, req-014, req-015, req-016, req-017, req-019, req-020, req-021,
+  req-022, req-025)
+- **Zugang & Sicherheit** — Zugangsschutz und externe Erreichbarkeit der
+  Worker-App: Anmeldung, Sitzungen, sicherer Zugang von außen. (req-023,
+  req-024)
