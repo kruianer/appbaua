@@ -2,8 +2,12 @@
 
 import { useEffect, useState } from "react";
 import type { DashboardData } from "@/lib/dashboard";
+import type { PreviewRow } from "@/lib/preview";
 import { RECURRING_MD_LABEL } from "@/lib/run-log";
 import { Tile } from "./Tile";
+
+/** DashboardData plus the "Nächste Aktivitäten" preview (req-022). */
+type StatusResponse = DashboardData & { preview: PreviewRow[] };
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
@@ -21,6 +25,29 @@ function hhmm(iso: string): string {
   const d = new Date(iso);
   const p = (n: number) => String(n).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/**
+ * The "wann" text of one preview row (req-022): a queue position never
+ * invents a clock time — "als nächstes" for the very next thing the worker
+ * will do, "danach" for the following queued entry, "in der Warteschlange"
+ * for everything further back. A scheduled type instead gets its real next
+ * window start, with the date spelled out once it is not today.
+ */
+function dueText(row: PreviewRow, now: Date): string {
+  if (row.due.kind === "queue") {
+    if (row.due.position === 0) return "als nächstes";
+    if (row.due.position === 1) return "danach";
+    return "in der Warteschlange";
+  }
+  const at = new Date(row.due.at);
+  const sameDay =
+    at.getFullYear() === now.getFullYear() &&
+    at.getMonth() === now.getMonth() &&
+    at.getDate() === now.getDate();
+  if (sameDay) return `ab ${hhmm(row.due.at)}`;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(at.getDate())}.${p(at.getMonth() + 1)}. ${hhmm(row.due.at)}`;
 }
 
 /** Elapsed since an ISO start, as M:SS, updated by the ticking `nowMs`. */
@@ -42,17 +69,19 @@ const PHASE_META: Record<
 };
 
 export function WorkerDashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
+  const [data, setData] = useState<StatusResponse | null>(null);
   const [nowMs, setNowMs] = useState(() => 0);
 
-  // Poll the status every 5s.
+  // Poll the status every 5s. The preview field inside this same response is
+  // NOT rebuilt by this poll — the worker loop rebuilds it after every pass
+  // (req-022); this just reads whatever it last wrote.
   useEffect(() => {
     let alive = true;
     const fetchStatus = async () => {
       try {
         const res = await fetch("/api/worker-status", { cache: "no-store" });
         if (!res.ok) return;
-        const d = (await res.json()) as DashboardData;
+        const d = (await res.json()) as StatusResponse;
         if (alive) setData(d);
       } catch {
         /* keep last known state */
@@ -193,7 +222,9 @@ export function WorkerDashboard() {
             aria-label="Live-Ausgabe"
             style={{
               margin: "var(--space-2) 0 0",
-              maxHeight: 220,
+              // req-022: half as tall as before — the user wants to see THAT
+              // something is happening, not read it in detail.
+              maxHeight: 110,
               overflow: "auto",
               padding: "var(--space-2)",
               borderRadius: "var(--radius-md)",
@@ -241,6 +272,70 @@ export function WorkerDashboard() {
           sub={data?.lastError ? "" : "Kein Fehler bisher"}
         />
       </div>
+
+      {/* req-022: "Nächste Aktivitäten" — what the worker will do next, in the
+          same order it actually works (repo outer, task type inner, bug-008),
+          rebuilt by the worker itself after every pass. */}
+      <div
+        style={{
+          fontSize: 10,
+          letterSpacing: ".12em",
+          textTransform: "uppercase",
+          color: muted(45),
+          margin: "var(--space-4) 0 var(--space-2)",
+        }}
+      >
+        Nächste Aktivitäten
+      </div>
+      {data && (data.preview ?? []).length === 0 ? (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "var(--space-4)",
+            color: muted(55),
+            fontSize: 13,
+          }}
+        >
+          Nichts geplant
+        </div>
+      ) : (
+        <div
+          style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}
+        >
+          {(data?.preview ?? []).map((row, i) => (
+            <div
+              key={`${row.repo}-${row.taskType}-${i}`}
+              className="card elev-sm"
+              style={{ gap: 2, padding: "var(--space-3)" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "var(--space-2)",
+                }}
+              >
+                <span style={{ fontWeight: 600, fontSize: 14, minWidth: 0 }}>
+                  {row.taskType} × {row.repo}
+                </span>
+                <span
+                  style={{
+                    flex: "none",
+                    fontSize: 11,
+                    color: muted(60),
+                  }}
+                >
+                  {dueText(row, new Date(nowMs || Date.now()))}
+                </span>
+              </div>
+              <div style={{ fontSize: 12, color: muted(60), wordBreak: "break-word" }}>
+                {row.mdName}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

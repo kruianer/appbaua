@@ -19,6 +19,8 @@ import {
   type WorkerStatusStore,
   EMPTY_STATUS,
 } from "./worker-status";
+import type { PreviewStore } from "./preview-store";
+import type { PreviewRow } from "./preview";
 
 // PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
 // is set (see store.ts). "position" holds the priority order (0 = highest);
@@ -380,6 +382,26 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         ],
       );
       return status;
+    },
+  };
+}
+
+export function createPgPreviewStore(): PreviewStore {
+  return {
+    async get(): Promise<PreviewRow[]> {
+      await ensureSchema();
+      const res = await getPool().query<{ rows: PreviewRow[] }>(
+        "SELECT rows FROM preview WHERE id = 'worker'",
+      );
+      return res.rows[0]?.rows ?? [];
+    },
+    async set(rows: PreviewRow[]): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO preview (id, rows) VALUES ('worker', $1)
+         ON CONFLICT (id) DO UPDATE SET rows = EXCLUDED.rows`,
+        [JSON.stringify(rows)],
+      );
     },
   };
 }

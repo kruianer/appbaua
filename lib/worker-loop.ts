@@ -13,6 +13,8 @@ import {
   setPauseUntil,
   setRunningStep,
 } from "./worker-status";
+import { buildPreview } from "./preview";
+import { getPreviewStore } from "./preview-store";
 
 // The worker loop. Runs server-side, independent of any browser. Each step
 // executes real work via Claude Code (req-006, executeStep): skip / success /
@@ -69,6 +71,8 @@ export type LoopDeps = {
   setRunningStep: (repo: string, taskType: string, startedAt: string) => Promise<void>;
   clearRunningStep: () => Promise<void>;
   setPauseUntil: (iso: string | null, reason?: string | null) => Promise<void>;
+  /** Rebuild and store "Nächste Aktivitäten" after this pass (req-022). */
+  updatePreview: () => Promise<void>;
 };
 
 const defaultDeps: LoopDeps = {
@@ -79,6 +83,13 @@ const defaultDeps: LoopDeps = {
   setRunningStep,
   clearRunningStep,
   setPauseUntil,
+  updatePreview: async () => {
+    const token = process.env.GITHUB_TOKEN;
+    if (!token) return; // same precondition executeStep has for any real work
+    const [repos, taskTypes] = await Promise.all([listRepos(), listTaskTypes()]);
+    const rows = await buildPreview(repos, taskTypes, new Date(), token);
+    await getPreviewStore().set(rows);
+  },
 };
 
 /**
@@ -210,6 +221,18 @@ export async function runOnce(
       md: null, // no step ran, so there is no file to name (req-015)
     });
   }
+
+  // req-022: refresh "Nächste Aktivitäten" after every pass — a real execution
+  // changed what is waiting, and even an idle pass can mean a schedule's window
+  // just opened or closed. Skipped during a rate-limit pause: nothing changed
+  // that the preview cares about, and it would only add load right when the
+  // account is already throttled.
+  if (rateLimitUntilMs === null) {
+    await deps.updatePreview().catch(() => {
+      /* best-effort: a stale preview must never break the pass itself */
+    });
+  }
+
   return { succeeded, rateLimitUntil: rateLimitUntilMs ?? undefined };
 }
 

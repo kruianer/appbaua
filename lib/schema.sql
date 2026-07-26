@@ -93,3 +93,11 @@ ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS pause_reason TEXT;
 -- Added with req-027: the model the running step's Claude call actually
 -- reported using, read from the event stream's own "init" event.
 ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_model TEXT;
+
+-- The "Nächste Aktivitäten" preview (req-022). Single row keyed "worker",
+-- holding the whole list as JSON — it is rebuilt wholesale after every pass,
+-- never patched row by row, so one JSON blob is simpler than a table.
+CREATE TABLE IF NOT EXISTS preview (
+  id   TEXT PRIMARY KEY,
+  rows JSONB NOT NULL DEFAULT '[]'::jsonb
+);

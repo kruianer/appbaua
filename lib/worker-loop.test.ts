@@ -36,6 +36,7 @@ function deps(over: Partial<LoopDeps> = {}): LoopDeps {
     setRunningStep: async () => {},
     clearRunningStep: async () => {},
     setPauseUntil: async () => {},
+    updatePreview: async () => {},
     ...over,
   };
 }
@@ -90,6 +91,26 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     expect(row.status).toBe("idle");
     expect(row.message).toContain("seit"); // it grew into a summary
     expect(row.message).toContain("zuletzt geprüft");
+  });
+
+  it("req-022: updatePreview runs after a normal pass", async () => {
+    let calls = 0;
+    await runOnce({ n: 0 }, deps({ updatePreview: async () => void calls++ }));
+    expect(calls).toBe(1);
+  });
+
+  it("req-022: updatePreview is skipped during a rate-limit pause", async () => {
+    let calls = 0;
+    const runStep = async (): Promise<StepDecision> => ({
+      kind: "rate-limited",
+      message: "Rate-Limit: usage limit",
+      pauseUntil: WED_18.getTime() + 60_000,
+    });
+    await runOnce(
+      { n: 0 },
+      deps({ runStep, updatePreview: async () => void calls++ }),
+    );
+    expect(calls).toBe(0);
   });
 
   it("AC: order is repo outer, task-type inner; success entries (bug-008)", async () => {
