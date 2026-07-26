@@ -31,16 +31,20 @@ Fix läuft `npm test` im Container genauso wie lokal.
 2. Am Ende greift das Test-Gate; der Test-Befehl scheitert mit "kein
    vitest" → .md nach failed/.
 
-# Hinweis zur Ursache (Verdacht, bitte verifizieren)
+# Ursache (verifiziert) + Fix
 
-vitest ist in der package.json als devDependency deklariert
-("vitest": "^3.2.7"). Der Worker-Container installiert aber vermutlich
-OHNE devDependencies: das Dockerfile setzt `ENV NODE_ENV=production` und
-`npm ci`, was devDependencies überspringt. Damit fehlt genau der
-Test-Runner, den der Worker zur Laufzeit fürs Test-Gate braucht.
+Das Test-Gate (lib/test-gate.ts) leert vor dem Testen node_modules und
+führt den Install-Befehl aus stack.md (`npm install`) neu aus
+("fresh-checkout"-Semantik, req-019). Dieser Install lief aber mit
+`NODE_ENV=production`: Der Worker-Container setzt NODE_ENV=production
+(Dockerfile), und `run` (lib/workspace.ts) vererbt `process.env` an jeden
+Kindprozess. Ein Production-Install überspringt devDependencies — und
+vitest ist eine devDependency. Ergebnis: nach dem Install fehlt vitest,
+`npm test` scheitert mit "kein vitest", das Gate wertet rot, jedes
+Requirement landet in failed/.
 
-Der Fix soll sicherstellen, dass der Test-Runner (und die übrigen zum
-Testen nötigen devDependencies) im Worker-Container verfügbar sind —
-z.B. devDependencies mitinstallieren, oder die zum Testen nötigen Pakete
-so bereitstellen, dass `npm test` im Container läuft. Analog zu bug-006
-(playwright-core fehlte), aber hier generisch für den Test-Runner.
+Fix (in diesem Commit): Der Install-Schritt des Test-Gates erzwingt jetzt
+eine Dev-Installation (NODE_ENV=development, NPM_CONFIG_PRODUCTION=false,
+NPM_CONFIG_INCLUDE=dev), sodass die Test-Werkzeuge vorhanden sind. Der
+Test-Befehl selbst läuft unverändert. Analog zu bug-006, aber generisch:
+betrifft jeden Test-Runner, der in devDependencies liegt.

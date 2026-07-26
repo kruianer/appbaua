@@ -141,6 +141,26 @@ describe("runTestGate (req-019)", () => {
     expect(gate.reason).toContain("FAIL lib/foo.test.ts > kaputt");
   });
 
+  it("bug-010: the install step forces a dev install so devDependencies (vitest) land", async () => {
+    // The container runs NODE_ENV=production; a production install would skip
+    // vitest. The install — not the test — must override the env to dev.
+    const runImpl = runner(() => ok());
+    await runTestGate("/work/repo", STACK, {
+      runImpl,
+      removeDir: vi.fn(async () => {}),
+    });
+    const installCall = runImpl.mock.calls.find(
+      (c) => c[0] === "npm" && c[1][0] === "install",
+    );
+    const testCall = runImpl.mock.calls.find(
+      (c) => c[0] === "npm" && c[1][0] === "test",
+    );
+    expect(installCall?.[2]?.env?.NODE_ENV).toBe("development");
+    expect(installCall?.[2]?.env?.NPM_CONFIG_PRODUCTION).toBe("false");
+    // The test command runs in the normal environment, no forced override.
+    expect(testCall?.[2]?.env).toBeUndefined();
+  });
+
   it("AC: it counts the state of a fresh checkout — install runs into an empty folder", async () => {
     // A package that only ever got installed into this working copy survives
     // `git clean -fd`; emptying the folder first is what makes an undeclared

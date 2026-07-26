@@ -35,6 +35,18 @@ export const STACK_FILE = "delivery/stack.md";
  */
 export const DEPENDENCY_DIR = "node_modules";
 
+/**
+ * Environment for the install step so it pulls devDependencies even though the
+ * worker container sets NODE_ENV=production (bug-010): the test runner lives in
+ * devDependencies, and a production install would leave it out. All three keys
+ * say the same thing to npm across versions; harmless for non-npm installers.
+ */
+export const DEV_INSTALL_ENV: Record<string, string> = {
+  NODE_ENV: "development",
+  NPM_CONFIG_PRODUCTION: "false",
+  NPM_CONFIG_INCLUDE: "dev",
+};
+
 /** How long install and test may each take before they count as failed. */
 export const TEST_TIMEOUT_MS = 30 * 60_000;
 
@@ -157,6 +169,7 @@ async function exec(
   command: string,
   dir: string,
   timeoutMs: number,
+  env?: Record<string, string>,
 ): Promise<TestGateResult | null> {
   const parts = splitCommand(command);
   if (!parts) {
@@ -171,6 +184,7 @@ async function exec(
     timeoutMs,
     // Nothing is piped in; an open pipe makes some CLIs wait for input.
     stdin: "ignore",
+    env,
   });
   if (res.ok) return null;
   return { status: "red", command, reason: `${command}: ${failureTail(res)}` };
@@ -206,7 +220,12 @@ export async function runTestGate(
   const install = installCommandFrom(stack);
   if (install) {
     await removeDir(path.join(dir, DEPENDENCY_DIR)).catch(() => {});
-    const installFailed = await exec(runImpl, install, dir, timeoutMs);
+    // The worker container runs with NODE_ENV=production, which `run` inherits
+    // into every child. A production install skips devDependencies — and the
+    // test runner (vitest etc.) lives there, so the suite would fail with "not
+    // found" (bug-010). Force a dev install for this one step so the test tools
+    // are present; the test command below still runs in the normal environment.
+    const installFailed = await exec(runImpl, install, dir, timeoutMs, DEV_INSTALL_ENV);
     if (installFailed) return installFailed;
   }
 
