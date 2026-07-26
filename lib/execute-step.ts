@@ -20,7 +20,7 @@ import {
   headCommit,
   listReady,
   moveMd,
-  prepareRepo,
+  prepareRepoOnConvention,
   readRepoFile,
   repoPathExists,
   writeRepoFile,
@@ -113,6 +113,16 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // finished after the repo's full test suite has actually run and come back
 // green. A red suite gets one repair attempt in the same run; what stays red is
 // not finished, so its .md is parked under failed/ like any other failure.
+//
+// req-020 takes two decisions away from this file. WHICH branch a step commits
+// on is no longer `dev` by definition — prepareRepoOnConvention reads it from
+// the target repo's own devops.md and hands it back, and every commit of this
+// step goes there. And a push that did not happen is no longer a successful
+// step with a remark: preparing a repo and pushing it are the two moments where
+// the worker touches the outside world, so both failures become an 'error' in
+// the Verlauf, naming the repo and the reason. A step that quietly reported
+// success while nothing left the container is exactly the silence this
+// requirement is about.
 
 export type StepDecision =
   | { kind: "skip" }
@@ -120,8 +130,15 @@ export type StepDecision =
   | { kind: "success"; message: string; md?: string | null }
   | { kind: "error"; message: string; md?: string | null };
 
+/** What the Verlauf leads with when a repo could not be made ready (req-020). */
+export const PREPARE_FAILED_MESSAGE = "Repo vorbereiten fehlgeschlagen";
+
+/** What the Verlauf leads with when the work never left the container (req-020). */
+export const PUSH_FAILED_MESSAGE = "Push fehlgeschlagen";
+
 export type ExecuteDeps = {
-  prepareRepo: typeof prepareRepo;
+  /** Clone/fetch and check out the branch the target repo itself names (req-020). */
+  prepareRepo: typeof prepareRepoOnConvention;
   listReady: typeof listReady;
   runClaude: typeof runClaude;
   commitAndPush: typeof commitAndPush;
@@ -149,7 +166,7 @@ export type ExecuteDeps = {
 };
 
 const defaultDeps = (): ExecuteDeps => ({
-  prepareRepo,
+  prepareRepo: prepareRepoOnConvention,
   listReady,
   runClaude,
   commitAndPush,
@@ -208,16 +225,40 @@ export async function executeStep(
     }
   }
 
+  // Where the work happens, and on which branch it lands — the target repo's
+  // devops.md decides that, not this worker (req-020). A repo that cannot be
+  // prepared produces an 'error' naming the repo and the reason, so the pass
+  // that finds nothing to do afterwards is never silent about why.
   let dir: string;
+  let branch: string;
   try {
-    dir = await d.prepareRepo(repo.url, token);
+    const prepared = await d.prepareRepo(repo.url, token);
+    dir = prepared.dir;
+    branch = prepared.branch;
   } catch (err) {
     return {
       kind: "error",
-      message: `Repo vorbereiten fehlgeschlagen: ${String(err)}`,
+      message: `${PREPARE_FAILED_MESSAGE} (${repo.name}): ${String(err)}`,
       md: runMd(),
     };
   }
+
+  /** Commit and push onto the branch this repo works on (req-020). */
+  const push = (message: string) =>
+    d.commitAndPush(dir, message, token, { branch });
+
+  /**
+   * The 'error' a push that did not happen becomes (req-020). "Nothing to
+   * commit" is not one of those — that is a run that had nothing to say.
+   */
+  const pushError = (
+    result: { pushed: boolean; detail: string },
+    note = "",
+  ): StepDecision => ({
+    kind: "error",
+    message: `${PUSH_FAILED_MESSAGE} (${repo.name}): ${result.detail}${note}`,
+    md: runMd(),
+  });
 
   // The Doku task stands or falls with the repo's design template (req-016):
   // without one it does NOTHING — no Claude run, no file, no commit — and the
@@ -318,7 +359,7 @@ export async function executeStep(
     // same task is not picked up again on the next pass (bug-002).
     const parked =
       src.base && mdName
-        ? await parkFailed(d, dir, src.base, mdName, token)
+        ? await parkFailed(d, dir, src.base, mdName, token, branch)
         : "";
     return {
       kind: "error",
@@ -338,14 +379,11 @@ export async function executeStep(
       await d.discardChanges(dir).catch(() => {});
       return { kind: "success", message: NO_IDEA_MESSAGE, md: runMd() };
     }
-    const push = await d.commitAndPush(
-      dir,
-      `worker: neue Idee ${created.join(", ")}`,
-      token,
-    );
+    const pushed = await push(`worker: neue Idee ${created.join(", ")}`);
+    if (pushFailed(pushed)) return pushError(pushed);
     return {
       kind: "success",
-      message: `Neue Idee: ${created.join(", ")} — ${push.detail}`,
+      message: `Neue Idee: ${created.join(", ")} — ${pushed.detail}`,
       md: runMd(),
     };
   }
@@ -367,15 +405,12 @@ export async function executeStep(
       outcome.report,
       SECURITY_REPORT_DIR,
     );
-    const push = await d.commitAndPush(
-      dir,
-      `worker: ${taskType.label}-Bericht abgelegt`,
-      token,
-    );
+    const pushed = await push(`worker: ${taskType.label}-Bericht abgelegt`);
     const where = rel ? ` (Bericht: ${rel})` : "";
+    if (pushFailed(pushed)) return pushError(pushed, where);
     return {
       kind: "success",
-      message: `${outcome.summary} — ${push.detail}${where}`,
+      message: `${outcome.summary} — ${pushed.detail}${where}`,
       md: runMd(),
     };
   }
@@ -389,8 +424,9 @@ export async function executeStep(
     // page that stayed without one is visible instead of silently absent
     // (req-017) — no matter whether the run changed anything else.
     const note = screenshotNote(shots);
-    const push = await d.commitAndPush(dir, "worker: Doku aktualisiert", token);
-    if (push.detail === NO_CHANGES_DETAIL) {
+    const pushed = await push("worker: Doku aktualisiert");
+    if (pushFailed(pushed)) return pushError(pushed, note ? ` (${note})` : "");
+    if (pushed.detail === NO_CHANGES_DETAIL) {
       return {
         kind: "success",
         message: `${DOC_UNCHANGED_MESSAGE}${note ? ` (${note})` : ""}`,
@@ -399,7 +435,7 @@ export async function executeStep(
     }
     return {
       kind: "success",
-      message: `${outcome.summary} — ${push.detail} (Doku: ${USER_DOCS_DIR}${
+      message: `${outcome.summary} — ${pushed.detail} (Doku: ${USER_DOCS_DIR}${
         note ? `, ${note}` : ""
       })`,
       md: runMd(),
@@ -429,7 +465,7 @@ export async function executeStep(
           };
     }
     if (gate.status === "red") {
-      const parked = await parkFailed(d, dir, src.base, mdName, token);
+      const parked = await parkFailed(d, dir, src.base, mdName, token, branch);
       return {
         kind: "error",
         message: `${GATE_RED_MESSAGE}: ${gate.reason}${parked}`,
@@ -458,16 +494,30 @@ export async function executeStep(
   const commitMsg = mdName
     ? `worker: ${mdName} abgearbeitet`
     : `worker: ${taskType.label} durchgeführt`;
-  const push = await d.commitAndPush(dir, commitMsg, token);
+  const pushed = await push(commitMsg);
 
   // The log stays a short message; it only names the file so the full report
   // remains findable from the Verlauf (req-010).
   const note = reportRel ? ` (Bericht: ${reportRel})` : "";
+  // A push that did not happen is a failed step (req-020). The .md is NOT
+  // parked under failed/: the work itself was fine and nothing was committed,
+  // so the next prepareRepo puts it back into ready/ and the next pass retries
+  // it — parking it would punish the repo for a network that was down.
+  if (pushFailed(pushed)) return pushError(pushed, `${gateNote}${note}`);
   return {
     kind: "success",
-    message: `${outcome.summary} — ${push.detail}${gateNote}${note}`,
+    message: `${outcome.summary} — ${pushed.detail}${gateNote}${note}`,
     md: runMd(),
   };
+}
+
+/**
+ * Did this push fail (req-020)? A working copy that held nothing to commit did
+ * not fail — a run can legitimately change nothing, and calling that an error
+ * would turn every quiet Doku day into a red entry.
+ */
+function pushFailed(result: { pushed: boolean; detail: string }): boolean {
+  return !result.pushed && result.detail !== NO_CHANGES_DETAIL;
 }
 
 /**
@@ -513,6 +563,7 @@ async function parkFailed(
   base: string,
   mdName: string,
   token: string,
+  branch: string,
 ): Promise<string> {
   try {
     await d.discardChanges(dir);
@@ -525,6 +576,7 @@ async function parkFailed(
       dir,
       `worker: ${mdName} fehlgeschlagen`,
       token,
+      { branch },
     );
     return ` — ${mdName} nach failed/ verschoben (${push.detail})`;
   } catch (err) {

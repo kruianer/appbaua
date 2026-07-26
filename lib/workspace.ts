@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { redact } from "./redact";
+import { DEVOPS_FILE, devBranchFrom } from "./dev-branch";
 
 /** What commitAndPush reports when the working copy holds nothing to commit. */
 export const NO_CHANGES_DETAIL = "keine Aenderungen";
@@ -12,8 +13,13 @@ export const NO_CHANGES_DETAIL = "keine Aenderungen";
 //
 // req-013 adds a second way to check a repo out: the appbaua rollout must not
 // leave a `dev` branch behind in a repo that never had one, so it takes the
-// repo's own default branch in that case (prepareRepoOnDevOrDefault). The
-// worker's own steps keep using prepareRepo and stay on `dev` (devops.md).
+// repo's own default branch in that case (prepareRepoOnDevOrDefault).
+//
+// req-020 adds the third and makes it the one the worker's own steps use
+// (prepareRepoOnConvention): the branch is no longer appbaua's decision at all,
+// it is read from the TARGET repo's devops.md. prepareRepo — fixed on `dev`,
+// creating it where there is none — is left for appbaua's OWN checkout, the
+// source of the rollout, where `dev` is a fact and not an assumption.
 //
 // bug-003: the token is never part of the remote URL — it travels as an HTTP
 // Authorization header supplied per call (see authEnv), so it lands neither in
@@ -44,6 +50,17 @@ export type RunOptions = {
 
 /** Seam so the git calls below can be observed in tests without a real repo. */
 export type WorkspaceDeps = { runImpl?: typeof run };
+
+/** A working copy plus the branch it is sitting on (req-013, req-020). */
+export type PreparedRepo = { dir: string; branch: string };
+
+export type PrepareDeps = WorkspaceDeps & {
+  /**
+   * Reads the repo's devops.md out of the working copy (req-020). A seam of its
+   * own, so the branch decision is testable without a filesystem.
+   */
+  readFileImpl?: (dir: string, rel: string) => Promise<string | null>;
+};
 
 export function run(
   cmd: string,
@@ -207,8 +224,131 @@ async function remoteHasBranch(
 }
 
 /**
+ * Track `branch` and reset the working copy to it. Only for a branch that
+ * exists on the remote — that is what makes the reset meaningful. A checkout
+ * that fails throws instead of leaving the caller on some other branch: work
+ * committed on the wrong branch is worse than a step that says it could not
+ * start (req-020).
+ */
+async function checkoutTracking(
+  git: typeof run,
+  dir: string,
+  branch: string,
+  token: string,
+): Promise<void> {
+  const co = await git("git", ["checkout", "-B", branch, `origin/${branch}`], {
+    cwd: dir,
+  });
+  if (!co.ok) {
+    throw new Error(`checkout ${branch} failed: ${redact(co.stderr, [token])}`);
+  }
+  await git("git", ["reset", "--hard", `origin/${branch}`], { cwd: dir });
+}
+
+/**
+ * The branch the working copy currently has checked out, or null when git
+ * cannot name one (a detached HEAD, a repo without a commit).
+ */
+async function currentBranch(
+  git: typeof run,
+  dir: string,
+): Promise<string | null> {
+  const res = await git("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+    cwd: dir,
+  });
+  const name = res.stdout.trim();
+  return res.ok && name && name !== "HEAD" ? name : null;
+}
+
+/**
+ * Clone (or fetch+reset) the repo and check out the branch ITS OWN devops.md
+ * says the dev environment lives on (req-020). Returns the local path and the
+ * branch that was checked out, or throws — every failure on this path has to be
+ * loud, because a repo the worker cannot prepare is a repo whose work never
+ * happens.
+ *
+ * Three cases, in the order the requirement states them:
+ *
+ *  - the devops.md names a concrete branch: that one. It is created when the
+ *    remote does not have it yet — the repo asked for it by name, so this is
+ *    its own decision and not a surprise branch;
+ *  - the devops.md states a convention instead of a name ("aktueller
+ *    `feature/*`-Branch"): the branch the working copy is already on, i.e. the
+ *    one the repo itself has checked out. NOTHING is created here — a repo that
+ *    deliberately has no `dev` must not grow one;
+ *  - the devops.md says nothing usable: the behaviour of req-013 — the repo's
+ *    `dev` if it has one, otherwise its default branch.
+ *
+ * The convention is read out of the working copy right after the fetch, i.e.
+ * off the branch the clone landed on. That is the repo's own instruction file
+ * and it changes about never; reading it from a second checkout would cost a
+ * fetch on every step to learn the same answer.
+ *
+ * In the convention case a current branch the REMOTE does not have does not
+ * count as one: that is a leftover of an earlier run in this work directory —
+ * exactly the `dev` this requirement does away with — and the repo's default
+ * branch is taken instead.
+ */
+export async function prepareRepoOnConvention(
+  normalizedUrl: string,
+  token: string,
+  deps: PrepareDeps = {},
+): Promise<PreparedRepo> {
+  const git = deps.runImpl ?? run;
+  const read = deps.readFileImpl ?? readRepoFile;
+  const { dir, auth } = await syncRepo(normalizedUrl, token, git);
+
+  const stated = devBranchFrom(await read(dir, DEVOPS_FILE).catch(() => null));
+  // Untracked leftovers of an earlier run must not be swept into this step's
+  // commit, whichever way the branch was found (bug-002).
+  const clean = () => git("git", ["clean", "-fd"], { cwd: dir });
+
+  if (stated?.kind === "named") {
+    const branch = stated.branch;
+    if (await remoteHasBranch(git, dir, auth, branch)) {
+      await checkoutTracking(git, dir, branch, token);
+    } else {
+      // The repo names a branch the remote does not have yet: create it where
+      // the clone stands, exactly as the worker always did for `dev`.
+      const created = await git("git", ["checkout", "-B", branch], { cwd: dir });
+      if (!created.ok) {
+        throw new Error(
+          `checkout ${branch} failed: ${redact(created.stderr, [token])}`,
+        );
+      }
+    }
+    await clean();
+    return { dir, branch };
+  }
+
+  let branch: string;
+  if (stated?.kind === "current") {
+    // The branch the repo itself has checked out — but only when the remote
+    // really has it. A purely local one is a leftover of an earlier run here,
+    // not this repo's branch.
+    const here = await currentBranch(git, dir);
+    branch =
+      here && (await remoteHasBranch(git, dir, auth, here))
+        ? here
+        : await defaultBranch(dir, token, deps);
+  } else {
+    // The repo says nothing: req-013's answer, and no branch is ever created.
+    branch = (await remoteHasBranch(git, dir, auth, DEV_BRANCH))
+      ? DEV_BRANCH
+      : await defaultBranch(dir, token, deps);
+  }
+
+  await checkoutTracking(git, dir, branch, token);
+  await clean();
+  return { dir, branch };
+}
+
+/**
  * Clone (or fetch+reset) the repo and check out `dev` (creating it from the
  * default branch if it does not exist). Returns the local path or throws.
+ *
+ * Since req-020 this is appbaua's OWN checkout only — the source the rollout
+ * reads the standard from. Target repos go through prepareRepoOnConvention.
  */
 export async function prepareRepo(
   normalizedUrl: string,

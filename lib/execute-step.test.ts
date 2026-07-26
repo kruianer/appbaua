@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import {
+  PREPARE_FAILED_MESSAGE,
+  PUSH_FAILED_MESSAGE,
   executeStep,
   type ExecuteDeps,
   type StepDecision,
@@ -33,6 +35,16 @@ const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
 const security = defaultTaskTypes().find((t) => t.id === "security")!;
 const doku = defaultTaskTypes().find((t) => t.id === "doku")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
+
+/**
+ * What prepareRepo hands back since req-020: the working copy AND the branch
+ * the target repo's own devops.md put the worker on. `dev` here, because that
+ * is what a standard repo says — the req-020 tests below say otherwise.
+ */
+const PREPARED = { dir: "/work/appbaua", branch: "dev" };
+
+/** How every commit of a step is made since req-020: onto that branch. */
+const ON = (branch = "dev") => ({ branch });
 
 /**
  * A repo that HAS a design template (req-016): doc-site.md names one and the
@@ -102,7 +114,7 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
   return {
     token: "tok",
     now: () => now,
-    prepareRepo: vi.fn(async () => "/work/appbaua"),
+    prepareRepo: vi.fn(async () => PREPARED),
     listReady: folders(),
     runClaude: vi.fn(async () => ({ ok: true, summary: "done", report: "" })),
     commitAndPush: vi.fn(async () => ({ pushed: true, detail: "auf dev gepusht" })),
@@ -195,7 +207,7 @@ describe("executeStep (req-006)", () => {
         message: "",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, review, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -669,6 +681,7 @@ describe("executeStep — fehlgeschlagene .md wird persistiert (bug-002)", () =>
       "/work/appbaua",
       "worker: bug-001.md fehlgeschlagen",
       "tok", // the push needs the credential handed in now (bug-003)
+      ON(), // …and the repo's own branch since req-020
     );
   });
 
@@ -819,6 +832,7 @@ describe("executeStep — Ideen-Task (req-011)", () => {
       "/work/appbaua",
       "worker: neue Idee dark-mode.md",
       "tok",
+      ON(),
     );
   });
 
@@ -834,7 +848,7 @@ describe("executeStep — Ideen-Task (req-011)", () => {
         message: "Neue Idee: dark-mode.md — auf dev gepusht",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, ideen, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -992,7 +1006,7 @@ describe("executeStep — Ideen-Task (req-011)", () => {
     expect(commitAndPush).not.toHaveBeenCalled();
   });
 
-  it("a push that fails is reported in the log message", async () => {
+  it("a push that fails is an error since req-020, not a quiet success", async () => {
     const d = await executeStep(
       repo,
       ideen,
@@ -1005,8 +1019,8 @@ describe("executeStep — Ideen-Task (req-011)", () => {
         })),
       }),
     );
-    expect(d.kind).toBe("success");
-    if (d.kind !== "success") return;
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
     expect(d.message).toContain("push failed: keine Rechte");
   });
 });
@@ -1060,6 +1074,7 @@ describe("executeStep — Security-Task (req-014)", () => {
       "/work/appbaua",
       "worker: Security-Bericht abgelegt",
       "tok",
+      ON(),
     );
     if (d.kind !== "success") return;
     expect(d.message).toContain("auf dev gepusht");
@@ -1087,7 +1102,7 @@ describe("executeStep — Security-Task (req-014)", () => {
         message: "Security-Check ok",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, security, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -1269,6 +1284,7 @@ describe("executeStep — Doku-Task (req-016)", () => {
       "/work/appbaua",
       "worker: Doku aktualisiert",
       "tok",
+      ON(),
     );
     if (d.kind !== "success") return;
     expect(d.message).toContain("auf dev gepusht");
@@ -1341,7 +1357,7 @@ describe("executeStep — Doku-Task (req-016)", () => {
         message: "Doku aktualisiert",
       },
     ];
-    const prepareRepo = vi.fn(async () => "/work/appbaua");
+    const prepareRepo = vi.fn(async () => PREPARED);
     const d = await executeStep(repo, doku, ranToday, deps({ prepareRepo }));
     expect(d.kind).toBe("skip");
     expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
@@ -1415,7 +1431,7 @@ describe("executeStep — Doku-Task (req-016)", () => {
     expect(d.message).toBe(DOC_UNCHANGED_MESSAGE);
   });
 
-  it("a push that fails is reported in the log message", async () => {
+  it("a push that fails is an error since req-020, not a quiet success", async () => {
     const d = await executeStep(
       repo,
       doku,
@@ -1427,8 +1443,8 @@ describe("executeStep — Doku-Task (req-016)", () => {
         })),
       }),
     );
-    expect(d.kind).toBe("success");
-    if (d.kind !== "success") return;
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
     expect(d.message).toContain("push failed: keine Rechte");
     expect(d.message).not.toBe(DOC_UNCHANGED_MESSAGE);
   });
@@ -1609,6 +1625,7 @@ describe("executeStep — Doku-Screenshots (req-017)", () => {
       "/work/appbaua",
       "worker: Doku aktualisiert",
       "tok",
+      ON(),
     );
     if (d.kind !== "success") return;
     expect(d.message).toContain("Screenshots: 1");
@@ -1877,6 +1894,7 @@ describe("executeStep — Test-Gate vor done/ (req-019)", () => {
       "/work/appbaua",
       "worker: req-001.md fehlgeschlagen",
       "tok",
+      ON(),
     );
   });
 
@@ -2062,5 +2080,238 @@ describe("executeStep — Test-Gate vor done/ (req-019)", () => {
       await executeStep(repo, type, [], deps({ runTestGate }));
     }
     expect(runTestGate).not.toHaveBeenCalled();
+  });
+});
+
+// req-020: der Worker committet auf dem Branch, den das ZIELREPO nennt — und
+// was beim Vorbereiten oder beim Pushen scheitert, steht als Fehler im Verlauf
+// statt nur auf der Konsole. Beides zusammen ist der Grund, warum ein Repo mit
+// abweichender Branch-Konvention bisher unbearbeitet blieb und der Worker ohne
+// erkennbaren Grund pausierte.
+describe("executeStep — Branch des Zielrepos und sichtbare Fehler (req-020)", () => {
+  /** A repo prepared on `branch` instead of the standard dev. */
+  const preparedOn = (branch: string) =>
+    vi.fn(async () => ({ dir: "/work/appbaua", branch }));
+
+  /** A push that did not happen although there was something to push. */
+  const refused = () =>
+    vi.fn(async () => ({ pushed: false, detail: "push failed: keine Rechte" }));
+
+  /** An idea folder that gained one file during the run (req-011 mechanics). */
+  function proposedIdea(): ExecuteDeps["listReady"] {
+    let asked = 0;
+    return vi.fn(async (_dir: string, rel: string) => {
+      if (rel !== "delivery/idea") return [];
+      asked += 1;
+      return asked === 1 ? [] : ["dark-mode.md"];
+    });
+  }
+
+  it("AC: ein Standard-Repo wird unverändert auf dev committet", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({ listReady: folders({ ready: ["req-001.md"] }), commitAndPush }),
+    );
+    expect(d.kind).toBe("success");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md abgearbeitet",
+      "tok",
+      ON("dev"),
+    );
+  });
+
+  it("AC: ein Repo ohne dev-Branch wird auf seinem eigenen Branch committet", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf feature/garten gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: preparedOn("feature/garten"),
+        listReady: folders({ ready: ["req-001.md"] }),
+        commitAndPush,
+      }),
+    );
+    // AC: die Arbeit wird tatsächlich bearbeitet, nicht übersprungen
+    expect(d.kind).toBe("success");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md abgearbeitet",
+      "tok",
+      ON("feature/garten"),
+    );
+    // …und nichts davon geht auf dev
+    expect(commitAndPush).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      ON("dev"),
+    );
+  });
+
+  it("auch eine fehlgeschlagene .md wird auf dem Branch des Repos geparkt", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "gepusht" }));
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: preparedOn("feature/garten"),
+        listReady: folders({ ready: ["req-001.md"] }),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+        commitAndPush,
+      }),
+    );
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: req-001.md fehlgeschlagen",
+      "tok",
+      ON("feature/garten"),
+    );
+  });
+
+  it("jede Aufgabenart committet auf dem Branch des Repos, nicht auf dev", async () => {
+    const cases: { type: typeof bug; listReady: ExecuteDeps["listReady"] }[] = [
+      { type: ideen, listReady: proposedIdea() },
+      { type: security, listReady: folders() },
+      { type: doku, listReady: folders() },
+      { type: review, listReady: folders() },
+    ];
+    for (const { type, listReady } of cases) {
+      const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "gepusht" }));
+      await executeStep(
+        repo,
+        type,
+        [],
+        deps({
+          prepareRepo: preparedOn("feature/garten"),
+          listReady,
+          runClaude: vi.fn(async () => ({
+            ok: true,
+            summary: "fertig",
+            report: "# Befund",
+          })),
+          commitAndPush,
+        }),
+      );
+      expect(commitAndPush).toHaveBeenCalledWith(
+        "/work/appbaua",
+        expect.any(String),
+        "tok",
+        ON("feature/garten"),
+      );
+    }
+  });
+
+  it("AC: scheitert das Vorbereiten, nennt der Verlauf Repo und Grund", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        prepareRepo: vi.fn(async () => {
+          throw new Error("fatal: Remote branch dev not found in upstream origin");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain(PREPARE_FAILED_MESSAGE);
+    expect(d.message).toContain(repo.name);
+    expect(d.message).toContain("Remote branch dev not found");
+  });
+
+  it("AC: scheitert der Push, nennt der Verlauf Repo und Grund", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["req-001.md"] }),
+        commitAndPush: refused(),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(d.message).toContain(PUSH_FAILED_MESSAGE);
+    expect(d.message).toContain(repo.name);
+    expect(d.message).toContain("keine Rechte");
+    expect(d.md).toBe("req-001.md"); // der Verlauf weiß, woran es lag
+  });
+
+  it("ein gescheiterter Push parkt die .md NICHT unter failed/", async () => {
+    // Die Arbeit war in Ordnung, und committet wurde nichts — der nächste Lauf
+    // findet die .md wieder in ready/ und versucht es erneut.
+    const moveMd = vi.fn(async (_dir: string, _from: string, _to: string) => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["req-001.md"] }),
+        commitAndPush: refused(),
+        moveMd,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(moveMd.mock.calls.map((c) => c[2])).not.toContain(
+      "delivery/bugs/failed/req-001.md",
+    );
+  });
+
+  it("ein Push, der nichts zu committen fand, bleibt ein Erfolg", async () => {
+    // Ein Lauf darf nichts ändern; das ist kein Fehler, sondern ein ruhiger Tag.
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: NO_CHANGES_DETAIL,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+  });
+
+  it("ein gescheiterter Push der Ideen- und Security-Aufgabe ist ebenfalls ein Fehler", async () => {
+    const idea = await executeStep(
+      repo,
+      ideen,
+      [],
+      deps({
+        listReady: proposedIdea(),
+        commitAndPush: refused(),
+      }),
+    );
+    expect(idea.kind).toBe("error");
+
+    const sec = await executeStep(
+      repo,
+      security,
+      [],
+      deps({
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "1 Finding",
+          report: "## Zusammenfassung\n\nEin Befund.",
+        })),
+        commitAndPush: refused(),
+      }),
+    );
+    expect(sec.kind).toBe("error");
+    if (sec.kind !== "error") return;
+    expect(sec.message).toContain("delivery/security/"); // Bericht bleibt auffindbar
   });
 });

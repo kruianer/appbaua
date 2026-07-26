@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { USER_DOCS_DIR } from "./doc-site";
+import { DEVOPS_FILE, environmentRow } from "./dev-branch";
 
 // Screenshots for the user documentation (req-017). The Doku task (req-016)
 // wrote text only; this module gives it pictures: before Claude writes a single
@@ -25,12 +26,12 @@ import { USER_DOCS_DIR } from "./doc-site";
 // optional package in a plain import made a missing driver unload half the suite.
 
 /**
- * The repo file that names the app's dev environment. Its `## Environments`
- * table is a machine contract of the setup-devops skill (headings, branch names
- * and paths stay unchanged in every language), which is why the URL can be read
- * out of it.
+ * The repo file that names the app's dev environment. It moved to dev-branch.ts
+ * with req-020, where the same `## Environments` table also answers which branch
+ * the worker commits on; re-exported here, because this is where req-017
+ * introduced it.
  */
-export const DEVOPS_FILE = "delivery/devops.md";
+export { DEVOPS_FILE };
 
 /**
  * Where the screenshots go: INSIDE the docs folder, so they are pushed,
@@ -100,31 +101,10 @@ export type CaptureDeps = {
   maxShots?: number;
 };
 
-/** The `## Environments` section of devops.md — a machine contract per the skill. */
-const ENV_HEADING = /^#{1,6}\s+.*(environments|umgebungen)/i;
-const ANY_HEADING = /^#{1,6}\s/;
 /** A cell that is a URL and nothing else: no prose, no placeholder. */
 const URL_CELL = /^https?:\/\/[^\s|]+$/i;
 /** Everything before the path of an absolute URL: scheme + host (+ port). */
 const ORIGIN = /^(https?:\/\/[^/]+)/i;
-
-/**
- * Read one table cell as a bare value: strips the decoration a hand-written line
- * carries (backticks, quotes, an autolink's angle brackets, a markdown link, a
- * trailing period). What is left is only accepted as a URL if it really is one,
- * which is what makes the skill's own `<TODO: dev/staging URL>` placeholder
- * count as "no dev environment" rather than as a host named TODO.
- */
-function cellValue(raw: string): string {
-  let v = raw.trim();
-  const link = v.match(/\[[^\]]*\]\(([^)]+)\)/);
-  if (link) v = link[1];
-  return v
-    .replace(/[`"'<>]/g, "")
-    .trim()
-    .replace(/[.,;]+$/, "")
-    .trim();
-}
 
 /**
  * Where the app's dev environment runs according to the repo's devops.md, or
@@ -134,25 +114,14 @@ function cellValue(raw: string): string {
  *
  * Only the Environments section is read and only its `dev` row, so the prod URL
  * one line below can never be mistaken for it — screenshots are taken against
- * dev and nothing else.
+ * dev and nothing else. That reading lives in dev-branch.ts since req-020, so
+ * the URL and the branch come out of one and the same row.
  */
 export function devUrlFrom(devops: string | null | undefined): string | null {
-  if (!devops) return null;
-  const lines = devops.split("\n");
-  const start = lines.findIndex((l) => ENV_HEADING.test(l.trim()));
-  if (start < 0) return null;
-
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (ANY_HEADING.test(line)) break; // next section: the table is over
-    if (!line.startsWith("|")) continue;
-    const cells = line.split("|").slice(1, -1).map(cellValue);
-    if (cells.length < 2) continue;
-    if (cells[0].toLowerCase() !== "dev") continue; // header, separator, prod row
-    const url = cells.slice(1).find((c) => URL_CELL.test(c));
-    if (url) return url.replace(/\/+$/, "");
-  }
-  return null;
+  const row = environmentRow(devops, "dev");
+  if (!row) return null;
+  const url = row.cells.slice(1).find((c) => URL_CELL.test(c));
+  return url ? url.replace(/\/+$/, "") : null;
 }
 
 /** Scheme + host of an absolute URL, or null when it is not one. */

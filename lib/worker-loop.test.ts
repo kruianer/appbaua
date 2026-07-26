@@ -329,3 +329,62 @@ describe("worker loop — .md am Verlaufs-Eintrag (req-015)", () => {
     expect(mdLabel(row)).toBeNull();
   });
 });
+
+// req-020: ein einzelnes Repo, das der Worker nicht vorbereiten kann, darf
+// weder die übrigen Repos aufhalten noch unsichtbar bleiben — und eine Pause
+// ohne jeden Verlaufs-Eintrag davor gibt es nicht mehr. Genau die war es, die
+// aussah, als hätte der Worker einfach nichts zu tun.
+describe("worker loop — kein wortloses Pausieren (req-020)", () => {
+  beforeEach(() => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+  });
+
+  it("AC: ein Repo, dessen Vorbereitung scheitert, steht im Verlauf — mit Repo und Grund", async () => {
+    const runStep = async (repo: Repo): Promise<StepDecision> =>
+      repo.name === "appbaua"
+        ? {
+            kind: "error",
+            message:
+              "Repo vorbereiten fehlgeschlagen (appbaua): Error: clone failed: not found",
+          }
+        : { kind: "success", message: "ok" };
+
+    const done = await runOnce({ n: 0 }, deps({ runStep }));
+
+    // AC: die übrigen Repos werden weiter bearbeitet
+    expect(done).toBe(1);
+    const rows = [...(await logStore.list(0, 10))].reverse();
+    expect(rows.map((r) => `${r.repo}:${r.status}`)).toEqual([
+      "appbaua:error",
+      "worker:success",
+    ]);
+    expect(rows[0].message).toContain("appbaua");
+    expect(rows[0].message).toContain("clone failed");
+  });
+
+  it("AC: ein Durchlauf, der nichts erledigt hat, sagt das vor der Pause", async () => {
+    // Vorher: geplante Schritte, die alle übersprungen wurden, schrieben gar
+    // nichts — der Worker pausierte ohne erkennbaren Grund.
+    const runStep = async (): Promise<StepDecision> => ({ kind: "skip" });
+
+    const done = await runOnce({ n: 0 }, deps({ runStep }));
+
+    expect(done).toBe(0);
+    expect(await logStore.count()).toBe(1);
+    const [row] = await logStore.list(0, 1);
+    expect(row.status).toBe("idle");
+  });
+
+  it("ein Durchlauf mit Einträgen braucht keine zusätzliche 'nichts zu tun'-Zeile", async () => {
+    const runStep = async (): Promise<StepDecision> => ({
+      kind: "error",
+      message: "kaputt",
+    });
+
+    await runOnce({ n: 0 }, deps({ runStep }));
+
+    const rows = await logStore.list(0, 10);
+    expect(rows).toHaveLength(2); // beide Repos, keine idle-Zeile obendrauf
+    expect(rows.every((r) => r.status === "error")).toBe(true);
+  });
+});
