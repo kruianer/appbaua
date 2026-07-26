@@ -53,6 +53,15 @@ tut der Doku-Task nichts. Der Push auf `dev` löst den dev-Deploy aus;
 nach prod geht die Doku nur über dasselbe Human-Gate wie der Code
 (siehe [delivery/devops.md](delivery/devops.md)).
 
+Vor dem Schreiben bebildert der Worker die Doku (req-017): er macht per
+Playwright Screenshots der laufenden dev-Umgebung der App — die dev-URL
+liest er aus dem `## Environments`-Abschnitt der
+[delivery/devops.md](delivery/devops.md) des Repos — und legt sie unter
+`site/user-docs/assets/screenshots/` ab, wo sie mit der Doku gepusht und
+deployt werden. Screenshots werden nur gegen dev gemacht, nie gegen prod.
+Ein fehlgeschlagener Screenshot bricht den Doku-Lauf NICHT ab: die Doku
+entsteht ohne dieses Bild, und der Verlauf vermerkt die betroffene Seite.
+
 ## Areas
 
 Geschäftsfunktions-Bereiche der App, zur Einordnung von Requirements.

@@ -198,12 +198,18 @@ export function securityPrompt(paths: { policyFile: string }): string {
  * from the shipped requirements and the code, and UPDATE the existing pages
  * instead of rebuilding the site — a doc that looks different after every run is
  * exactly what the requirement rules out.
+ *
+ * `screenshots` are the pictures the worker already took of the running dev
+ * environment (req-017). They are handed over as a closed list on purpose: the
+ * placement is Claude's decision, but WHICH images exist is not — a page must
+ * never point at a picture that was never taken.
  */
 export function docPrompt(paths: {
   designDir: string;
   docSiteFile: string;
   docsDir: string;
   doneRequirementsDir: string;
+  screenshots?: { page: string; rel: string }[];
 }): string {
   return [
     `Pflege die Benutzer-Dokumentation dieses Repos als mehrseitige Website,`,
@@ -223,11 +229,39 @@ export function docPrompt(paths: {
     `inhaltlich stehen. Baue die Doku NICHT bei jedem Lauf neu auf und ändere`,
     `weder Struktur noch Aussehen ohne Anlass — die Seite soll nicht bei jedem`,
     `Lauf anders aussehen. Gibt es noch keine Doku, lege sie neu an.`,
+    screenshotInstruction(paths.screenshots ?? []),
     `Schreibe alles, was zur Doku gehört (HTML, CSS, Assets), ausschließlich`,
     `nach ${paths.docsDir}/. Ändere sonst NICHTS im Repo — keinen Code, keine`,
     `Requirements, keine Konfiguration.`,
     `Committe/pushe NICHT selbst — das übernimmt der Worker.`,
     `Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
+ * What the Doku prompt says about this run's screenshots (req-017). Two cases,
+ * and the second one matters as much as the first: a run whose screenshots
+ * failed must produce a doc WITHOUT pictures rather than one with broken images,
+ * because a page whose image is missing must still show its content.
+ */
+function screenshotInstruction(shots: { page: string; rel: string }[]): string {
+  if (shots.length === 0) {
+    return [
+      `Für diesen Lauf stehen KEINE neuen Screenshots der App zur Verfügung.`,
+      `Schreibe die Doku ohne neue Bilder und verweise auf KEINE Bild-Datei, die`,
+      `es nicht gibt — eine Seite ohne Bild ist besser als eine mit kaputtem Bild.`,
+      `Bereits eingebundene Bilder, deren Datei noch vorhanden ist, lässt du stehen.`,
+    ].join(" ");
+  }
+  const list = shots.map((s) => `${s.rel} (zeigt ${s.page})`).join(", ");
+  return [
+    `Von der laufenden dev-Umgebung der App liegen bereits Screenshots im Repo:`,
+    `${list}.`,
+    `Binde jeden davon dort ein, wo die Doku über die gezeigte Seite spricht`,
+    `(relativer Pfad von der jeweiligen Doku-Seite aus, mit beschreibendem`,
+    `alt-Text). Verwende AUSSCHLIESSLICH diese Bilder, erzeuge selbst keine`,
+    `weiteren Bild-Dateien und verweise auf keine Bild-Datei, die es nicht gibt —`,
+    `eine Seite ohne Bild ist besser als eine mit kaputtem Bild.`,
   ].join(" ");
 }
 

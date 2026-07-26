@@ -258,6 +258,62 @@ describe("docPrompt (req-016)", () => {
   });
 });
 
+// req-017: the pictures the worker already took are handed over as a CLOSED
+// list. Where they go is Claude's decision; which of them exist is not — a page
+// pointing at a screenshot that was never taken is exactly the broken image the
+// requirement rules out.
+describe("docPrompt — Screenshots (req-017)", () => {
+  const withShots = docPrompt({
+    designDir: "delivery/doc-design",
+    docSiteFile: "delivery/doc-site.md",
+    docsDir: "site/user-docs",
+    doneRequirementsDir: "delivery/requirements/done",
+    screenshots: [
+      { page: "/", rel: "site/user-docs/assets/screenshots/start.png" },
+      { page: "/verlauf", rel: "site/user-docs/assets/screenshots/verlauf.png" },
+    ],
+  });
+  const withoutShots = docPrompt({
+    designDir: "delivery/doc-design",
+    docSiteFile: "delivery/doc-site.md",
+    docsDir: "site/user-docs",
+    doneRequirementsDir: "delivery/requirements/done",
+    screenshots: [],
+  });
+
+  it("AC: names every available picture and what it shows", () => {
+    expect(withShots).toContain("site/user-docs/assets/screenshots/start.png");
+    expect(withShots).toContain("site/user-docs/assets/screenshots/verlauf.png");
+    expect(withShots).toContain("zeigt /verlauf");
+  });
+
+  it("AC: asks for them to be placed where the docs talk about that page", () => {
+    expect(withShots).toContain("Binde jeden davon dort ein");
+    expect(withShots).toContain("alt-Text");
+  });
+
+  it("AC: allows no picture beyond the ones that exist", () => {
+    expect(withShots).toContain("AUSSCHLIESSLICH diese Bilder");
+    expect(withShots).toContain("keine Bild-Datei, die es nicht gibt");
+  });
+
+  it("AC: without pictures it asks for a doc without images, not for broken ones", () => {
+    expect(withoutShots).toContain("KEINE neuen Screenshots");
+    expect(withoutShots).toContain("ohne neue Bilder");
+    expect(withoutShots).toContain("KEINE Bild-Datei, die es nicht gibt");
+  });
+
+  it("defaults to the no-pictures wording when nobody says otherwise", () => {
+    const noKey = docPrompt({
+      designDir: "delivery/doc-design",
+      docSiteFile: "delivery/doc-site.md",
+      docsDir: "site/user-docs",
+      doneRequirementsDir: "delivery/requirements/done",
+    });
+    expect(noKey).toContain("KEINE neuen Screenshots");
+  });
+});
+
 describe("createActivityStream (bug-001)", () => {
   it("holds back an incomplete line until the rest arrives", () => {
     const event = JSON.stringify({

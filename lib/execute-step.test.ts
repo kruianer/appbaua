@@ -12,6 +12,11 @@ import {
   NO_DESIGN_MESSAGE,
   USER_DOCS_DIR,
 } from "./doc-site";
+import {
+  NO_DEV_URL_MESSAGE,
+  SCREENSHOT_DIR,
+  type ShotResult,
+} from "./doc-screenshots";
 import { NO_CHANGES_DETAIL } from "./workspace";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true };
@@ -34,6 +39,25 @@ const DOC_SITE_MD = [
   "",
   "- Ort: delivery/doc-design/",
 ].join("\n");
+
+/** The repo's devops.md, which is where the Doku task reads the dev URL (req-017). */
+const DEVOPS_MD = [
+  "# DevOps Convention",
+  "",
+  "## Environments",
+  "",
+  "| Environment | Branch | URL                     |",
+  "|-------------|--------|-------------------------|",
+  "| dev         | dev    | https://dev.appbaua.com |",
+  "| prod        | main   | https://app.appbaua.com |",
+].join("\n");
+
+/**
+ * Default for the screenshot dep: a run that photographed nothing at all, so the
+ * tests that predate req-017 keep seeing exactly the messages they asserted.
+ * Every req-017 test says what it wants instead.
+ */
+const noShots = (): ShotResult => ({ shot: [], missing: [] });
 
 /**
  * Folder-aware fake for listReady: a step looks into in-progress/ (leftovers of
@@ -65,10 +89,13 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
     discardChanges: vi.fn(async (_dir: string) => {}),
     headCommit: vi.fn(async (_dir: string) => "282a765"),
     writeRepoFile: writerFake(),
-    readRepoFile: vi.fn(async (_dir: string, rel: string) =>
-      rel === "delivery/doc-site.md" ? DOC_SITE_MD : null,
-    ),
+    readRepoFile: vi.fn(async (_dir: string, rel: string) => {
+      if (rel === "delivery/doc-site.md") return DOC_SITE_MD;
+      if (rel === "delivery/devops.md") return DEVOPS_MD;
+      return null;
+    }),
     repoPathExists: vi.fn(async (_dir: string, _rel: string) => true),
+    captureScreenshots: vi.fn(async (_dir: string, _url: string | null) => noShots()),
     setCurrentMd: vi.fn(async (_md: string | null) => {}),
     setCurrentOutput: vi.fn(async (_text: string | null) => {}),
     ...over,
@@ -1467,5 +1494,264 @@ describe("executeStep — Doku-Task (req-016)", () => {
     if (d.kind !== "success") return;
     expect(d.message).not.toContain(long);
     expect(d.message.length).toBeLessThan(500);
+  });
+});
+
+// req-017: the Doku task bebildert its pages. Before Claude starts, the worker
+// photographs the app's running dev environment into site/user-docs/ and hands
+// the list over in the prompt. A picture that could not be taken must cost its
+// illustration and NOTHING else — the docs get built either way.
+describe("executeStep — Doku-Screenshots (req-017)", () => {
+  const START = {
+    page: "/",
+    file: "start.png",
+    rel: `${SCREENSHOT_DIR}/start.png`,
+  };
+  const VERLAUF = {
+    page: "/verlauf",
+    file: "verlauf.png",
+    rel: `${SCREENSHOT_DIR}/verlauf.png`,
+  };
+
+  /** A capture that came back with `shot` pictures and `missing` gaps. */
+  function shots(result: ShotResult) {
+    return vi.fn(async (_dir: string, _url: string | null) => result);
+  }
+
+  it("AC: the screenshots are taken against the repo's dev environment", async () => {
+    const captureScreenshots = shots({ shot: [START], missing: [] });
+    await executeStep(repo, doku, [], deps({ captureScreenshots }));
+    expect(captureScreenshots).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "https://dev.appbaua.com", // from delivery/devops.md, never the prod URL
+    );
+  });
+
+  it("AC: the pictures reach Claude, so a doc page can show them", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "Doku aktualisiert", report: "" };
+    });
+    await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude,
+        captureScreenshots: shots({ shot: [START, VERLAUF], missing: [] }),
+      }),
+    );
+    expect(seenPrompt).toContain(START.rel);
+    expect(seenPrompt).toContain(VERLAUF.rel);
+    expect(seenPrompt).toContain("Binde jeden davon dort ein");
+  });
+
+  it("AC: the pictures are there before Claude runs — it can only place existing files", async () => {
+    const order: string[] = [];
+    await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        captureScreenshots: vi.fn(async (_dir: string, _url: string | null) => {
+          order.push("screenshots");
+          return { shot: [START], missing: [] };
+        }),
+        runClaude: vi.fn(async () => {
+          order.push("claude");
+          return { ok: true, summary: "Doku aktualisiert", report: "" };
+        }),
+      }),
+    );
+    expect(order).toEqual(["screenshots", "claude"]);
+  });
+
+  it("AC: the pictures are pushed with the docs", async () => {
+    // They lie inside site/user-docs/, so the same commit carries them.
+    expect(START.rel.startsWith(`${USER_DOCS_DIR}/`)).toBe(true);
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ commitAndPush, captureScreenshots: shots({ shot: [START], missing: [] }) }),
+    );
+    expect(d.kind).toBe("success");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: Doku aktualisiert",
+      "tok",
+    );
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("Screenshots: 1");
+  });
+
+  it("AC: a failed screenshot is noted in the Verlauf and the doc is built anyway", async () => {
+    const runClaude = vi.fn(async () => ({
+      ok: true,
+      summary: "Doku aktualisiert",
+      report: "",
+    }));
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude,
+        commitAndPush,
+        captureScreenshots: shots({
+          shot: [START],
+          missing: [{ page: "/verlauf", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(runClaude).toHaveBeenCalled(); // the doc is built regardless
+    expect(commitAndPush).toHaveBeenCalled();
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("ohne Bild: /verlauf (nicht erreichbar)");
+  });
+
+  it("AC: the dev environment being down does not stop the Doku run", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        captureScreenshots: shots({
+          shot: [],
+          missing: [{ page: "/", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("keine Screenshots");
+    expect(d.message).toContain("ohne Bild: /");
+  });
+
+  it("AC: without pictures Claude is told to reference no image at all", async () => {
+    // That is what keeps a failed screenshot from leaving a broken image behind.
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "Doku aktualisiert", report: "" };
+    });
+    await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        runClaude,
+        captureScreenshots: shots({
+          shot: [],
+          missing: [{ page: "/", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(seenPrompt).toContain("KEINE neuen Screenshots");
+    expect(seenPrompt).toContain("KEINE Bild-Datei, die");
+  });
+
+  it("a run that changed nothing still reports its pictures", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        commitAndPush: vi.fn(async () => ({
+          pushed: false,
+          detail: NO_CHANGES_DETAIL,
+        })),
+        captureScreenshots: shots({
+          shot: [START],
+          missing: [{ page: "/verlauf", reason: "nicht erreichbar" }],
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(DOC_UNCHANGED_MESSAGE);
+    expect(d.message).toContain("ohne Bild: /verlauf");
+  });
+
+  it("a repo without a dev environment gets no pictures, and the Verlauf says so", async () => {
+    const captureScreenshots = shots({
+      shot: [],
+      missing: [{ page: "/", reason: NO_DEV_URL_MESSAGE }],
+    });
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        // doc-site.md is there, devops.md is not
+        readRepoFile: vi.fn(async (_dir: string, rel: string) =>
+          rel === "delivery/doc-site.md" ? DOC_SITE_MD : null,
+        ),
+        captureScreenshots,
+      }),
+    );
+    expect(captureScreenshots).toHaveBeenCalledWith("/work/appbaua", null);
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(NO_DEV_URL_MESSAGE);
+  });
+
+  it("a crashing screenshot run never fails the Doku step", async () => {
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({
+        captureScreenshots: vi.fn(async () => {
+          throw new Error("Browser weg");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("Screenshot-Lauf abgebrochen");
+    expect(d.message).toContain("Browser weg");
+  });
+
+  it("no design template -> not even a browser is started", async () => {
+    // The Doku task does NOTHING without one (req-016); shooting screenshots for
+    // a doc that is never written would be an hour of browser for nothing.
+    const captureScreenshots = shots({ shot: [START], missing: [] });
+    const d = await executeStep(
+      repo,
+      doku,
+      [],
+      deps({ readRepoFile: vi.fn(async () => null), captureScreenshots }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe(NO_DESIGN_MESSAGE);
+    expect(captureScreenshots).not.toHaveBeenCalled();
+  });
+
+  it("no other task type photographs anything", async () => {
+    const captureScreenshots = shots({ shot: [START], missing: [] });
+    await executeStep(repo, review, [], deps({ captureScreenshots }));
+    await executeStep(repo, security, [], deps({ captureScreenshots }));
+    await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        captureScreenshots,
+      }),
+    );
+    expect(captureScreenshots).not.toHaveBeenCalled();
   });
 });

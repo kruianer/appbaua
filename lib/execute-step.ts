@@ -44,6 +44,13 @@ import {
   designDirFrom,
 } from "./doc-site";
 import {
+  DEVOPS_FILE,
+  captureDocScreenshots,
+  devUrlFrom,
+  screenshotNote,
+  type ShotResult,
+} from "./doc-screenshots";
+import {
   SECURITY_OK_MESSAGE,
   SECURITY_POLICY_FILE,
   SECURITY_REPORT_DIR,
@@ -84,6 +91,12 @@ import { setCurrentMd, setCurrentOutput } from "./worker-status";
 // repo's delivery/doc-site.md points at a design template that actually exists —
 // without one the step does nothing at all and says so in the Verlauf.
 //
+// req-017 gives that documentation pictures: right before Claude starts, the
+// worker photographs the app's running dev environment into the docs folder and
+// hands the resulting list over in the prompt. A picture that could not be taken
+// costs its illustration and nothing else — the docs are built either way, and
+// the Verlauf names every page that stayed without one.
+//
 // req-015 carries the .md name out to the caller, so the run log can store it
 // on the entry and the Verlauf can name the file a run worked off — the same
 // information the Aktivität tab shows while the step is still running.
@@ -110,6 +123,8 @@ export type ExecuteDeps = {
   readRepoFile: typeof readRepoFile;
   /** Is the design template the spec names actually there (req-016)? */
   repoPathExists: typeof repoPathExists;
+  /** Photograph the app's dev environment into the docs folder (req-017). */
+  captureScreenshots: (dir: string, baseUrl: string | null) => Promise<ShotResult>;
   /** Publish the .md this step works on (req-008). */
   setCurrentMd: typeof setCurrentMd;
   /** Publish the live Claude output tail of this step (req-008). */
@@ -129,6 +144,7 @@ const defaultDeps = (): ExecuteDeps => ({
   writeRepoFile,
   readRepoFile,
   repoPathExists,
+  captureScreenshots: (dir, baseUrl) => captureDocScreenshots(dir, baseUrl),
   setCurrentMd,
   setCurrentOutput,
   now: () => new Date(),
@@ -192,11 +208,24 @@ export async function executeStep(
   // Verlauf says why. Checked before anything else happens, so a repo that has
   // not been set up yet costs a clone and not an hour of Claude.
   let designDir: string | null = null;
+  /** What this run photographed; stays empty for every type but Doku (req-017). */
+  let shots: ShotResult = { shot: [], missing: [] };
   if (src.kind === "doc") {
     designDir = await docDesignDir(d, dir);
     if (!designDir) {
       return { kind: "success", message: NO_DESIGN_MESSAGE, md: runMd() };
     }
+    // Pictures first, prompt second: Claude can only place images that are
+    // already lying in the working copy (req-017). Where the app runs comes out
+    // of the repo's own devops.md — screenshots are taken against dev, never
+    // against prod and never against a locally started app.
+    const devops = await d.readRepoFile(dir, DEVOPS_FILE).catch(() => null);
+    shots = await d
+      .captureScreenshots(dir, devUrlFrom(devops))
+      .catch((err): ShotResult => ({
+        shot: [],
+        missing: [{ page: "/", reason: `Screenshot-Lauf abgebrochen: ${String(err)}` }],
+      }));
   }
 
   // Pick the work item and claim it by moving it into in-progress/ (req-008).
@@ -243,6 +272,7 @@ export async function executeStep(
       docSiteFile: DOC_SITE_FILE,
       docsDir: USER_DOCS_DIR,
       doneRequirementsDir: DONE_REQUIREMENTS_DIR,
+      screenshots: shots.shot,
     });
   } else {
     prompt = recurringPrompt(taskType.label);
@@ -334,13 +364,23 @@ export async function executeStep(
   // deploy. It files no report — the pages are the report. A run that found
   // nothing to add changes nothing, and that is a normal day, not a failure.
   if (src.kind === "doc") {
+    // Whatever happened to the pictures belongs in the Verlauf of THIS run, so a
+    // page that stayed without one is visible instead of silently absent
+    // (req-017) — no matter whether the run changed anything else.
+    const note = screenshotNote(shots);
     const push = await d.commitAndPush(dir, "worker: Doku aktualisiert", token);
     if (push.detail === NO_CHANGES_DETAIL) {
-      return { kind: "success", message: DOC_UNCHANGED_MESSAGE, md: runMd() };
+      return {
+        kind: "success",
+        message: `${DOC_UNCHANGED_MESSAGE}${note ? ` (${note})` : ""}`,
+        md: runMd(),
+      };
     }
     return {
       kind: "success",
-      message: `${outcome.summary} — ${push.detail} (Doku: ${USER_DOCS_DIR})`,
+      message: `${outcome.summary} — ${push.detail} (Doku: ${USER_DOCS_DIR}${
+        note ? `, ${note}` : ""
+      })`,
       md: runMd(),
     };
   }

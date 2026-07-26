@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/": ["./lib/schema.sql"],
   },
+  // Der Browser-Treiber der Doku-Screenshots (req-017) laeuft nur im Worker und
+  // wird zur Laufzeit nachgeladen; Next soll ihn nicht mitbuendeln.
+  serverExternalPackages: ["playwright-core"],
 };
 
 export default nextConfig;
