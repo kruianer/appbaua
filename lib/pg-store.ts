@@ -332,9 +332,10 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         current_md: string | null;
         current_output: string | null;
         pause_reason: string | null;
+        current_model: string | null;
       }>(
         `SELECT current_repo, current_type, step_started_at, pause_until,
-                current_md, current_output, pause_reason
+                current_md, current_output, pause_reason, current_model
          FROM worker_status WHERE id = 'worker'`,
       );
       if (res.rows.length === 0) return { ...EMPTY_STATUS };
@@ -344,6 +345,7 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
         currentType: r.current_type,
         currentMd: r.current_md,
         currentOutput: r.current_output,
+        currentModel: r.current_model,
         stepStartedAt: iso(r.step_started_at),
         pauseUntil: iso(r.pause_until),
         pauseReason: r.pause_reason,
@@ -352,8 +354,8 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
     async set(status: WorkerStatus): Promise<WorkerStatus> {
       await ensureSchema();
       await getPool().query(
-        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until, current_md, current_output, pause_reason)
-         VALUES ('worker', $1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO worker_status (id, current_repo, current_type, step_started_at, pause_until, current_md, current_output, pause_reason, current_model)
+         VALUES ('worker', $1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (id) DO UPDATE SET
            current_repo = EXCLUDED.current_repo,
            current_type = EXCLUDED.current_type,
@@ -361,7 +363,8 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
            pause_until = EXCLUDED.pause_until,
            current_md = EXCLUDED.current_md,
            current_output = EXCLUDED.current_output,
-           pause_reason = EXCLUDED.pause_reason`,
+           pause_reason = EXCLUDED.pause_reason,
+           current_model = EXCLUDED.current_model`,
         [
           status.currentRepo,
           status.currentType,
@@ -370,6 +373,7 @@ export function createPgWorkerStatusStore(): WorkerStatusStore {
           status.currentMd,
           status.currentOutput,
           status.pauseReason,
+          status.currentModel,
         ],
       );
       return status;

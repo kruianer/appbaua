@@ -389,6 +389,18 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     expect(last).toContain("→ Bash: npm test");
   });
 
+  it("req-027: onModel fires once with the model the init event names", async () => {
+    const clock = { t: 0 };
+    const models: string[] = [];
+    await runClaude("/repo", "prompt", {
+      runImpl: streamingRun(clock),
+      onOutput: () => {},
+      onModel: (m) => models.push(m),
+      now: () => clock.t,
+    });
+    expect(models).toEqual(["opus"]); // EVENTS' init event names "opus"
+  });
+
   it("AC: the live output changes while the step runs", async () => {
     const clock = { t: 0 };
     const seen: string[] = [];

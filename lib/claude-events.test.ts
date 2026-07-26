@@ -4,6 +4,7 @@ import {
   describeEvent,
   finalResultText,
   toActivityLine,
+  modelFromEvent,
 } from "./claude-events";
 
 // bug-001: the live output must show what Claude is actually doing. These tests
@@ -12,6 +13,26 @@ import {
 const line = (event: unknown) => JSON.stringify(event);
 const assistant = (content: unknown[]) =>
   line({ type: "assistant", message: { role: "assistant", content } });
+
+describe("modelFromEvent (req-027)", () => {
+  it("reads the model off the init event", () => {
+    expect(
+      modelFromEvent(line({ type: "system", subtype: "init", model: "sonnet" })),
+    ).toBe("sonnet");
+  });
+
+  it("is null for any other event", () => {
+    expect(modelFromEvent(line({ type: "system", subtype: "hook" }))).toBeNull();
+    expect(
+      modelFromEvent(line({ type: "result", subtype: "success", result: "ok" })),
+    ).toBeNull();
+  });
+
+  it("is null for non-JSON or empty lines", () => {
+    expect(modelFromEvent("not json")).toBeNull();
+    expect(modelFromEvent("")).toBeNull();
+  });
+});
 
 describe("describeEvent — tool activity", () => {
   it("names the tool and the file it touches", () => {

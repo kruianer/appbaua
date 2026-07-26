@@ -64,7 +64,7 @@ import {
   SECURITY_REPORT_DIR,
   hasSecurityFindings,
 } from "./security-report";
-import { setCurrentMd, setCurrentOutput } from "./worker-status";
+import { setCurrentMd, setCurrentOutput, setCurrentModel } from "./worker-status";
 import { isRateLimit, pauseUntilFrom } from "./rate-limit";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
@@ -176,6 +176,8 @@ export type ExecuteDeps = {
   setCurrentMd: typeof setCurrentMd;
   /** Publish the live Claude output tail of this step (req-008). */
   setCurrentOutput: typeof setCurrentOutput;
+  /** Publish the model this step's Claude call actually reports using (req-027). */
+  setCurrentModel: typeof setCurrentModel;
   now: () => Date;
   token: string | undefined;
 };
@@ -195,6 +197,7 @@ const defaultDeps = (): ExecuteDeps => ({
   runTestGate: (dir, stack) => runTestGate(dir, stack),
   setCurrentMd,
   setCurrentOutput,
+  setCurrentModel,
   now: () => new Date(),
   token: process.env.GITHUB_TOKEN,
 });
@@ -361,6 +364,13 @@ export async function executeStep(
       onOutput: (tail) => {
         outputWrites = outputWrites
           .then(() => d.setCurrentOutput(tail))
+          .catch(() => {});
+      },
+      // The model this call actually reports using (req-027) — published so the
+      // Aktivität card can show it while the step runs.
+      onModel: (model) => {
+        outputWrites = outputWrites
+          .then(() => d.setCurrentModel(model))
           .catch(() => {});
       },
     });

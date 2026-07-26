@@ -20,6 +20,12 @@ export type WorkerStatus = {
    * is running — the finished result lives in the run log (req-004).
    */
   currentOutput: string | null;
+  /**
+   * The model the running step's Claude call actually reported using (req-027),
+   * read from the event stream's own "init" event — the real model, not merely
+   * the one requested. Null until that event arrives, and whenever no step runs.
+   */
+  currentModel: string | null;
   stepStartedAt: string | null; // ISO
   pauseUntil: string | null; // ISO
   /**
@@ -35,6 +41,7 @@ export const EMPTY_STATUS: WorkerStatus = {
   currentType: null,
   currentMd: null,
   currentOutput: null,
+  currentModel: null,
   stepStartedAt: null,
   pauseUntil: null,
   pauseReason: null,
@@ -112,6 +119,7 @@ export async function setRunningStep(
     currentType: taskType,
     currentMd: null, // filled in once the step picked its file (req-008)
     currentOutput: null,
+    currentModel: null, // filled in once the Claude call reports it (req-027)
     stepStartedAt: startedAt,
     pauseUntil: null,
     pauseReason: null,
@@ -165,4 +173,9 @@ export async function setCurrentMd(md: string | null): Promise<void> {
  */
 export async function setCurrentOutput(text: string | null): Promise<void> {
   await patchRunning({ currentOutput: text === null ? null : redact(text) });
+}
+
+/** The model the running step's Claude call reports using (req-027). */
+export async function setCurrentModel(model: string | null): Promise<void> {
+  await patchRunning({ currentModel: model });
 }

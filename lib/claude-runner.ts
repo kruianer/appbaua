@@ -1,5 +1,5 @@
 import { run, type RunResult } from "./workspace";
-import { describeEvent, finalResultText } from "./claude-events";
+import { describeEvent, finalResultText, modelFromEvent } from "./claude-events";
 import { SECURITY_OK_MESSAGE } from "./security-report";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
@@ -304,6 +304,12 @@ export async function runClaude(
      * it are swallowed — live output must never break the run.
      */
     onOutput?: (tail: string) => void;
+    /**
+     * Fires once with the model the run's own "init" event names (req-027) —
+     * the model actually used, read from the event stream rather than assumed
+     * from the --model flag handed in. Never fires again after the first call.
+     */
+    onModel?: (model: string) => void;
     /** Clock for the throttle; injectable for tests. */
     now?: () => number;
   },
@@ -311,9 +317,33 @@ export async function runClaude(
   const runImpl = deps?.runImpl ?? run;
   const timeoutMs = deps?.timeoutMs ?? CLAUDE_TIMEOUT_MS;
   const onOutput = deps?.onOutput;
-  const onData = onOutput
+  const onModel = deps?.onModel;
+  const activityData = onOutput
     ? createActivityStream(onOutput, { now: deps?.now })
     : undefined;
+  // A second, independent look at the same raw lines for the model (req-027):
+  // this must never depend on onOutput being set, and must never throw into the
+  // process's stdout handler.
+  let modelSeen = false;
+  let rest = "";
+  const onData =
+    activityData || onModel
+      ? (chunk: string) => {
+          activityData?.(chunk);
+          if (onModel && !modelSeen) {
+            const parts = (rest + chunk).split("\n");
+            rest = parts.pop() ?? "";
+            for (const line of parts) {
+              const model = modelFromEvent(line);
+              if (model) {
+                modelSeen = true;
+                onModel(model);
+                break;
+              }
+            }
+          }
+        }
+      : undefined;
 
   let res: RunResult;
   try {

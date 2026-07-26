@@ -133,6 +133,7 @@ describe("buildDashboard — running step details (req-008)", () => {
     currentType: "Requirements",
     currentMd: "req-042-beispiel.md",
     currentOutput: "Zeile 1\nZeile 2",
+    currentModel: "sonnet",
     stepStartedAt: now.toISOString(),
     pauseUntil: null,
     pauseReason: null,

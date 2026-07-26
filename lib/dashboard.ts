@@ -18,6 +18,8 @@ export type DashboardData = {
   currentMd: string | null;
   /** Live Claude output tail of the running step; null unless running (req-008). */
   currentOutput: string | null;
+  /** Model the running step's Claude call reports using; null unless running (req-027). */
+  currentModel: string | null;
   stepStartedAt: string | null;
   // pause:
   pauseUntil: string | null;
@@ -75,6 +77,7 @@ export function buildDashboard(input: {
     currentType: status.currentType,
     currentMd: running ? status.currentMd : null,
     currentOutput: running ? status.currentOutput : null,
+    currentModel: running ? status.currentModel : null,
     stepStartedAt: status.stepStartedAt,
     pauseUntil: status.pauseUntil,
     pauseReason: phase === "pause" ? status.pauseReason : null,

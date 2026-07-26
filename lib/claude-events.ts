@@ -41,6 +41,25 @@ type ContentBlock = {
   content?: unknown;
 };
 
+/**
+ * The model named by a "system"/"init" event line, or null. Reads the SAME
+ * field the activity line already announces ("Claude Code gestartet
+ * (sonnet)") — this just also hands it back as a plain value, so the worker
+ * can publish it as its own status field (req-027) instead of only prose.
+ */
+export function modelFromEvent(raw: string): string | null {
+  let event: unknown;
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!event || typeof event !== "object") return null;
+  const e = event as { type?: unknown; subtype?: unknown; model?: unknown };
+  if (e.type !== "system" || e.subtype !== "init") return null;
+  return typeof e.model === "string" ? e.model : null;
+}
+
 /** Collapse whitespace and cut over-long text, so one event stays one line. */
 export function toActivityLine(
   text: string,

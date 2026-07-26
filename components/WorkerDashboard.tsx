@@ -83,6 +83,10 @@ export function WorkerDashboard() {
   // Live Claude output — only while the step runs; afterwards the result is in
   // the Verlauf log (req-004).
   const liveOutput = phase === "running" ? (data?.currentOutput ?? "") : "";
+  // The model actually in use (req-027) — null until the run's own init event
+  // names it, and always null once the step is over.
+  const modelLine =
+    phase === "running" && data?.currentModel ? `Modell: ${data.currentModel}` : null;
 
   let statusLine = "…";
   if (data) {
@@ -166,6 +170,22 @@ export function WorkerDashboard() {
             }}
           >
             {mdLine}
+          </div>
+        )}
+        {modelLine && (
+          <div
+            style={{
+              display: "inline-flex",
+              alignSelf: "flex-start",
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--color-accent-300)",
+              border: "1px solid var(--color-accent)",
+              padding: "1px 8px",
+              borderRadius: 999,
+            }}
+          >
+            {modelLine}
           </div>
         )}
         {liveOutput && (

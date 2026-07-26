@@ -13,6 +13,7 @@ const IDLE: DashboardData = {
   currentType: null,
   currentMd: null,
   currentOutput: null,
+  currentModel: null,
   stepStartedAt: null,
   pauseUntil: null,
   pauseReason: null,
@@ -84,6 +85,19 @@ describe("Aktivität — laufender Schritt (req-008)", () => {
     expect(
       screen.queryByText("wiederkehrende Aufgabe"),
     ).not.toBeInTheDocument();
+  });
+
+  it("req-027: shows the model actually in use while the step runs", async () => {
+    stubStatus(running({ currentModel: "sonnet" }));
+    render(<WorkerDashboard />);
+    expect(await screen.findByText("Modell: sonnet")).toBeInTheDocument();
+  });
+
+  it("req-027: shows no model field once the step is over", async () => {
+    stubStatus(IDLE);
+    render(<WorkerDashboard />);
+    await screen.findByText("Leerlauf — nichts zu tun");
+    expect(screen.queryByText(/^Modell:/)).not.toBeInTheDocument();
   });
 
   it("a running step without any output yet shows no empty output box", async () => {
