@@ -6,16 +6,12 @@ import { SESSION_TTL_MS, type AuthSession } from "./auth-types";
 // — every other fact (which user, when it expires) lives server-side in the
 // store, so a session can be revoked (logout) by deleting one row rather than
 // having to invalidate a signed token.
-
-export const SESSION_COOKIE = "appbaua_session";
-
-/** Cookie options shared by every place that sets or clears the session cookie. */
-export const SESSION_COOKIE_OPTIONS = {
-  httpOnly: true,
-  sameSite: "lax" as const,
-  secure: process.env.NODE_ENV === "production",
-  path: "/",
-};
+//
+// SESSION_COOKIE/SESSION_COOKIE_OPTIONS live in ./auth-cookie-name — re-export
+// them here so every existing import of THIS module keeps working; the split
+// exists only so middleware.ts (Edge runtime) can get the name without
+// pulling in this file's node:crypto/auth-store chain.
+export { SESSION_COOKIE, SESSION_COOKIE_OPTIONS } from "./auth-cookie-name";
 
 function newToken(): string {
   return randomBytes(32).toString("base64url");

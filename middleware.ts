@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE } from "./lib/auth-session";
+import { SESSION_COOKIE } from "./lib/auth-cookie-name";
 
 // req-023: guards the whole app. Without a valid session, only the
 // anmelde-/registrierungs-/recovery surface is reachable — everything else
