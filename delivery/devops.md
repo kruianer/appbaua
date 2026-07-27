@@ -19,6 +19,16 @@ Ubuntu). Der Deploy läuft als GitHub-Actions-Workflow, ausgelöst durch
 den Push — kein PaaS-Auto-Deploy, aber dieselbe Wirkung: git push ist der
 Trigger.
 
+## Konfiguration pro Umgebung (req-023)
+
+`APP_ORIGIN` muss in `deploy/dev.env` und `deploy/prod.env` (nicht im
+Repo, siehe docker-compose.yml) auf die jeweils eigene URL oben gesetzt
+sein — `https://dev.appbaua.com` bzw. `https://app.appbaua.com`. Passkeys
+sind an diesen Wert gebunden (WebAuthn rpId); stünde in beiden envs
+dieselbe URL, würde ein auf dev registrierter Passkey fälschlich auch auf
+prod versucht (und WebAuthn selbst lehnt das dann ab — kein Login mehr
+möglich, bis der Wert korrigiert ist).
+
 ## Deploy Trigger
 
 - Push auf `dev`   → Workflow deployt automatisch die dev-Umgebung.

@@ -8,6 +8,9 @@
 #   APP_PORT        host port the app listens on (e.g. 3001 dev, 3002 prod)
 #   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 #   GITHUB_TOKEN    PAT for the private-repo reachability check
+#   APP_ORIGIN      this deployment's own URL (req-023), e.g.
+#                   https://dev.appbaua.com or https://app.appbaua.com —
+#                   MUST differ between dev and prod (WebAuthn rpId binding)
 # DATABASE_URL is assembled from the POSTGRES_* vars below.
 
 services:
@@ -49,6 +52,11 @@ services:
       # Which repo the appbaua standard is read from (req-012). Optional; the
       # app falls back to github.com/kruianer/appbaua.
       APPBAUA_SOURCE_REPO: ${APPBAUA_SOURCE_REPO:-}
+      # req-023: this deployment's own URL. Passkeys are bound to it (the
+      # WebAuthn rpId is derived from it), so dev and prod MUST set different
+      # values — https://dev.appbaua.com / https://app.appbaua.com — or a
+      # passkey registered on one would silently not work on the other.
+      APP_ORIGIN: ${APP_ORIGIN}
       NODE_ENV: production
       # System-Kacheln (req-009): wo die Host-Werte im Container liegen.
       HOST_PROC: /host/proc
