@@ -17,6 +17,8 @@ export const DEFAULT_RATE_LIMIT_PAUSE_MS = 60 * 60_000; // 1 hour
 const RATE_LIMIT_PATTERNS = [
   /rate.?limit/i,
   /usage limit/i,
+  /session limit/i,
+  /limit (?:reached|exceeded)/i,
   /too many requests/i,
   /\b429\b/,
   /quota (?:exceeded|reached)/i,
@@ -31,9 +33,11 @@ export function isRateLimit(text: string | null | undefined): boolean {
 
 /**
  * The reset instant a rate-limit message names, as epoch ms, or null when it
- * names none. Recognises two shapes the CLI/API use:
+ * names none. Recognises three shapes the CLI/API use:
  *   - a unix timestamp, e.g. "try again at 1753560000" / "resets 1753560000"
  *   - an ISO-8601 instant, e.g. "resets at 2026-07-26T21:00:00Z"
+ *   - a 12-hour clock with a UTC marker, e.g. "resets 10:50pm (UTC)" — the
+ *     shape the CLI's session-limit message uses (bug-011)
  * A timestamp in the past is ignored (returns null), so a stale number can never
  * shorten the pause below the sensible default.
  */
@@ -61,6 +65,32 @@ export function resetAtFrom(
     const raw = Number(unix[1]);
     const ms = unix[1].length <= 10 ? raw * 1000 : raw;
     if (ms > nowMs) return ms;
+  }
+
+  // A 12-hour clock next to a reset word, with an explicit UTC/GMT marker
+  // (bug-011): "resets 10:50pm (UTC)". Only UTC/GMT are recognised — any other
+  // zone name would need an offset table the message never provides. The date
+  // is today-in-UTC unless that has already passed, in which case it is
+  // tomorrow — the message never names a date, only a time.
+  const clock12 = text.match(
+    /(?:reset|resets)[^0-9]{0,10}(\d{1,2}):(\d{2})\s*([ap]m)\b[^)]{0,10}\((?:UTC|GMT)\)/i,
+  );
+  if (clock12) {
+    const hour12 = Number(clock12[1]) % 12;
+    const hour = /pm/i.test(clock12[3]) ? hour12 + 12 : hour12;
+    const minute = Number(clock12[2]);
+    const now = new Date(nowMs);
+    let ms = Date.UTC(
+      now.getUTCFullYear(),
+      now.getUTCMonth(),
+      now.getUTCDate(),
+      hour,
+      minute,
+      0,
+      0,
+    );
+    if (ms <= nowMs) ms += 24 * 60 * 60_000;
+    return ms;
   }
 
   return null;
