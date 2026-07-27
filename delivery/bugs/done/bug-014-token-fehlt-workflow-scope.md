@@ -50,3 +50,14 @@ Wenn das bewusst NICHT gewollt ist (Worker soll keine CI-Dateien ändern
 dürfen), wäre die Alternative, das im Prompt/den Konventionen
 auszuschließen — dann sollte der Worker aber vorher abbrechen statt am
 Push zu scheitern.
+
+# Behoben am 2026-07-27
+
+Keine Code-Änderung — reine Berechtigung. Der Nutzer hat beim
+Fine-grained Token die Berechtigung "Workflows: Read and write" ergänzt.
+Der Token-Wert blieb dabei gleich, `dev.env`/`prod.env` mussten also
+nicht angefasst werden; der prod-Worker wurde neu gestartet.
+
+Verifiziert mit einem echten Push gegen livinggardenkeeper, der
+`.github/workflows/ci.yml` berührt: Push ging durch (`1d86d8c..18a011b`),
+Testcommit anschließend per Revert zurückgenommen (`18a011b..8408eb2`).
