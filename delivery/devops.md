@@ -60,6 +60,41 @@ Deploy-Workflows) startet den `cloudflared`-Dienst mit; er hält die
 ausgehende Verbindung zu Cloudflare, worüber die jeweilige Domain die App
 erreicht. Kein Eingriff in Router/Firewall nötig.
 
+## Notfall: ausgesperrt (Passkey UND Backup-Codes verloren)
+
+Der Passkey-Schutz (req-023) richtet sich gegen jemanden, der nur die URL
+kennt — nicht gegen den Betreiber der Maschine. Wer SSH-Zugang zum
+Beelink hat, kommt immer wieder herein. Drei Stufen, von harmlos nach
+radikal:
+
+**Stufe 1 — Passkey weg, Backup-Code vorhanden.** Der normale Weg:
+`/recovery` aufrufen, Code eingeben, neuen Passkey registrieren. Dafür
+sind die Codes da.
+
+**Stufe 2 — beides weg.** Per SSH auf dem Beelink alle Auth-Nutzer der
+betroffenen Umgebung löschen; danach ist sie wieder „jungfräulich"
+(`bootstrapped: false`) und die Login-Seite zeigt erneut
+„Ersteinrichtung starten":
+
+```bash
+# <ENV> ist dev oder prod; USER/DB aus der jeweiligen deploy/<env>.env
+docker compose -p appbaua-<ENV> exec db \
+  psql -U <POSTGRES_USER> -d <POSTGRES_DB> -c "DELETE FROM auth_users;"
+```
+
+Wegen `ON DELETE CASCADE` verschwinden Credentials, Sessions,
+Einladungen und Backup-Codes automatisch mit. **Nur** Auth-Daten sind
+betroffen — Repos, Task-Typen, Verlauf und Worker-Status liegen in
+anderen Tabellen und bleiben unangetastet.
+
+**Stufe 3 — DB-Zugang unklar.** Notfalls den Stack mit frischem
+DB-Volume neu aufsetzen. Das ist praktisch nie nötig; Stufe 2 reicht.
+
+**Konsequenz für den Alltag:** Backup-Codes trotzdem sichern (am besten
+im Passwortmanager). Stufe 2 ist der Notausgang, nicht der reguläre Weg —
+sie kostet den kompletten Auth-Zustand der Umgebung, inklusive aller
+eingeladenen Nutzer.
+
 ## Deploy Trigger
 
 - Push auf `dev`   → Workflow deployt automatisch die dev-Umgebung.
