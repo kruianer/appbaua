@@ -13,6 +13,8 @@
     "worker": "tsx worker/index.ts"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.2",
     "next": "^15.5.21",
     "pg": "^8.13.1",
     "playwright-core": "^1.62.0",

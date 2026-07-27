@@ -21,6 +21,15 @@ import {
 } from "./worker-status";
 import type { PreviewStore } from "./preview-store";
 import type { PreviewRow } from "./preview";
+import type { AuthStore } from "./auth-store";
+import type {
+  AuthUser,
+  AuthCredential,
+  AuthSession,
+  AuthChallenge,
+  AuthInvitation,
+  AuthBackupCode,
+} from "./auth-types";
 
 // PostgreSQL-backed store. Selected automatically when DATABASE_URL or PGHOST
 // is set (see store.ts). "position" holds the priority order (0 = highest);
@@ -402,6 +411,289 @@ export function createPgPreviewStore(): PreviewStore {
          ON CONFLICT (id) DO UPDATE SET rows = EXCLUDED.rows`,
         [JSON.stringify(rows)],
       );
+    },
+  };
+}
+
+export function createPgAuthStore(): AuthStore {
+  const userRow = (r: {
+    id: string;
+    is_operator: boolean;
+    created_at: Date;
+  }): AuthUser => ({
+    id: r.id,
+    isOperator: r.is_operator,
+    createdAt: new Date(r.created_at).toISOString(),
+  });
+  const credRow = (r: {
+    id: string;
+    user_id: string;
+    public_key: string;
+    counter: string;
+    transports: string[];
+    created_at: Date;
+  }): AuthCredential => ({
+    id: r.id,
+    userId: r.user_id,
+    publicKey: r.public_key,
+    counter: Number(r.counter),
+    transports: r.transports,
+    createdAt: new Date(r.created_at).toISOString(),
+  });
+  const sessionRow = (r: {
+    id: string;
+    user_id: string;
+    created_at: Date;
+    expires_at: Date;
+  }): AuthSession => ({
+    id: r.id,
+    userId: r.user_id,
+    createdAt: new Date(r.created_at).toISOString(),
+    expiresAt: new Date(r.expires_at).toISOString(),
+  });
+  const challengeRow = (r: {
+    token: string;
+    challenge: string;
+    user_id: string | null;
+    purpose: string;
+    expires_at: Date;
+  }): AuthChallenge => ({
+    token: r.token,
+    challenge: r.challenge,
+    userId: r.user_id,
+    purpose: r.purpose as AuthChallenge["purpose"],
+    expiresAt: new Date(r.expires_at).toISOString(),
+  });
+  const invitationRow = (r: {
+    token: string;
+    created_by: string;
+    created_at: Date;
+    expires_at: Date;
+    used_at: Date | null;
+  }): AuthInvitation => ({
+    token: r.token,
+    createdBy: r.created_by,
+    createdAt: new Date(r.created_at).toISOString(),
+    expiresAt: new Date(r.expires_at).toISOString(),
+    usedAt: r.used_at ? new Date(r.used_at).toISOString() : null,
+  });
+  const backupRow = (r: {
+    id: string;
+    user_id: string;
+    code_hash: string | null;
+    created_at: Date;
+  }): AuthBackupCode => ({
+    id: r.id,
+    userId: r.user_id,
+    codeHash: r.code_hash,
+    createdAt: new Date(r.created_at).toISOString(),
+  });
+
+  return {
+    async createUser(user) {
+      await ensureSchema();
+      await getPool().query(
+        "INSERT INTO auth_users (id, is_operator, created_at) VALUES ($1, $2, $3)",
+        [user.id, user.isOperator, user.createdAt],
+      );
+      return user;
+    },
+    async getUser(id) {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT id, is_operator, created_at FROM auth_users WHERE id = $1",
+        [id],
+      );
+      return res.rows[0] ? userRow(res.rows[0]) : null;
+    },
+    async countUsers() {
+      await ensureSchema();
+      const res = await getPool().query<{ count: string }>(
+        "SELECT COUNT(*)::text AS count FROM auth_users",
+      );
+      return Number(res.rows[0].count);
+    },
+    async getOperator() {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT id, is_operator, created_at FROM auth_users WHERE is_operator = TRUE LIMIT 1",
+      );
+      return res.rows[0] ? userRow(res.rows[0]) : null;
+    },
+
+    async addCredential(cred) {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO auth_credentials (id, user_id, public_key, counter, transports, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          cred.id,
+          cred.userId,
+          cred.publicKey,
+          cred.counter,
+          JSON.stringify(cred.transports),
+          cred.createdAt,
+        ],
+      );
+    },
+    async getCredential(id) {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT id, user_id, public_key, counter, transports, created_at FROM auth_credentials WHERE id = $1",
+        [id],
+      );
+      return res.rows[0] ? credRow(res.rows[0]) : null;
+    },
+    async listCredentialsForUser(userId) {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT id, user_id, public_key, counter, transports, created_at FROM auth_credentials WHERE user_id = $1",
+        [userId],
+      );
+      return res.rows.map(credRow);
+    },
+    async updateCredentialCounter(id, counter) {
+      await ensureSchema();
+      await getPool().query(
+        "UPDATE auth_credentials SET counter = $1 WHERE id = $2",
+        [counter, id],
+      );
+    },
+
+    async createSession(session) {
+      await ensureSchema();
+      await getPool().query(
+        "INSERT INTO auth_sessions (id, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)",
+        [session.id, session.userId, session.createdAt, session.expiresAt],
+      );
+    },
+    async getSession(id) {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT id, user_id, created_at, expires_at FROM auth_sessions WHERE id = $1",
+        [id],
+      );
+      return res.rows[0] ? sessionRow(res.rows[0]) : null;
+    },
+    async deleteSession(id) {
+      await ensureSchema();
+      await getPool().query("DELETE FROM auth_sessions WHERE id = $1", [id]);
+    },
+
+    async createChallenge(challenge) {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO auth_challenges (token, challenge, user_id, purpose, expires_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          challenge.token,
+          challenge.challenge,
+          challenge.userId,
+          challenge.purpose,
+          challenge.expiresAt,
+        ],
+      );
+    },
+    async consumeChallenge(token) {
+      await ensureSchema();
+      const client = await getPool().connect();
+      try {
+        await client.query("BEGIN");
+        const res = await client.query(
+          "SELECT token, challenge, user_id, purpose, expires_at FROM auth_challenges WHERE token = $1",
+          [token],
+        );
+        await client.query("DELETE FROM auth_challenges WHERE token = $1", [
+          token,
+        ]);
+        await client.query("COMMIT");
+        return res.rows[0] ? challengeRow(res.rows[0]) : null;
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+
+    async createInvitation(invitation) {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO auth_invitations (token, created_by, created_at, expires_at, used_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          invitation.token,
+          invitation.createdBy,
+          invitation.createdAt,
+          invitation.expiresAt,
+          invitation.usedAt,
+        ],
+      );
+    },
+    async getInvitation(token) {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT token, created_by, created_at, expires_at, used_at FROM auth_invitations WHERE token = $1",
+        [token],
+      );
+      return res.rows[0] ? invitationRow(res.rows[0]) : null;
+    },
+    async markInvitationUsed(token, usedAt) {
+      await ensureSchema();
+      await getPool().query(
+        "UPDATE auth_invitations SET used_at = $1 WHERE token = $2",
+        [usedAt, token],
+      );
+    },
+
+    async addBackupCodes(codes) {
+      await ensureSchema();
+      const client = await getPool().connect();
+      try {
+        await client.query("BEGIN");
+        for (const c of codes) {
+          await client.query(
+            `INSERT INTO auth_backup_codes (id, user_id, code_hash, created_at)
+             VALUES ($1, $2, $3, $4)`,
+            [c.id, c.userId, c.codeHash, c.createdAt],
+          );
+        }
+        await client.query("COMMIT");
+      } catch (err) {
+        await client.query("ROLLBACK");
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+    async listBackupCodesForUser(userId) {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT id, user_id, code_hash, created_at FROM auth_backup_codes WHERE user_id = $1",
+        [userId],
+      );
+      return res.rows.map(backupRow);
+    },
+    async findBackupCodeByHash(codeHash) {
+      await ensureSchema();
+      const res = await getPool().query(
+        "SELECT id, user_id, code_hash, created_at FROM auth_backup_codes WHERE code_hash = $1 LIMIT 1",
+        [codeHash],
+      );
+      return res.rows[0] ? backupRow(res.rows[0]) : null;
+    },
+    async consumeBackupCode(id) {
+      await ensureSchema();
+      await getPool().query(
+        "UPDATE auth_backup_codes SET code_hash = NULL WHERE id = $1",
+        [id],
+      );
+    },
+    async clearBackupCodesForUser(userId) {
+      await ensureSchema();
+      await getPool().query("DELETE FROM auth_backup_codes WHERE user_id = $1", [
+        userId,
+      ]);
     },
   };
 }
