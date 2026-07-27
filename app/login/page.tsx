@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { startAuthentication } from "@simplewebauthn/browser";
 
@@ -11,6 +11,23 @@ export default function LoginPage() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // AC1: without this, a fresh install had no visible way to reach the
+  // operator bootstrap — only "kein Passkey" login or "Backup-Code", neither
+  // of which can work before anyone has registered. Shown only while truly
+  // unbootstrapped, so it never reads as an open self-registration (AC6).
+  const [bootstrapped, setBootstrapped] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/bootstrap/status", { cache: "no-store" });
+        const data = await res.json();
+        setBootstrapped(Boolean(data.bootstrapped));
+      } catch {
+        setBootstrapped(true); // fail closed: no link shown on doubt
+      }
+    })();
+  }, []);
 
   async function login() {
     setBusy(true);
@@ -62,6 +79,11 @@ export default function LoginPage() {
         </button>
         {error && (
           <div style={{ color: "var(--color-accent-300)", fontSize: 13 }}>{error}</div>
+        )}
+        {bootstrapped === false && (
+          <a href="/register" style={{ fontSize: 13, textAlign: "center" }}>
+            Noch kein Zugang? Ersteinrichtung starten
+          </a>
         )}
         <a href="/recovery" style={{ fontSize: 13, textAlign: "center" }}>
           Zugang verloren? Mit Backup-Code wiederherstellen
