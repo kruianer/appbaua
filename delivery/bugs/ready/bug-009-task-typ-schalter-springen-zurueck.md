@@ -8,53 +8,53 @@ created: 2026-07-26
 
 # Observed
 
-Task-Typ-Schalter springen ohne mein Zutun zurück.
+Task-Typ-Schalter springen zurück, sobald ich den Tab wechsle:
 
-Zuletzt beobachtet **auf prod am 27.07., ohne jeden Deploy**: Ich habe
-`code-review`, `security` und `ideen` eingeschaltet — wenige Minuten
-später waren sie wieder deaktiviert. Kein Deployment, kein Neustart, kein
-weiterer Klick von mir dazwischen.
+1. In der Task-Steuerung einzelne Typen aktivieren (z.B. `code-review`,
+   `security`, `ideen`) — die Schalter gehen sichtbar an.
+2. Auf den Aktivität-Tab wechseln.
+3. Zurück auf die Task-Steuerung: die Typen sind wieder deaktiviert.
 
-(Die ursprüngliche Fassung dieses Bugs vermutete den Reset "beim
-Deployment". Das war zu eng gefasst und vermutlich der Grund, warum der
-Fix-Versuch scheiterte: es passiert auch im laufenden Betrieb.)
+Es sieht aus, als würde die Einstellung nicht gespeichert. Zuvor auch
+schon beobachtet als "Schalter sind Minuten später wieder aus" auf prod.
 
 # Expected
 
-Ein Schalter, den ich umlege, bleibt so — bis ich ihn selbst wieder
-ändere. Weder ein laufender Worker-Durchlauf noch eine andere gleichzeitige
-Änderung darf ihn zurücksetzen.
+Ein Schalter, den ich umlege, bleibt so — beim Tab-Wechsel, beim
+Neuladen, und auch während der Worker weiterläuft. Bis ich ihn selbst
+wieder ändere.
 
 # Steps
 
-1. In der Task-Steuerung (prod) einen deaktivierten Typ einschalten, z.B.
-   `code-review`.
-2. Ein paar Minuten warten, während der Worker weiterläuft.
-3. Seite neu laden: der Typ steht wieder auf inaktiv.
+1. Task-Steuerung öffnen, einen deaktivierten Typ einschalten.
+2. Auf Aktivität wechseln.
+3. Zurück auf Task-Steuerung — der Typ steht wieder auf inaktiv.
 
 # Hinweis zur Ursache (Verdacht, bitte reproduce-first verifizieren)
 
-Alle Schreibpfade in `lib/task-service.ts` (`toggleTaskType`,
-`toggleAlways`, `reorderTaskTypes`, `setDaySchedule`) arbeiten nach dem
-Muster **list() → verändern → replace(GESAMTE Liste)**. `replace()` ist in
-`lib/pg-store.ts` ein `DELETE FROM task_types` plus kompletter Neu-Insert.
+Sehr wahrscheinlich ein reiner Frontend-Fehler, kein Persistenz-Problem:
 
-Damit überschreibt jeder Schreibvorgang die ganze Liste auf Basis eines
-Standes, der beim Schreiben bereits veraltet sein kann — ein klassischer
-Lost Update. Zwei Kandidaten dafür, dass zwischendurch jemand anders
-schreibt:
+`components/TaskControl.tsx` initialisiert seinen State aus einer Prop:
 
-1. **Der Worker-Prozess** liest `listTaskTypes()` mehrfach pro Durchlauf
-   (`lib/worker-loop.ts`, u.a. Zeilen 89, 111, 129). Der
-   `seedMissingDefaults`-Wrapper in `lib/task-store.ts` SCHREIBT beim
-   Lesen zurück, sobald `withMissingDefaults` etwas ergänzt — ein `list()`
-   mit Schreib-Nebenwirkung, mehrmals pro Minute, aus einem zweiten
-   Container gegen dieselbe DB.
-2. **Die Web-App** baut ihren `replace()`-Aufruf aus ihrem Client-State.
-   Steht der auf einem älteren Stand, macht schon der nächste Klick eine
-   vorherige Änderung wieder rückgängig.
+```ts
+const [types, setTypes] = useState<TaskType[]>(initialTaskTypes);
+```
 
-Ein Fix sollte die Schreibvorgänge feldgenau machen (nur den einen Typ
-ändern statt die ganze Liste zu ersetzen) oder gegen einen veralteten
-Stand absichern, statt blind alles zu überschreiben. Ein Repro-Test, der
-zwei überlappende Schreibvorgänge simuliert, ist der natürliche Einstieg.
+`initialTaskTypes` kommt aus `app/page.tsx` (Server Component) und ist der
+Stand **zum Zeitpunkt des Seitenaufrufs**. Beim Tab-Wechsel wird
+`TaskControl` in `components/AppShell.tsx` (Zeile ~669) aus dem Baum
+genommen und beim Zurückwechseln neu gemountet — dabei initialisiert
+`useState` wieder mit derselben, inzwischen veralteten Prop. Die eigene
+Änderung ist im Client-State verloren, obwohl sie serverseitig gespeichert
+wurde.
+
+Prüfen lohnt sich: liegt der geänderte Wert nach Schritt 1 tatsächlich in
+der DB (`SELECT id, active FROM task_types`)? Wenn ja, ist es eindeutig
+der Remount und nicht das Speichern.
+
+Mögliche Richtungen für den Fix: den Stand beim Mounten (bzw. beim
+Sichtbarwerden des Tabs) frisch vom Server holen, statt sich auf die
+Initial-Prop zu verlassen — oder den Tab-Inhalt nicht aushängen, sondern
+nur ausblenden, damit der State erhalten bleibt. Dasselbe Muster betrifft
+potenziell auch die Repo-Liste (`initialRepos`) und den Hauptschalter
+(`initialWorkerEnabled`) — bitte mitprüfen.
