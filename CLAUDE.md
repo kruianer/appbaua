@@ -78,4 +78,4 @@ ergänzt.
   req-022, req-025, req-026, req-027, req-029)
 - **Zugang & Sicherheit** — Zugangsschutz und externe Erreichbarkeit der
   Worker-App: Anmeldung, Sitzungen, sicherer Zugang von außen. (req-023,
-  req-024)
+  req-024, req-031)
