@@ -16,11 +16,15 @@ function jsonResponse(data: unknown) {
   return { ok: true, json: async () => data };
 }
 
-/** Fake API: GET reports the current count, DELETE wipes it. */
+/** Fake API: GET reports the current count, DELETE wipes it, /api/auth/me
+ * says "not the operator" by default (req-023's invite button stays hidden). */
 function stubApi() {
   requests = [];
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     requests.push({ url, method: init?.method ?? "GET" });
+    if (url.includes("/api/auth/me")) {
+      return jsonResponse({ user: { isOperator: false } });
+    }
     if (init?.method === "DELETE") {
       total = 0;
       return jsonResponse({ total: 0 });
@@ -47,10 +51,33 @@ describe("Einstellungen — Verlauf-Log löschen", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the placeholder hint for further settings", async () => {
+  it("req-023: shows an Abmelden button", async () => {
     render(<Settings />);
     expect(
-      await screen.findByText("weitere Einstellungen folgen"),
+      await screen.findByRole("button", { name: "Abmelden" }),
+    ).toBeInTheDocument();
+  });
+
+  it("req-023: hides 'Einladung erstellen' for a non-operator user", async () => {
+    render(<Settings />);
+    await screen.findByRole("button", { name: "Abmelden" });
+    expect(
+      screen.queryByRole("button", { name: "Einladung erstellen" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("req-023 AC5: shows 'Einladung erstellen' only for the operator", async () => {
+    requests = [];
+    vi.stubGlobal("fetch", async (url: string) => {
+      requests.push({ url, method: "GET" });
+      if (url.includes("/api/auth/me")) {
+        return jsonResponse({ user: { isOperator: true } });
+      }
+      return jsonResponse({ entries: [], total, page: 0, hasMore: false });
+    });
+    render(<Settings />);
+    expect(
+      await screen.findByRole("button", { name: "Einladung erstellen" }),
     ).toBeInTheDocument();
   });
 

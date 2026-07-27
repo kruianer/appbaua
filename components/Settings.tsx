@@ -23,6 +23,11 @@ export function Settings() {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [toast, setToast] = useState(false);
+  // req-023: only the operator gets the "Einladung erstellen" action.
+  const [isOperator, setIsOperator] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [inviting, setInviting] = useState(false);
 
   const loadCount = useCallback(async () => {
     try {
@@ -38,6 +43,43 @@ export function Settings() {
   useEffect(() => {
     void loadCount();
   }, [loadCount]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = await res.json();
+        setIsOperator(Boolean(data.user?.isOperator));
+      } catch {
+        /* leave the invite action hidden */
+      }
+    })();
+  }, []);
+
+  const logout = useCallback(async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+      window.location.href = "/login";
+    } finally {
+      setLoggingOut(false);
+    }
+  }, [loggingOut]);
+
+  const createInvite = useCallback(async () => {
+    if (inviting) return;
+    setInviting(true);
+    try {
+      const res = await fetch("/api/auth/invitations", { method: "POST" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setInviteLink(`${window.location.origin}/register?invite=${data.token}`);
+    } finally {
+      setInviting(false);
+    }
+  }, [inviting]);
 
   // Auto-hide the confirmation again.
   useEffect(() => {
@@ -119,13 +161,54 @@ export function Settings() {
 
       <div
         style={{
-          marginTop: "var(--space-4)",
-          textAlign: "center",
-          fontSize: 12,
+          fontSize: 10,
+          letterSpacing: ".12em",
+          textTransform: "uppercase",
           color: muted(45),
+          margin: "var(--space-4) 0 var(--space-2)",
         }}
       >
-        weitere Einstellungen folgen
+        Zugang &amp; Sicherheit
+      </div>
+
+      <div className="card elev-sm" style={{ gap: "var(--space-3)" }}>
+        {isOperator && (
+          <>
+            <p style={{ margin: 0, fontSize: 13, color: muted(70) }}>
+              Als Betreiber kannst du weitere Personen einladen — sie
+              registrieren dann ihren eigenen Passkey.
+            </p>
+            <button
+              className="btn btn-secondary btn-block"
+              onClick={createInvite}
+              disabled={inviting}
+              style={{ marginTop: 0 }}
+            >
+              <Icon name="plus" size={16} /> Einladung erstellen
+            </button>
+            {inviteLink && (
+              <div
+                style={{
+                  fontSize: 12,
+                  wordBreak: "break-all",
+                  padding: "9px 12px",
+                  borderRadius: "var(--radius-md)",
+                  background: "color-mix(in srgb, var(--color-text) 6%, transparent)",
+                }}
+              >
+                {inviteLink}
+              </div>
+            )}
+          </>
+        )}
+        <button
+          className="btn btn-primary btn-block"
+          onClick={logout}
+          disabled={loggingOut}
+          style={{ marginTop: 0 }}
+        >
+          Abmelden
+        </button>
       </div>
 
       {confirmOpen && (

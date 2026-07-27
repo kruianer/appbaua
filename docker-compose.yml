@@ -8,6 +8,13 @@
 #   APP_PORT        host port the app listens on (e.g. 3001 dev, 3002 prod)
 #   POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
 #   GITHUB_TOKEN    PAT for the private-repo reachability check
+#   APP_ORIGIN      this deployment's own URL (req-023), e.g.
+#                   https://dev.appbaua.com or https://app.appbaua.com —
+#                   MUST differ between dev and prod (WebAuthn rpId binding)
+#   CLOUDFLARE_TUNNEL_TOKEN
+#                   this environment's cloudflared tunnel token (req-024),
+#                   generated in the Cloudflare dashboard per tunnel — dev and
+#                   prod each get their OWN tunnel and token
 # DATABASE_URL is assembled from the POSTGRES_* vars below.
 
 services:
@@ -49,6 +56,11 @@ services:
       # Which repo the appbaua standard is read from (req-012). Optional; the
       # app falls back to github.com/kruianer/appbaua.
       APPBAUA_SOURCE_REPO: ${APPBAUA_SOURCE_REPO:-}
+      # req-023: this deployment's own URL. Passkeys are bound to it (the
+      # WebAuthn rpId is derived from it), so dev and prod MUST set different
+      # values — https://dev.appbaua.com / https://app.appbaua.com — or a
+      # passkey registered on one would silently not work on the other.
+      APP_ORIGIN: ${APP_ORIGIN}
       NODE_ENV: production
       # System-Kacheln (req-009): wo die Host-Werte im Container liegen.
       HOST_PROC: /host/proc
@@ -94,6 +106,20 @@ services:
       NODE_ENV: production
     volumes:
       - claude-home:/claude-home
+
+  # External access without an open router port (req-024): cloudflared holds
+  # an outbound-only connection to Cloudflare's edge, which then routes the
+  # environment's own domain (dev.appbaua.com / app.appbaua.com, set as the
+  # tunnel's public hostname in the Cloudflare dashboard/config, NOT here) to
+  # this container, which forwards to the app service over the compose
+  # network. TLS terminates at the Cloudflare edge; the token that identifies
+  # WHICH tunnel this is comes only from the env file, never the repo.
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - app
 
 volumes:
   db-data:

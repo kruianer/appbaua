@@ -101,3 +101,70 @@ CREATE TABLE IF NOT EXISTS preview (
   id   TEXT PRIMARY KEY,
   rows JSONB NOT NULL DEFAULT '[]'::jsonb
 );
+
+-- Passkey authentication (req-023). Person ≠ operator context: a user signs
+-- in with a passkey; the app itself is worked in a single operator's context
+-- (n:m-capable in shape, not built out — one operator, one-or-more users).
+
+CREATE TABLE IF NOT EXISTS auth_users (
+  id         TEXT PRIMARY KEY,
+  is_operator BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- One row per registered passkey (a user may have several, one per device).
+-- counter guards against a cloned authenticator (WebAuthn replay defence).
+CREATE TABLE IF NOT EXISTS auth_credentials (
+  id                TEXT PRIMARY KEY, -- base64url credential ID
+  user_id           TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+  public_key        TEXT NOT NULL,    -- base64url COSE public key
+  counter           BIGINT NOT NULL DEFAULT 0,
+  transports        JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS auth_credentials_user_idx ON auth_credentials (user_id);
+
+-- Sessions (opaque token, the cookie carries only its id). expires_at makes a
+-- stale row inert without a background sweep having to run first.
+CREATE TABLE IF NOT EXISTS auth_sessions (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS auth_sessions_user_idx ON auth_sessions (user_id);
+
+-- A pending WebAuthn ceremony's server-generated challenge, so the same
+-- server process is not required to finish what it started (Next.js runs
+-- handlers statelessly). One outstanding challenge per token; short-lived.
+CREATE TABLE IF NOT EXISTS auth_challenges (
+  token      TEXT PRIMARY KEY,
+  challenge  TEXT NOT NULL,
+  user_id    TEXT,             -- set for a login/registration-add ceremony
+  purpose    TEXT NOT NULL,    -- 'register' | 'login'
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+-- Invitations (req-023: no open self-registration). A single-use token the
+-- operator hands out; consuming it creates the invited user.
+CREATE TABLE IF NOT EXISTS auth_invitations (
+  token      TEXT PRIMARY KEY,
+  created_by TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  expires_at TIMESTAMPTZ NOT NULL,
+  used_at    TIMESTAMPTZ
+);
+
+-- Recovery backup codes (req-023). Hashed, single-use: consuming one clears
+-- its hash to NULL rather than deleting the row, so "10 issued, 3 left" stays
+-- answerable without a separate counter.
+CREATE TABLE IF NOT EXISTS auth_backup_codes (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+  code_hash  TEXT,             -- NULL once consumed
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS auth_backup_codes_user_idx ON auth_backup_codes (user_id);

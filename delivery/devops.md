@@ -19,6 +19,47 @@ Ubuntu). Der Deploy läuft als GitHub-Actions-Workflow, ausgelöst durch
 den Push — kein PaaS-Auto-Deploy, aber dieselbe Wirkung: git push ist der
 Trigger.
 
+## Konfiguration pro Umgebung (req-023)
+
+`APP_ORIGIN` muss in `deploy/dev.env` und `deploy/prod.env` (nicht im
+Repo, siehe docker-compose.yml) auf die jeweils eigene URL oben gesetzt
+sein — `https://dev.appbaua.com` bzw. `https://app.appbaua.com`. Passkeys
+sind an diesen Wert gebunden (WebAuthn rpId); stünde in beiden envs
+dieselbe URL, würde ein auf dev registrierter Passkey fälschlich auch auf
+prod versucht (und WebAuthn selbst lehnt das dann ab — kein Login mehr
+möglich, bis der Wert korrigiert ist).
+
+## Externer Zugang über Cloudflare Tunnel (req-024)
+
+Beide Umgebungen — dev UND prod — sind über je einen eigenen Cloudflare
+Tunnel von außen erreichbar, ohne offenen Port am Router. Der App-
+Container bleibt zusätzlich im WLAN direkt über `APP_PORT` erreichbar;
+der Tunnel kommt als zweiter, unabhängiger Zugangsweg hinzu.
+
+**Einmalige manuelle Konto-Schritte (macht der Nutzer, nicht der
+Worker):**
+
+1. Die Zone `appbaua.com` bei Cloudflare anlegen (falls noch nicht
+   geschehen) und die Nameserver beim Registrar auf die von Cloudflare
+   genannten umstellen.
+2. Im Cloudflare-Dashboard unter Zero Trust → Networks → Tunnels **zwei**
+   Tunnel anlegen — einen für dev, einen für prod (getrennte Tunnel,
+   getrennte Tokens, damit ein Ausfall/eine Rotation den jeweils anderen
+   nicht berührt).
+3. Für jeden Tunnel eine Public Hostname zuweisen: `dev.appbaua.com` →
+   der dev-Tunnel, `app.appbaua.com` → der prod-Tunnel, jeweils auf
+   Service `http://app:3000` (Compose-interner Servicename/Port, siehe
+   docker-compose.yml).
+4. Je Tunnel den angezeigten Token kopieren und als `CLOUDFLARE_TUNNEL_TOKEN`
+   in `deploy/dev.env` bzw. `deploy/prod.env` eintragen — NICHT ins Repo
+   committen (diese env-Dateien sind bewusst nicht versioniert, siehe
+   Compose-Datei-Kopf).
+
+**Danach automatisch:** `docker compose up -d` (Teil des bestehenden
+Deploy-Workflows) startet den `cloudflared`-Dienst mit; er hält die
+ausgehende Verbindung zu Cloudflare, worüber die jeweilige Domain die App
+erreicht. Kein Eingriff in Router/Firewall nötig.
+
 ## Deploy Trigger
 
 - Push auf `dev`   → Workflow deployt automatisch die dev-Umgebung.
