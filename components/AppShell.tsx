@@ -57,6 +57,13 @@ export function AppShell({
   initialWorkerEnabled: boolean;
 }) {
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
+  // Lifted here (not owned by TaskControl) so the state survives the
+  // remount TaskControl goes through when the tab bar switches away and
+  // back — see bug-009. Mirrors the existing `repos` pattern above.
+  const [taskTypes, setTaskTypes] = useState<TaskType[]>(initialTaskTypes);
+  const [workerEnabled, setWorkerEnabled] = useState<boolean>(
+    initialWorkerEnabled,
+  );
   const [tab, setTab] = useState<Tab>("aktiv");
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -667,8 +674,10 @@ export function AppShell({
         </>
       ) : tab === "settings" ? (
         <TaskControl
-          initialTaskTypes={initialTaskTypes}
-          initialWorkerEnabled={initialWorkerEnabled}
+          types={taskTypes}
+          setTypes={setTaskTypes}
+          workerEnabled={workerEnabled}
+          setWorkerEnabled={setWorkerEnabled}
         />
       ) : tab === "einstellungen" ? (
         <Settings />

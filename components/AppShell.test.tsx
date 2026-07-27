@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppShell } from "./AppShell";
 import { defaultTaskTypes } from "@/lib/task-types";
@@ -32,6 +32,10 @@ function logEntry(): RunLogEntry {
 let entries: RunLogEntry[];
 /** Abrufe der System-Kacheln — sie dürfen nur laufen, solange der Tab offen ist. */
 let systemCalls: number;
+/** Serverseitiger Stand von Task-Typen und Hauptschalter, wie ihn die echten
+ * API-Routen (PATCH /api/task-types/:id, PUT /api/worker-state) zurückgeben. */
+let serverTaskTypes: ReturnType<typeof defaultTaskTypes>;
+let serverWorkerEnabled: boolean;
 
 function jsonResponse(data: unknown) {
   return { ok: true, json: async () => data };
@@ -64,6 +68,8 @@ const dashboard = {
 beforeEach(() => {
   entries = [logEntry()];
   systemCalls = 0;
+  serverTaskTypes = defaultTaskTypes();
+  serverWorkerEnabled = true;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url.startsWith("/api/system-metrics")) {
       systemCalls += 1;
@@ -81,6 +87,21 @@ beforeEach(() => {
         page: 0,
         hasMore: false,
       });
+    }
+    // Mirrors PATCH /api/task-types/:id (lib/task-service#toggleTaskType).
+    const taskTypeMatch = /^\/api\/task-types\/([^/]+)$/.exec(url);
+    if (taskTypeMatch && init?.method === "PATCH") {
+      const id = taskTypeMatch[1];
+      serverTaskTypes = serverTaskTypes.map((t) =>
+        t.id === id ? { ...t, active: !t.active } : t,
+      );
+      return jsonResponse({ types: serverTaskTypes });
+    }
+    // Mirrors PUT /api/worker-state.
+    if (url.startsWith("/api/worker-state") && init?.method === "PUT") {
+      const body = JSON.parse(String(init.body));
+      serverWorkerEnabled = body.enabled;
+      return jsonResponse({ state: { enabled: serverWorkerEnabled } });
     }
     return jsonResponse({});
   });
@@ -228,5 +249,64 @@ describe("Kopfzeile (req-015)", () => {
 
     // …and it sits right next to the wordmark.
     expect(logo.parentElement?.textContent).toContain("appbaua");
+  });
+});
+
+// bug-009: TaskControl used to own its state via useState(initialTaskTypes),
+// initialised once from a prop that goes stale after the first render. The
+// Tasks tab unmounts TaskControl when you leave it and remounts it when you
+// come back, so that useState re-ran with the stale prop and threw away any
+// change made in between — even though the change was already persisted
+// server-side. The fix lifts the state into AppShell, which never unmounts.
+describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
+  it("AC: ein Task-Typ bleibt deaktiviert, nachdem man den Tab wechselt und zurückkommt", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    const toggle = await screen.findByRole("switch", {
+      name: "Code-Review aktiv/inaktiv",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await user.click(toggle);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("switch", { name: "Code-Review aktiv/inaktiv" }),
+      ).toHaveAttribute("aria-checked", "false"),
+    );
+
+    // Weg vom Tab (TaskControl hängt aus) und zurück (TaskControl mountet neu).
+    await user.click(screen.getByRole("button", { name: "Aktivität" }));
+    await user.click(screen.getByRole("button", { name: "Tasks" }));
+
+    expect(
+      await screen.findByRole("switch", { name: "Code-Review aktiv/inaktiv" }),
+    ).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("AC: der Hauptschalter bleibt aus, nachdem man den Tab wechselt und zurückkommt", async () => {
+    const user = userEvent.setup();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    const worker = await screen.findByRole("switch", {
+      name: "Worker an/aus",
+    });
+    expect(worker).toHaveAttribute("aria-checked", "true");
+
+    await user.click(worker);
+    await waitFor(() =>
+      expect(
+        screen.getByRole("switch", { name: "Worker an/aus" }),
+      ).toHaveAttribute("aria-checked", "false"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Repos" }));
+    await user.click(screen.getByRole("button", { name: "Tasks" }));
+
+    expect(
+      await screen.findByRole("switch", { name: "Worker an/aus" }),
+    ).toHaveAttribute("aria-checked", "false");
   });
 });
