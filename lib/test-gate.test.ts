@@ -145,7 +145,7 @@ describe("runTestGate (req-019)", () => {
 
   it("bug-010: the install step forces a dev install so devDependencies (vitest) land", async () => {
     // The container runs NODE_ENV=production; a production install would skip
-    // vitest. The install — not the test — must override the env to dev.
+    // vitest.
     const runImpl = runner(() => ok());
     await runTestGate("/work/repo", STACK, {
       runImpl,
@@ -154,13 +154,25 @@ describe("runTestGate (req-019)", () => {
     const installCall = runImpl.mock.calls.find(
       (c) => c[0] === "npm" && c[1][0] === "install",
     );
+    expect(installCall?.[2]?.env?.NODE_ENV).toBe("development");
+    expect(installCall?.[2]?.env?.NPM_CONFIG_PRODUCTION).toBe("false");
+  });
+
+  it("bug-015: the suite itself also runs as development, not production", async () => {
+    // Under NODE_ENV=production, libraries load their production builds and
+    // drop the hooks test tools need: React's has no `act()`, so every React
+    // Testing Library render throws and the gate calls a green suite red.
+    // Originally only the install overrode the env — the test run inherited
+    // the container's production setting, which is what this pins down.
+    const runImpl = runner(() => ok());
+    await runTestGate("/work/repo", STACK, {
+      runImpl,
+      removeDir: vi.fn(async () => {}),
+    });
     const testCall = runImpl.mock.calls.find(
       (c) => c[0] === "npm" && c[1][0] === "test",
     );
-    expect(installCall?.[2]?.env?.NODE_ENV).toBe("development");
-    expect(installCall?.[2]?.env?.NPM_CONFIG_PRODUCTION).toBe("false");
-    // The test command runs in the normal environment, no forced override.
-    expect(testCall?.[2]?.env).toBeUndefined();
+    expect(testCall?.[2]?.env?.NODE_ENV).toBe("development");
   });
 
   it("AC: it counts the state of a fresh checkout — install runs into an empty folder", async () => {

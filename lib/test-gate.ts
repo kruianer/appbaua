@@ -36,16 +36,30 @@ export const STACK_FILE = "delivery/stack.md";
 export const DEPENDENCY_DIR = "node_modules";
 
 /**
- * Environment for the install step so it pulls devDependencies even though the
- * worker container sets NODE_ENV=production (bug-010): the test runner lives in
- * devDependencies, and a production install would leave it out. All three keys
- * say the same thing to npm across versions; harmless for non-npm installers.
+ * Environment for install AND test so both see a development environment, even
+ * though the worker container sets NODE_ENV=production.
+ *
+ * Install needs it because the test runner lives in devDependencies and a
+ * production install would leave it out (bug-010). The test run needs it for a
+ * second, independent reason (bug-015): libraries ship separate production
+ * builds selected by NODE_ENV, and those builds drop the hooks test tools rely
+ * on — React's production build has no `act()`, so every React Testing Library
+ * render throws "act(...) is not supported in production builds of React" and
+ * the whole suite goes red in the container while it is green everywhere else.
+ *
+ * A test suite is a development activity; running it under NODE_ENV=production
+ * tests a different build than the one the tests were written against. All
+ * three keys say the same thing to npm across versions; harmless for non-npm
+ * tooling, which simply ignores the two NPM_CONFIG_* keys.
  */
-export const DEV_INSTALL_ENV: Record<string, string> = {
+export const DEV_TEST_ENV: Record<string, string> = {
   NODE_ENV: "development",
   NPM_CONFIG_PRODUCTION: "false",
   NPM_CONFIG_INCLUDE: "dev",
 };
+
+/** @deprecated Kept as the old name of {@link DEV_TEST_ENV} (bug-010 → bug-015). */
+export const DEV_INSTALL_ENV = DEV_TEST_ENV;
 
 /** How long install and test may each take before they count as failed. */
 export const TEST_TIMEOUT_MS = 30 * 60_000;
@@ -242,13 +256,16 @@ export async function runTestGate(
     // The worker container runs with NODE_ENV=production, which `run` inherits
     // into every child. A production install skips devDependencies — and the
     // test runner (vitest etc.) lives there, so the suite would fail with "not
-    // found" (bug-010). Force a dev install for this one step so the test tools
-    // are present; the test command below still runs in the normal environment.
-    const installFailed = await exec(runImpl, install, dir, timeoutMs, DEV_INSTALL_ENV);
+    // found" (bug-010).
+    const installFailed = await exec(runImpl, install, dir, timeoutMs, DEV_TEST_ENV);
     if (installFailed) return installFailed;
   }
 
-  const testFailed = await exec(runImpl, test, dir, timeoutMs);
+  // Same environment for the suite itself (bug-015): under NODE_ENV=production
+  // libraries load their production builds, which drop the test hooks — React's
+  // has no `act()`, so every component render throws and the gate reports red
+  // for a suite that is green outside the container.
+  const testFailed = await exec(runImpl, test, dir, timeoutMs, DEV_TEST_ENV);
   if (testFailed) return testFailed;
   return { status: "green", command: test, reason: "" };
 }
