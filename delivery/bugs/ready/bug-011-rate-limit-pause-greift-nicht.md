@@ -36,21 +36,31 @@ Grund, kein Fehler-Eintrag.
 2. Verlauf ansehen: der Lauf ist als Fehler protokolliert und die .md
    liegt in `failed/` statt in `ready/`.
 
-# Hinweis zur Ursache (Verdacht, bitte reproduce-first verifizieren)
+# Ursache (aus dem Verlauf belegt)
 
-Die Erkennung sitzt in `lib/rate-limit.ts` (`isRateLimit`) und wird in
-`lib/execute-step.ts` auf `outcome.summary` des Claude-Laufs angewendet.
-Zwei plausible Lücken:
+Der exakte Wortlaut aus dem prod-Verlauf (mehrfach, 26.07. 22:01–22:16
+UTC, über mehrere Repos hinweg):
 
-1. **Der Text passt nicht auf die Muster.** `isRateLimit` prüft u.a. auf
-   `rate limit`, `usage limit`, `429`, `quota exceeded`, `overloaded`.
-   Formuliert die CLI die Meldung anders (oder steckt das Limit im
-   stderr-/Event-Stream statt in `summary`), greift die Erkennung nicht.
-2. **Der Limit-Fall erreicht die Prüfung gar nicht.** Läuft der Prozess
-   z.B. in den 60-Minuten-Timeout (`code === 124`), wird vorher
-   `"Claude-Lauf: Timeout (60 min)"` zurückgegeben — der Timeout-Zweig
-   greift VOR der Rate-Limit-Prüfung, und ein Lauf, der wegen Drosselung
-   hängt, sieht genau so aus.
+```
+Claude-Lauf: Claude-Lauf fehlgeschlagen: You've hit your session limit ·
+resets 10:50pm (UTC) — req-001-wechselplatte.md nach failed/ verschoben
+```
 
-Der Fix sollte mit einem Test beginnen, der die tatsächliche
-Fehlermeldung aus dem Verlauf reproduziert.
+Damit ist die Lücke eindeutig: `isRateLimit` in `lib/rate-limit.ts` prüft
+auf `rate limit`, `usage limit`, `429`, `quota exceeded`/`quota reached`
+und `overloaded`. Die CLI schreibt aber **"session limit"** — keines der
+Muster passt, also wird der Lauf als gewöhnlicher Fehler behandelt und die
+.md nach `failed/` verschoben.
+
+Zwei Dinge gehören zum Fix:
+
+1. **Erkennung erweitern:** "session limit" (und sinnvollerweise weitere
+   Varianten wie "limit reached"/"limit exceeded") als Rate-Limit
+   erkennen.
+2. **Reset-Zeitpunkt parsen:** Die Meldung nennt ihn im Format
+   `resets 10:50pm (UTC)` — also 12-Stunden-Uhrzeit mit Zeitzone, nicht
+   ISO-8601 und kein Unix-Timestamp. `resetAtFrom` erkennt derzeit nur
+   die letzten beiden Formate und würde hier auf die 1-Stunden-Pause
+   zurückfallen, obwohl die Meldung den genauen Zeitpunkt liefert.
+
+Ein Repro-Test sollte genau diesen Meldungstext verwenden.
