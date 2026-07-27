@@ -53,3 +53,26 @@ describe("docker-compose.yml — Mounts in den Containern", () => {
     expect(sockets).toEqual([]);
   });
 });
+
+describe("docker-compose.yml — Cloudflare Tunnel (req-024)", () => {
+  it("AC: der Tunnel-Dienst ist konfiguriert und haengt am app-Dienst", () => {
+    expect(COMPOSE).toContain("cloudflared:");
+    expect(COMPOSE).toContain("cloudflare/cloudflared");
+  });
+
+  it("AC: der Tunnel-Token kommt aus der env-Datei, steht nie im Klartext im Repo", () => {
+    expect(COMPOSE).toContain("${CLOUDFLARE_TUNNEL_TOKEN}");
+    // A real token is a long opaque string; this file only ever names the var.
+    expect(COMPOSE).not.toMatch(/CLOUDFLARE_TUNNEL_TOKEN\s*[:=]\s*[A-Za-z0-9._-]{20,}/);
+  });
+
+  it("AC: kein zusaetzlicher Port fuer den Tunnel-Dienst wird am Host geoeffnet", () => {
+    const lines = COMPOSE.split("\n");
+    const start = lines.findIndex((l) => l.trim() === "cloudflared:");
+    const next = lines.findIndex(
+      (l, i) => i > start && /^  \S/.test(l), // next top-level service/key
+    );
+    const block = lines.slice(start, next === -1 ? undefined : next).join("\n");
+    expect(block).not.toContain("ports:");
+  });
+});
