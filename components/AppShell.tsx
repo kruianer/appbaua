@@ -73,6 +73,10 @@ export function AppShell({
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
+  // req-030: which repo's second row (Modell-Auswahl + "Auf appbaua
+  // umstellen") is expanded — only one at a time, mirrors TaskControl's
+  // openId (req-002).
+  const [openRepoId, setOpenRepoId] = useState<string | null>(null);
   const [ghRepos, setGhRepos] = useState<GithubRepo[]>([]);
   const [ghLoading, setGhLoading] = useState(false);
   // req-012: which repo is currently being converted, and the last result per
@@ -216,6 +220,7 @@ export function AppShell({
       if (e.button !== 0 && e.pointerType === "mouse") return;
       e.preventDefault();
       setDragId(id);
+      setOpenRepoId(null); // collapse while reordering (req-030)
 
       const onMove = (ev: PointerEvent) => {
         if (ev.cancelable) ev.preventDefault();
@@ -487,7 +492,24 @@ export function AppShell({
                         >
                           {i + 1}
                         </div>
-                        <div style={{ minWidth: 0, flex: 1 }}>
+                        <button
+                          onClick={() =>
+                            setOpenRepoId((cur) =>
+                              cur === r.id ? null : r.id,
+                            )
+                          }
+                          aria-expanded={openRepoId === r.id}
+                          style={{
+                            minWidth: 0,
+                            flex: 1,
+                            textAlign: "left",
+                            background: "transparent",
+                            border: "none",
+                            color: "var(--color-text)",
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
                           <div
                             style={{
                               fontWeight: 600,
@@ -511,7 +533,7 @@ export function AppShell({
                           >
                             {r.url}
                           </div>
-                        </div>
+                        </button>
                         <button
                           role="switch"
                           aria-checked={r.active}
@@ -553,78 +575,82 @@ export function AppShell({
                         >
                           <Icon name="trash" size={18} />
                         </button>
-                        {/* req-012: bring this repo up to the appbaua standard.
-                            Own line, so the entry above stays readable. */}
-                        <div
-                          style={{
-                            flexBasis: "100%",
-                            minWidth: 0,
-                            display: "flex",
-                            alignItems: "center",
-                            flexWrap: "wrap",
-                            gap: "var(--space-2)",
-                          }}
-                        >
-                          <button
-                            className="btn btn-secondary"
-                            aria-label={`${r.name} auf appbaua umstellen`}
-                            onClick={() => convert(r.id)}
-                            disabled={converting !== null}
+                        {/* req-012/req-028, aufklappbar seit req-030: bring
+                            this repo up to the appbaua standard and pick its
+                            model. Own line, so the entry above stays
+                            readable; hidden until the entry is expanded. */}
+                        {openRepoId === r.id && (
+                          <div
                             style={{
-                              flex: "none",
-                              fontSize: 12,
-                              padding: "6px 10px",
+                              flexBasis: "100%",
+                              minWidth: 0,
+                              display: "flex",
+                              alignItems: "center",
+                              flexWrap: "wrap",
+                              gap: "var(--space-2)",
                             }}
                           >
-                            <Icon name="sync" size={15} />
-                            {busy ? "Wird umgestellt …" : "Auf appbaua umstellen"}
-                          </button>
-                          {/* req-028: which Claude model this repo's runs use.
-                              Persists until changed; a running step finishes
-                              with its own model. */}
-                          <select
-                            aria-label={`${r.name}: Modell`}
-                            value={r.model}
-                            onChange={(e) =>
-                              setModel(r.id, e.target.value as RepoModel)
-                            }
-                            style={{
-                              flex: "none",
-                              fontSize: 12,
-                              padding: "5px 8px",
-                              borderRadius: "var(--radius-sm, 6px)",
-                              background: "var(--color-surface)",
-                              color: "var(--color-text)",
-                              border:
-                                "1px solid color-mix(in srgb, var(--color-text) 20%, transparent)",
-                            }}
-                          >
-                            {REPO_MODELS.map((m) => (
-                              <option key={m} value={m}>
-                                {REPO_MODEL_LABELS[m]}
-                              </option>
-                            ))}
-                          </select>
-                          {result && (
-                            <span
-                              role="status"
+                            <button
+                              className="btn btn-secondary"
+                              aria-label={`${r.name} auf appbaua umstellen`}
+                              onClick={() => convert(r.id)}
+                              disabled={converting !== null}
                               style={{
-                                // Beside the button while it fits, on its own
-                                // line as soon as it does not.
-                                flex: "1 1 160px",
-                                minWidth: 0,
+                                flex: "none",
                                 fontSize: 12,
-                                lineHeight: 1.35,
-                                wordBreak: "break-word",
-                                color: result.ok
-                                  ? muted(70)
-                                  : "var(--color-accent-300)",
+                                padding: "6px 10px",
                               }}
                             >
-                              {result.text}
-                            </span>
-                          )}
-                        </div>
+                              <Icon name="sync" size={15} />
+                              {busy ? "Wird umgestellt …" : "Auf appbaua umstellen"}
+                            </button>
+                            {/* req-028: which Claude model this repo's runs
+                                use. Persists until changed; a running step
+                                finishes with its own model. */}
+                            <select
+                              aria-label={`${r.name}: Modell`}
+                              value={r.model}
+                              onChange={(e) =>
+                                setModel(r.id, e.target.value as RepoModel)
+                              }
+                              style={{
+                                flex: "none",
+                                fontSize: 12,
+                                padding: "5px 8px",
+                                borderRadius: "var(--radius-sm, 6px)",
+                                background: "var(--color-surface)",
+                                color: "var(--color-text)",
+                                border:
+                                  "1px solid color-mix(in srgb, var(--color-text) 20%, transparent)",
+                              }}
+                            >
+                              {REPO_MODELS.map((m) => (
+                                <option key={m} value={m}>
+                                  {REPO_MODEL_LABELS[m]}
+                                </option>
+                              ))}
+                            </select>
+                            {result && (
+                              <span
+                                role="status"
+                                style={{
+                                  // Beside the button while it fits, on its own
+                                  // line as soon as it does not.
+                                  flex: "1 1 160px",
+                                  minWidth: 0,
+                                  fontSize: 12,
+                                  lineHeight: 1.35,
+                                  wordBreak: "break-word",
+                                  color: result.ok
+                                    ? muted(70)
+                                    : "var(--color-accent-300)",
+                                }}
+                              >
+                                {result.text}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                     );
                   })}

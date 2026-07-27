@@ -1,7 +1,13 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { AppShell } from "./AppShell";
 import { defaultTaskTypes } from "@/lib/task-types";
@@ -14,6 +20,7 @@ import type { RunLogEntry } from "@/lib/run-log";
 
 const repos: Repo[] = [
   { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" },
+  { id: "r2", name: "beta", url: "github.com/kruianer/beta", active: true, model: "sonnet" },
 ];
 
 function logEntry(): RunLogEntry {
@@ -36,6 +43,10 @@ let systemCalls: number;
  * API-Routen (PATCH /api/task-types/:id, PUT /api/worker-state) zurückgeben. */
 let serverTaskTypes: ReturnType<typeof defaultTaskTypes>;
 let serverWorkerEnabled: boolean;
+/** Serverseitiger Stand der Repos, wie ihn die echten API-Routen
+ * (PATCH /api/repos/:id, PATCH /api/repos/:id/model, POST /api/repos/:id/appbaua)
+ * zurückgeben. */
+let serverRepos: Repo[];
 
 function jsonResponse(data: unknown) {
   return { ok: true, json: async () => data };
@@ -70,7 +81,31 @@ beforeEach(() => {
   systemCalls = 0;
   serverTaskTypes = defaultTaskTypes();
   serverWorkerEnabled = true;
+  serverRepos = repos.map((r) => ({ ...r }));
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    // Mirrors PATCH /api/repos/:id (lib/repo-service#toggleRepo).
+    const repoToggleMatch = /^\/api\/repos\/([^/]+)$/.exec(url);
+    if (repoToggleMatch && init?.method === "PATCH") {
+      const id = repoToggleMatch[1];
+      serverRepos = serverRepos.map((r) =>
+        r.id === id ? { ...r, active: !r.active } : r,
+      );
+      return jsonResponse({ repos: serverRepos });
+    }
+    // Mirrors PATCH /api/repos/:id/model (req-028).
+    const repoModelMatch = /^\/api\/repos\/([^/]+)\/model$/.exec(url);
+    if (repoModelMatch && init?.method === "PATCH") {
+      const id = repoModelMatch[1];
+      const body = JSON.parse(String(init.body));
+      serverRepos = serverRepos.map((r) =>
+        r.id === id ? { ...r, model: body.model } : r,
+      );
+      return jsonResponse({ repos: serverRepos });
+    }
+    // Mirrors POST /api/repos/:id/appbaua (req-012).
+    if (/^\/api\/repos\/[^/]+\/appbaua$/.test(url) && init?.method === "POST") {
+      return jsonResponse({ message: "Umstellung abgeschlossen." });
+    }
     if (url.startsWith("/api/system-metrics")) {
       systemCalls += 1;
       return jsonResponse(systemMetrics);
@@ -308,5 +343,131 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
     expect(
       await screen.findByRole("switch", { name: "Worker an/aus" }),
     ).toHaveAttribute("aria-checked", "false");
+  });
+});
+
+// req-030: the repo row's second line (Modell-Auswahl + "Auf appbaua
+// umstellen") used to sit permanently under every entry. It now behaves like
+// the Task-Typen (req-002): collapsed by default, expands on a click on the
+// name/URL area, only one repo open at a time, and reordering closes it.
+describe("Repo-Zeile — aufklappbar (req-030)", () => {
+  function nameToggle(container: HTMLElement, id: string) {
+    return container.querySelector<HTMLButtonElement>(
+      `[data-repo-row][data-id="${id}"] button`,
+    )!;
+  }
+
+  function convertButton() {
+    return screen.queryByRole("button", {
+      name: "appbaua auf appbaua umstellen",
+    });
+  }
+
+  function modelSelect() {
+    return screen.queryByLabelText("appbaua: Modell");
+  }
+
+  async function openRepos(user: ReturnType<typeof userEvent.setup>) {
+    renderShell();
+    await user.click(screen.getByRole("button", { name: "Repos" }));
+    await screen.findByText("github.com/kruianer/appbaua");
+  }
+
+  it("AC: eingeklappt zeigt der Eintrag weder Modell-Auswahl noch Umstellen-Button", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+
+    expect(convertButton()).not.toBeInTheDocument();
+    expect(modelSelect()).not.toBeInTheDocument();
+  });
+
+  it("AC: ein Klick auf den Namen klappt die zweite Zeile auf", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+
+    await user.click(nameToggle(document.body, "r1"));
+
+    expect(convertButton()).toBeInTheDocument();
+    expect(modelSelect()).toBeInTheDocument();
+  });
+
+  it("AC: ein erneuter Klick auf den Namen klappt die zweite Zeile wieder zu", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+
+    const toggle = nameToggle(document.body, "r1");
+    await user.click(toggle);
+    expect(convertButton()).toBeInTheDocument();
+
+    await user.click(toggle);
+    expect(convertButton()).not.toBeInTheDocument();
+    expect(modelSelect()).not.toBeInTheDocument();
+  });
+
+  it("AC: das Öffnen eines anderen Repos klappt das vorige zu", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+
+    await user.click(nameToggle(document.body, "r1"));
+    expect(convertButton()).toBeInTheDocument();
+
+    await user.click(nameToggle(document.body, "r2"));
+
+    expect(convertButton()).not.toBeInTheDocument();
+    expect(modelSelect()).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "beta auf appbaua umstellen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC: Umsortieren (Drag-Start) klappt einen offenen Bereich zu", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+
+    await user.click(nameToggle(document.body, "r1"));
+    expect(convertButton()).toBeInTheDocument();
+
+    const grips = screen.getAllByLabelText("Ziehen zum Umsortieren");
+    fireEvent.pointerDown(grips[1], { button: 0, pointerType: "mouse" });
+    fireEvent.pointerUp(document);
+
+    expect(convertButton()).not.toBeInTheDocument();
+    expect(modelSelect()).not.toBeInTheDocument();
+  });
+
+  it("AC: der Aktiv-Schalter ändert nur den Zustand, der Bereich bleibt offen", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+
+    await user.click(nameToggle(document.body, "r1"));
+    expect(convertButton()).toBeInTheDocument();
+
+    const activeSwitch = screen.getByRole("switch", {
+      name: "appbaua aktiv/inaktiv",
+    });
+    expect(activeSwitch).toHaveAttribute("aria-checked", "true");
+
+    await user.click(activeSwitch);
+
+    await waitFor(() =>
+      expect(activeSwitch).toHaveAttribute("aria-checked", "false"),
+    );
+    expect(convertButton()).toBeInTheDocument();
+    expect(modelSelect()).toBeInTheDocument();
+  });
+
+  it("AC: nach ausgelöster Umstellung bleibt der Bereich mit der Ergebnismeldung offen", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+
+    await user.click(nameToggle(document.body, "r1"));
+    const convert = convertButton()!;
+    await user.click(convert);
+
+    expect(
+      await screen.findByText("Umstellung abgeschlossen."),
+    ).toBeInTheDocument();
+    expect(convertButton()).toBeInTheDocument();
+    expect(modelSelect()).toBeInTheDocument();
   });
 });

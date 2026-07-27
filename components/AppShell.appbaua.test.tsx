@@ -73,6 +73,11 @@ beforeEach(() => {
   });
 });
 
+const REPO_ID: Record<string, string> = {
+  "leer-repo": "r1",
+  "zweites-repo": "r2",
+};
+
 /** Render and switch to the Repo-Verwaltung, where the button lives. */
 async function openRepos(user: ReturnType<typeof userEvent.setup>) {
   render(
@@ -89,12 +94,26 @@ async function openRepos(user: ReturnType<typeof userEvent.setup>) {
 const rolloutButton = (name: string) =>
   screen.getByRole("button", { name: `${name} auf appbaua umstellen` });
 
+// req-030: the rollout button sits in the repo row's second line, which is
+// collapsed by default and only shown after a click on the name/URL area
+// (same toggle pattern as the Task-Typen, see AppShell.test.tsx).
+const openRow = async (user: ReturnType<typeof userEvent.setup>, name: string) => {
+  const id = REPO_ID[name];
+  const toggle = document.querySelector<HTMLButtonElement>(
+    `[data-repo-row][data-id="${id}"] button`,
+  )!;
+  await user.click(toggle);
+};
+
 describe("Repo-Verwaltung — Auf appbaua umstellen (req-012)", () => {
   it("AC: jeder Repo-Eintrag hat den Button", async () => {
     const user = userEvent.setup();
     await openRepos(user);
 
+    await openRow(user, "leer-repo");
     expect(rolloutButton("leer-repo")).toBeInTheDocument();
+
+    await openRow(user, "zweites-repo");
     expect(rolloutButton("zweites-repo")).toBeInTheDocument();
   });
 
@@ -102,6 +121,7 @@ describe("Repo-Verwaltung — Auf appbaua umstellen (req-012)", () => {
     const user = userEvent.setup();
     holdRollout();
     await openRepos(user);
+    await openRow(user, "leer-repo");
 
     await user.click(rolloutButton("leer-repo"));
     expect(await screen.findByText("Wird umgestellt …")).toBeInTheDocument();
@@ -115,6 +135,7 @@ describe("Repo-Verwaltung — Auf appbaua umstellen (req-012)", () => {
   it("AC: die Meldung nennt die Anzahlen und den Ziel-Branch", async () => {
     const user = userEvent.setup();
     await openRepos(user);
+    await openRow(user, "leer-repo");
 
     await user.click(rolloutButton("leer-repo"));
 
@@ -133,6 +154,7 @@ describe("Repo-Verwaltung — Auf appbaua umstellen (req-012)", () => {
     };
     const user = userEvent.setup();
     await openRepos(user);
+    await openRow(user, "leer-repo");
 
     await user.click(rolloutButton("leer-repo"));
 
@@ -153,6 +175,7 @@ describe("Repo-Verwaltung — Auf appbaua umstellen (req-012)", () => {
     });
     const user = userEvent.setup();
     await openRepos(user);
+    await openRow(user, "leer-repo");
 
     await user.click(rolloutButton("leer-repo"));
 
@@ -166,22 +189,30 @@ describe("Repo-Verwaltung — Auf appbaua umstellen (req-012)", () => {
     const user = userEvent.setup();
     holdRollout();
     await openRepos(user);
+    await openRow(user, "leer-repo");
 
     await user.click(rolloutButton("leer-repo"));
     await screen.findByText("Wird umgestellt …");
 
+    // req-030: das zweite Repo öffnen klappt das erste zu (nur eins zur
+    // Zeit) — die laufende Umstellung läuft im Hintergrund weiter.
+    await openRow(user, "zweites-repo");
     expect(rolloutButton("zweites-repo")).toBeDisabled();
     await user.click(rolloutButton("zweites-repo"));
     expect(calls).toEqual(["/api/repos/r1/appbaua"]);
 
+    await openRow(user, "leer-repo");
     release();
     await screen.findByText(SUCCESS_MESSAGE);
+
+    await openRow(user, "zweites-repo");
     expect(rolloutButton("zweites-repo")).toBeEnabled();
   });
 
   it("ein erneuter Lauf ersetzt die alte Meldung, statt sie zu doppeln", async () => {
     const user = userEvent.setup();
     await openRepos(user);
+    await openRow(user, "leer-repo");
 
     await user.click(rolloutButton("leer-repo"));
     await screen.findByText(SUCCESS_MESSAGE);
