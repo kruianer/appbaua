@@ -3,6 +3,7 @@ import { createMemoryAuthStore, setAuthStore, getAuthStore } from "./auth-store"
 import {
   issueBackupCodes,
   redeemBackupCode,
+  backupCodeStatus,
 } from "./auth-recovery";
 import { BACKUP_CODE_COUNT } from "./auth-types";
 
@@ -63,5 +64,35 @@ describe("redeemBackupCode (req-023)", () => {
     const messy = ` ${codes[0].toLowerCase()} `;
     const result = await redeemBackupCode(messy, () => NOW);
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("backupCodeStatus (req-031)", () => {
+  it("AC: reports all codes unused right after issuing", async () => {
+    await issueBackupCodes("u1", () => NOW);
+    const status = await backupCodeStatus("u1");
+    expect(status).toEqual({ total: BACKUP_CODE_COUNT, remaining: BACKUP_CODE_COUNT });
+  });
+
+  it("AC: reports fewer remaining as codes are redeemed", async () => {
+    const codes = await issueBackupCodes("u1", () => NOW);
+    await redeemBackupCode(codes[0], () => NOW);
+    await redeemBackupCode(codes[1], () => NOW);
+    await redeemBackupCode(codes[2], () => NOW);
+    const status = await backupCodeStatus("u1");
+    expect(status).toEqual({ total: BACKUP_CODE_COUNT, remaining: BACKUP_CODE_COUNT - 3 });
+  });
+
+  it("a user with no codes yet reports 0 of 0", async () => {
+    const status = await backupCodeStatus("nobody");
+    expect(status).toEqual({ total: 0, remaining: 0 });
+  });
+
+  it("re-issuing resets the count back to fully unused", async () => {
+    const first = await issueBackupCodes("u1", () => NOW);
+    await redeemBackupCode(first[0], () => NOW);
+    await issueBackupCodes("u1", () => NOW);
+    const status = await backupCodeStatus("u1");
+    expect(status).toEqual({ total: BACKUP_CODE_COUNT, remaining: BACKUP_CODE_COUNT });
   });
 });

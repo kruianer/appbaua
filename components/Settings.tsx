@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { SystemMonitor } from "./SystemMonitor";
+import { BackupCodesDisplay } from "./BackupCodesDisplay";
 
 // Einstellungsseite (req-007): der Zustand des Mini-PCs (req-009) und das
 // Löschen des ganzen Verlauf-Logs, dazu ein Platzhalter für das, was folgt.
@@ -18,6 +19,13 @@ function countLabel(total: number | null): string {
   return `Aktuell ${total} ${total === 1 ? "Eintrag" : "Einträge"} im Verlauf`;
 }
 
+type BackupCodeStatus = { total: number; remaining: number };
+
+function backupCodesLabel(status: BackupCodeStatus | null): string {
+  if (!status) return "Backup-Codes werden geladen…";
+  return `noch ${status.remaining} von ${status.total} Codes übrig`;
+}
+
 export function Settings() {
   const [total, setTotal] = useState<number | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -28,6 +36,41 @@ export function Settings() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
+  // req-031: regenerate backup codes for the signed-in user.
+  const [codeStatus, setCodeStatus] = useState<BackupCodeStatus | null>(null);
+  const [regenConfirmOpen, setRegenConfirmOpen] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
+  const [newCodes, setNewCodes] = useState<string[] | null>(null);
+
+  const loadCodeStatus = useCallback(async () => {
+    try {
+      const res = await fetch("/api/auth/backup-codes", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setCodeStatus({ total: Number(data.total ?? 0), remaining: Number(data.remaining ?? 0) });
+    } catch {
+      /* keep the last known status */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCodeStatus();
+  }, [loadCodeStatus]);
+
+  const regenerateCodes = useCallback(async () => {
+    if (regenerating) return;
+    setRegenerating(true);
+    try {
+      const res = await fetch("/api/auth/backup-codes", { method: "POST" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setRegenConfirmOpen(false);
+      setNewCodes(data.backupCodes ?? []);
+      await loadCodeStatus();
+    } finally {
+      setRegenerating(false);
+    }
+  }, [regenerating, loadCodeStatus]);
 
   const loadCount = useCallback(async () => {
     try {
@@ -201,6 +244,23 @@ export function Settings() {
             )}
           </>
         )}
+
+        <p style={{ margin: 0, fontSize: 13, color: muted(70) }}>
+          Backup-Codes helfen dir zurück in dein Konto, falls du dein
+          Passkey-Gerät verlierst. Erzeugst du neue, gelten die bisherigen
+          Codes danach nicht mehr.
+        </p>
+        <div style={{ fontSize: 14, fontWeight: 600 }}>
+          {backupCodesLabel(codeStatus)}
+        </div>
+        <button
+          className="btn btn-secondary btn-block"
+          onClick={() => setRegenConfirmOpen(true)}
+          style={{ marginTop: 0 }}
+        >
+          <Icon name="sync" size={16} /> Neue Backup-Codes erzeugen
+        </button>
+
         <button
           className="btn btn-primary btn-block"
           onClick={logout}
@@ -267,6 +327,83 @@ export function Settings() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {regenConfirmOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            display: "grid",
+            placeItems: "center",
+            padding: "var(--space-4)",
+            background: "color-mix(in srgb, #000 55%, transparent)",
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Neue Backup-Codes erzeugen?"
+            style={{
+              width: "100%",
+              maxWidth: 320,
+              background: "var(--color-surface)",
+              borderRadius: "var(--radius-lg)",
+              padding: "var(--space-4)",
+              boxShadow: "var(--shadow-lg)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-3)",
+            }}
+          >
+            <h4 style={{ margin: 0 }}>Neue Backup-Codes erzeugen?</h4>
+            <p style={{ margin: 0, fontSize: 14, color: muted(75) }}>
+              Die bisherigen Backup-Codes funktionieren danach nicht mehr.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "var(--space-2)",
+                marginTop: "var(--space-2)",
+              }}
+            >
+              <button
+                className="btn btn-secondary"
+                onClick={() => setRegenConfirmOpen(false)}
+              >
+                Abbrechen
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={regenerateCodes}
+                disabled={regenerating}
+              >
+                <Icon name="sync" size={16} /> Erzeugen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {newCodes && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Neue Backup-Codes"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            display: "grid",
+            placeItems: "center",
+            padding: "var(--space-4)",
+            background: "color-mix(in srgb, #000 55%, transparent)",
+          }}
+        >
+          <BackupCodesDisplay codes={newCodes} onDismiss={() => setNewCodes(null)} />
         </div>
       )}
     </div>

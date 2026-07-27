@@ -42,6 +42,21 @@ export async function issueBackupCodes(
   return codes;
 }
 
+export type BackupCodeStatus = { total: number; remaining: number };
+
+/**
+ * How many of a user's current backup codes are still unused (req-031: the
+ * settings screen shows this without ever revealing the codes themselves
+ * again — only `issueBackupCodes` returns plaintext).
+ */
+export async function backupCodeStatus(userId: string): Promise<BackupCodeStatus> {
+  const codes = await getAuthStore().listBackupCodesForUser(userId);
+  return {
+    total: codes.length,
+    remaining: codes.filter((c) => c.codeHash !== null).length,
+  };
+}
+
 export type RecoveryResult =
   | { ok: true; userId: string; registration: RegistrationStart }
   | { ok: false; error: "invalid-code" };

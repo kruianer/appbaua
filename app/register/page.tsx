@@ -3,6 +3,7 @@
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { startRegistration } from "@simplewebauthn/browser";
+import { BackupCodesDisplay } from "@/components/BackupCodesDisplay";
 
 // req-023: covers two entry points into the SAME ceremony —
 // - AC1: the operator bootstrap, when no user exists yet at all (no token).
@@ -68,38 +69,13 @@ function RegisterForm() {
 
   if (step === "codes") {
     return (
-      <div className="card elev-md" style={{ maxWidth: 420, width: "100%", gap: "var(--space-4)" }}>
-        <div style={{ fontWeight: 700, fontSize: 18 }}>Backup-Codes sichern</div>
-        <div style={{ fontSize: 13, opacity: 0.75 }}>
-          Diese Codes werden nur EINMAL angezeigt. Bewahre sie sicher auf — jeder
-          ist einmal verwendbar, falls du dein Passkey-Gerät verlierst.
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr 1fr",
-            gap: 6,
-            fontFamily: "var(--font-mono, ui-monospace, monospace)",
-            fontSize: 13,
-            background: "color-mix(in srgb, var(--color-text) 6%, transparent)",
-            borderRadius: "var(--radius-md)",
-            padding: "var(--space-3)",
-          }}
-        >
-          {backupCodes.map((c) => (
-            <div key={c}>{c}</div>
-          ))}
-        </div>
-        <button
-          className="btn btn-primary btn-block"
-          onClick={() => {
-            router.push("/");
-            router.refresh();
-          }}
-        >
-          Gesichert — weiter
-        </button>
-      </div>
+      <BackupCodesDisplay
+        codes={backupCodes}
+        onDismiss={() => {
+          router.push("/");
+          router.refresh();
+        }}
+      />
     );
   }
 
