@@ -450,10 +450,36 @@ export type PushOptions = WorkspaceDeps & {
 };
 
 /**
+ * Was this push refused because the remote moved on, rather than for a real
+ * reason (no permission, protected branch, missing scope)? Only the first case
+ * is worth retrying — git says so in the words below (bug-017).
+ */
+export function isStaleBranchPush(stderr: string): boolean {
+  return /\bfetch first\b|\bnon-fast-forward\b|tip of your current branch is behind/i.test(
+    stderr,
+  );
+}
+
+/** What the Verlauf says when the retry succeeded, appended to the push detail. */
+export const REBASED_DETAIL = "nach Rebase auf den neuen Remote-Stand";
+
+/**
  * Stage everything, commit, push to origin/<branch> (`dev` unless told
  * otherwise). Returns false if nothing to commit. The token is needed for the
  * push itself: the remote URL no longer carries it, so the credential has to
  * come along per call (bug-003).
+ *
+ * A step takes minutes to an hour, and the worker starts it by resetting hard
+ * onto the remote. Anything pushed to that branch in the meantime — by the
+ * operator, or by a run in another repo that touches the same one — makes the
+ * push land on a stale base and git refuses it with "fetch first". Losing a
+ * finished step to that is pure waste, so the push is retried ONCE on top of
+ * the fresh remote state (bug-017).
+ *
+ * Rebase, not merge: the worker's commit is the only local one, so replaying it
+ * onto the new tip keeps the history linear and produces no merge commit nobody
+ * asked for. A rebase that hits a conflict is aborted and reported — two
+ * authors changed the same lines, and picking a winner is not the worker's call.
  */
 export async function commitAndPush(
   dir: string,
@@ -463,6 +489,7 @@ export async function commitAndPush(
 ): Promise<{ pushed: boolean; detail: string }> {
   const git = opts.runImpl ?? run;
   const branch = opts.branch ?? DEV_BRANCH;
+  const auth = authEnv(token);
   await git("git", ["add", "-A"], { cwd: dir });
   const status = await git("git", ["status", "--porcelain"], { cwd: dir });
   if (!status.stdout.trim()) {
@@ -472,14 +499,36 @@ export async function commitAndPush(
   if (!commit.ok) {
     return { pushed: false, detail: `commit failed: ${redact(commit.stderr, [token])}` };
   }
-  const push = await git("git", ["push", "origin", branch], {
-    cwd: dir,
-    env: authEnv(token),
-  });
-  if (!push.ok) {
+
+  const push = await git("git", ["push", "origin", branch], { cwd: dir, env: auth });
+  if (push.ok) return { pushed: true, detail: `auf ${branch} gepusht` };
+
+  // Anything other than "the remote moved on" is not ours to retry.
+  if (!isStaleBranchPush(push.stderr)) {
     return { pushed: false, detail: `push failed: ${redact(push.stderr, [token])}` };
   }
-  return { pushed: true, detail: `auf ${branch} gepusht` };
+
+  const fetched = await git("git", ["fetch", "origin", branch], { cwd: dir, env: auth });
+  if (!fetched.ok) {
+    return { pushed: false, detail: `push failed: ${redact(push.stderr, [token])}` };
+  }
+
+  const rebase = await git("git", ["rebase", `origin/${branch}`], { cwd: dir });
+  if (!rebase.ok) {
+    // Conflicting edits to the same lines. Leave the working copy usable rather
+    // than mid-rebase, and report the ORIGINAL rejection — that is what happened.
+    await git("git", ["rebase", "--abort"], { cwd: dir });
+    return {
+      pushed: false,
+      detail: `push failed: ${redact(push.stderr, [token])}`,
+    };
+  }
+
+  const retry = await git("git", ["push", "origin", branch], { cwd: dir, env: auth });
+  if (!retry.ok) {
+    return { pushed: false, detail: `push failed: ${redact(retry.stderr, [token])}` };
+  }
+  return { pushed: true, detail: `auf ${branch} gepusht (${REBASED_DETAIL})` };
 }
 
 /**

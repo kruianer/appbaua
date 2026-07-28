@@ -4,7 +4,9 @@ import path from "node:path";
 import {
   authEnv,
   basicAuthHeader,
+  REBASED_DETAIL,
   commitAndPush,
+  isStaleBranchPush,
   prepareRepo,
   prepareRepoOnConvention,
   prepareRepoOnDevOrDefault,
@@ -196,6 +198,124 @@ describe("git-Fehlermeldungen ohne Token (bug-003)", () => {
     expect(res.pushed).toBe(false);
     expect(res.detail).toContain("commit failed");
     expect(res.detail).not.toContain(PAT);
+  });
+});
+
+// A step runs for minutes to an hour after resetting hard onto the remote.
+// Whatever gets pushed to that branch meanwhile — the operator working in the
+// same repo, another run touching it — leaves the worker's commit on a stale
+// base, and git refuses it. Throwing away finished work over that is waste.
+describe("Push auf veraltetem Stand: einmal rebasen statt aufgeben (bug-017)", () => {
+  /** git's rejection when the remote has commits the push does not build on. */
+  const STALE = [
+    " ! [rejected]        main -> main (fetch first)",
+    "error: failed to push some refs",
+    "hint: Updates were rejected because the remote contains work that you do",
+    "hint: not have locally.",
+  ].join("\n");
+
+  /** Fails the first push with `stderr`, lets a later one through. */
+  function pushFailsOnce(stderr: string) {
+    let pushes = 0;
+    return fakeGit((args) => {
+      const dirty = dirtyStatus(args);
+      if (dirty) return dirty;
+      if (args[0] !== "push") return undefined;
+      pushes += 1;
+      return pushes === 1 ? { ok: false, code: 1, stderr } : undefined;
+    });
+  }
+
+  it("recognises only a stale branch, not a real refusal", () => {
+    expect(isStaleBranchPush(STALE)).toBe(true);
+    expect(isStaleBranchPush("non-fast-forward")).toBe(true);
+    // A missing scope or a protected branch must NOT be retried — rebasing
+    // changes nothing about either, and the second push would fail identically.
+    expect(
+      isStaleBranchPush(
+        "refusing to allow a Personal Access Token to create or update workflow",
+      ),
+    ).toBe(false);
+    expect(isStaleBranchPush("protected branch hook declined")).toBe(false);
+    expect(isStaleBranchPush("Permission to repo denied")).toBe(false);
+  });
+
+  it("AC: fetches, rebases onto the new tip and pushes again", async () => {
+    const { runImpl, calls } = pushFailsOnce(STALE);
+    const res = await commitAndPush(repoDir(FRESH), "worker: x", PAT, {
+      runImpl,
+      branch: "main",
+    });
+
+    expect(res.pushed).toBe(true);
+    expect(res.detail).toContain(REBASED_DETAIL);
+    expect(sub(calls, "fetch")?.args).toEqual(["fetch", "origin", "main"]);
+    expect(sub(calls, "rebase")?.args).toEqual(["rebase", "origin/main"]);
+    expect(calls.filter((c) => c.args[0] === "push")).toHaveLength(2);
+  });
+
+  it("retries exactly once — a second rejection is reported, not retried again", async () => {
+    // Guards against a loop: were the retry itself retried, a branch somebody
+    // keeps pushing to would spin here instead of ending the step.
+    const { runImpl, calls } = fakeGit(
+      (args) =>
+        dirtyStatus(args) ??
+        (args[0] === "push" ? { ok: false, code: 1, stderr: STALE } : undefined),
+    );
+    const res = await commitAndPush(repoDir(FRESH), "worker: x", PAT, { runImpl });
+
+    expect(res.pushed).toBe(false);
+    expect(calls.filter((c) => c.args[0] === "push")).toHaveLength(2);
+  });
+
+  it("a conflicting rebase is aborted, so no working copy is left mid-rebase", async () => {
+    // Both sides changed the same lines; picking a winner is not the worker's
+    // call. What matters is that the next step finds a usable checkout.
+    const { runImpl, calls } = fakeGit(
+      (args) =>
+        dirtyStatus(args) ??
+        (args[0] === "push"
+          ? { ok: false, code: 1, stderr: STALE }
+          : args[0] === "rebase"
+            ? { ok: false, code: 1, stderr: "CONFLICT (content): delivery/x.md" }
+            : undefined),
+    );
+    const res = await commitAndPush(repoDir(FRESH), "worker: x", PAT, { runImpl });
+
+    expect(res.pushed).toBe(false);
+    expect(res.detail).toContain("push failed");
+    expect(calls.some((c) => c.args[0] === "rebase" && c.args[1] === "--abort")).toBe(
+      true,
+    );
+    // Only the first push happened: after a failed rebase there is nothing new
+    // to push, so trying again would just repeat the same rejection.
+    expect(calls.filter((c) => c.args[0] === "push")).toHaveLength(1);
+  });
+
+  it("a refusal that is not about staleness is NOT retried", async () => {
+    const { runImpl, calls } = fakeGit(
+      (args) =>
+        dirtyStatus(args) ??
+        (args[0] === "push"
+          ? { ok: false, code: 1, stderr: "protected branch hook declined" }
+          : undefined),
+    );
+    const res = await commitAndPush(repoDir(FRESH), "worker: x", PAT, { runImpl });
+
+    expect(res.pushed).toBe(false);
+    expect(calls.filter((c) => c.args[0] === "push")).toHaveLength(1);
+    expect(calls.some((c) => c.args[0] === "rebase")).toBe(false);
+  });
+
+  it("the retry carries the credential too, and never in an argument", async () => {
+    const { runImpl, calls } = pushFailsOnce(STALE);
+    await commitAndPush(repoDir(FRESH), "worker: x", PAT, { runImpl });
+
+    const pushes = calls.filter((c) => c.args[0] === "push");
+    for (const p of pushes) expect(p.opts.env?.GIT_CONFIG_VALUE_0).toBeTruthy();
+    for (const call of calls) {
+      for (const arg of call.args) expect(arg).not.toContain(PAT);
+    }
   });
 });
 
