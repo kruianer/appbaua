@@ -116,6 +116,21 @@ p {
   background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
+/* — links — */
+/* bug-013: plain <a> tags (the auth pages' "Ersteinrichtung"/"Backup-Code"/
+   "Anmelden" links) carried no color of their own, so the browser applied its
+   default palette — blue unvisited, purple visited — unreadable on the dark
+   background and inconsistent between the two states. One rule here fixes
+   every current and future page that uses a plain <a>, without repeating it
+   per page. :visited is pinned to the SAME color so a link's look never
+   depends on browsing history. */
+a {
+  color: var(--color-text);
+}
+a:visited {
+  color: var(--color-text);
+}
+
 /* — buttons — */
 .btn {
   display: inline-flex;

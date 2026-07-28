@@ -2,7 +2,9 @@
 
 import {
   type CSSProperties,
+  type Dispatch,
   type PointerEvent as ReactPointerEvent,
+  type SetStateAction,
   useCallback,
   useRef,
   useState,
@@ -32,14 +34,16 @@ const DAY_SHORT: Record<Weekday, string> = {
 };
 
 export function TaskControl({
-  initialTaskTypes,
-  initialWorkerEnabled,
+  types,
+  setTypes,
+  workerEnabled,
+  setWorkerEnabled,
 }: {
-  initialTaskTypes: TaskType[];
-  initialWorkerEnabled: boolean;
+  types: TaskType[];
+  setTypes: Dispatch<SetStateAction<TaskType[]>>;
+  workerEnabled: boolean;
+  setWorkerEnabled: Dispatch<SetStateAction<boolean>>;
 }) {
-  const [types, setTypes] = useState<TaskType[]>(initialTaskTypes);
-  const [workerEnabled, setWorkerEnabled] = useState(initialWorkerEnabled);
   const [dragId, setDragId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [dayErrors, setDayErrors] = useState<Record<string, string>>({});

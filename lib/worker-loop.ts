@@ -71,7 +71,12 @@ export type LoopDeps = {
   setRunningStep: (repo: string, taskType: string, startedAt: string) => Promise<void>;
   clearRunningStep: () => Promise<void>;
   setPauseUntil: (iso: string | null, reason?: string | null) => Promise<void>;
-  /** Rebuild and store "Nächste Aktivitäten" after this pass (req-022). */
+  /**
+   * Rebuild and store "Nächste Aktivitäten" (req-022). Called both at the
+   * START of a pass — so the preview is never stale while a step runs, which
+   * can take up to an hour (bug-012) — and again at the end, since the pass's
+   * own work changes what's next.
+   */
   updatePreview: () => Promise<void>;
 };
 
@@ -106,6 +111,14 @@ export async function runOnce(
 ): Promise<PassResult> {
   const state = await getWorkerState();
   if (!state.enabled) return { succeeded: 0 }; // switch off: do nothing, log nothing
+
+  // bug-012: refresh "Nächste Aktivitäten" right away, before any step runs —
+  // a single step can take up to an hour, and without this the preview stayed
+  // on the PREVIOUS pass's stand for that whole time. The end-of-pass refresh
+  // further down still runs too: the work just done changes what's next.
+  await deps.updatePreview().catch(() => {
+    /* best-effort: a stale preview must never break the pass itself */
+  });
 
   const repos = await listRepos();
   const taskTypes = await listTaskTypes();

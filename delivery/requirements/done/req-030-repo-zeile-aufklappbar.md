@@ -43,24 +43,24 @@ bedienbar und lösen kein Auf- oder Zuklappen aus.
 
 # Acceptance Criteria
 
-- [ ] Given die Repo-Liste enthält das Repo "appbaua", when ich die Liste
+- [x] Given die Repo-Liste enthält das Repo "appbaua", when ich die Liste
   öffne, then sehe ich weder die Modell-Auswahl noch den Button "Auf
   appbaua umstellen" für diesen Eintrag.
-- [ ] Given der Eintrag "appbaua" ist eingeklappt, when ich auf seinen
+- [x] Given der Eintrag "appbaua" ist eingeklappt, when ich auf seinen
   Namen klicke, then erscheinen die Modell-Auswahl und der Button "Auf
   appbaua umstellen".
-- [ ] Given der Eintrag "appbaua" ist aufgeklappt, when ich erneut auf
+- [x] Given der Eintrag "appbaua" ist aufgeklappt, when ich erneut auf
   seinen Namen klicke, then sind Modell-Auswahl und Button wieder
   ausgeblendet.
-- [ ] Given der Eintrag "appbaua" ist aufgeklappt, when ich auf den Namen
+- [x] Given der Eintrag "appbaua" ist aufgeklappt, when ich auf den Namen
   eines anderen Repos klicke, then ist nur noch dieses andere Repo
   aufgeklappt und "appbaua" wieder zu.
-- [ ] Given ein aufgeklapptes Repo, when ich die Reihenfolge per Drag &
+- [x] Given ein aufgeklapptes Repo, when ich die Reihenfolge per Drag &
   Drop ändere, then ist der aufgeklappte Bereich geschlossen.
-- [ ] Given ein aufgeklapptes Repo, when ich seinen Aktiv-Schalter
+- [x] Given ein aufgeklapptes Repo, when ich seinen Aktiv-Schalter
   betätige, then ändert sich nur der Aktiv-Zustand und der Bereich bleibt
   aufgeklappt (der Schalter klappt NICHT zu).
-- [ ] Given ich habe "Auf appbaua umstellen" ausgelöst und die
+- [x] Given ich habe "Auf appbaua umstellen" ausgelöst und die
   Ergebnismeldung erscheint, when ich nichts weiter tue, then bleibt der
   Bereich offen und die Meldung lesbar.
 

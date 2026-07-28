@@ -93,13 +93,29 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
     expect(row.message).toContain("zuletzt geprüft");
   });
 
-  it("req-022: updatePreview runs after a normal pass", async () => {
-    let calls = 0;
-    await runOnce({ n: 0 }, deps({ updatePreview: async () => void calls++ }));
-    expect(calls).toBe(1);
+  it("bug-012: updatePreview runs at the START of a pass, before any step executes", async () => {
+    const order: string[] = [];
+    const runStep = async (): Promise<StepDecision> => {
+      order.push("step");
+      return { kind: "success", message: "ok" };
+    };
+    await runOnce(
+      { n: 0 },
+      deps({ runStep, updatePreview: async () => void order.push("preview") }),
+    );
+    // The whole point of bug-012: the preview is rebuilt BEFORE steps run, so
+    // it never sits stale for the duration of a (possibly hour-long) step.
+    expect(order[0]).toBe("preview");
+    expect(order.filter((e) => e === "step").length).toBeGreaterThan(0);
   });
 
-  it("req-022: updatePreview is skipped during a rate-limit pause", async () => {
+  it("req-022: updatePreview also runs after a normal pass (start AND end)", async () => {
+    let calls = 0;
+    await runOnce({ n: 0 }, deps({ updatePreview: async () => void calls++ }));
+    expect(calls).toBe(2); // once before the pass (bug-012), once after (req-022)
+  });
+
+  it("req-022: the end-of-pass updatePreview is skipped during a rate-limit pause — the start-of-pass one still ran", async () => {
     let calls = 0;
     const runStep = async (): Promise<StepDecision> => ({
       kind: "rate-limited",
@@ -110,7 +126,7 @@ describe("worker loop (req-004 orchestration, req-006 real steps)", () => {
       { n: 0 },
       deps({ runStep, updatePreview: async () => void calls++ }),
     );
-    expect(calls).toBe(0);
+    expect(calls).toBe(1); // the pre-pass refresh (bug-012), not the end-of-pass one
   });
 
   it("AC: order is repo outer, task-type inner; success entries (bug-008)", async () => {
