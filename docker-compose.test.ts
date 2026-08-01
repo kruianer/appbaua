@@ -54,6 +54,23 @@ describe("docker-compose.yml — Mounts in den Containern", () => {
   });
 });
 
+describe("docker-compose.yml — PID 1 im Worker (bug-018)", () => {
+  /** Der Block eines Dienstes bis zum nächsten Dienst auf gleicher Ebene. */
+  function serviceBlock(name: string): string {
+    const lines = COMPOSE.split("\n");
+    const start = lines.findIndex((l) => l.trim() === `${name}:`);
+    const next = lines.findIndex((l, i) => i > start && /^  \S/.test(l));
+    return lines.slice(start, next === -1 ? undefined : next).join("\n");
+  }
+
+  it("AC: der worker-Dienst laeuft mit einem echten init als PID 1", () => {
+    // Ohne das ist PID 1 `npm run worker` — ein Node-Prozess, der geerbte
+    // Kinder nie mit wait() abholt. git-Enkelkinder von Claude Code bleiben
+    // dann als Zombies stehen, bis der Container nicht mehr forken kann.
+    expect(serviceBlock("worker")).toMatch(/^\s*init:\s*true\s*$/m);
+  });
+});
+
 describe("docker-compose.yml — Cloudflare Tunnel (req-024)", () => {
   it("AC: der Tunnel-Dienst ist konfiguriert und haengt am app-Dienst", () => {
     expect(COMPOSE).toContain("cloudflared:");
