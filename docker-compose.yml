@@ -88,6 +88,14 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     restart: unless-stopped
+    # A real init as PID 1 (bug-018). Without it PID 1 is `npm run worker`, a
+    # Node process that never reaps the children git/Claude Code leave behind:
+    # every finished git call stays in the process table as a zombie. After a
+    # few days that filled it with 14k entries and the container could not fork
+    # at all any more — every step died with "cannot fork() for
+    # git-remote-https: Resource temporarily unavailable". docker-init does the
+    # one thing Node does not: wait() on whatever it inherits.
+    init: true
     depends_on:
       db:
         condition: service_healthy
