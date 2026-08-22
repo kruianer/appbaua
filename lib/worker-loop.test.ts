@@ -295,6 +295,34 @@ describe("worker loop — Dauerfehler pausiert (bug-002)", () => {
     expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
   });
 
+  it("bug-019: an auth-expired step pauses with its own reason, not the empty pause", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const stop = new Error("stop");
+    const pauseMs = 6 * 60 * 60_000;
+    const resumeMs = WED_18.getTime() + pauseMs;
+    const pauseArgs: Array<{ iso: string | null; reason?: string | null }> = [];
+    const slept: number[] = [];
+    const d = deps({
+      runStep: async (): Promise<StepDecision> => ({
+        kind: "auth-expired",
+        message: "Anmeldung abgelaufen. Bitte im Worker-Container `claude login` ausführen.",
+        pauseUntil: resumeMs,
+      }),
+      setPauseUntil: async (iso, reason) => {
+        pauseArgs.push({ iso, reason });
+      },
+      sleep: async (ms: number) => {
+        slept.push(ms);
+        throw stop; // leave the endless loop after the first pause
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    expect(pauseArgs[0].iso).toBe(new Date(resumeMs).toISOString());
+    expect(pauseArgs[0].reason).toContain("Anmeldung");
+    expect(slept[0]).toBe(resumeMs - WED_18.getTime());
+    expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
+  });
+
   it("a pass that blows up entirely pauses too", async () => {
     setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1)));
     // runForever logs the failed pass; keep the test output readable.

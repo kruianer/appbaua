@@ -66,6 +66,11 @@ import {
 } from "./security-report";
 import { setCurrentMd, setCurrentOutput, setCurrentModel } from "./worker-status";
 import { isRateLimit, pauseUntilFrom } from "./rate-limit";
+import {
+  AUTH_EXPIRED_MESSAGE,
+  AUTH_EXPIRED_PAUSE_MS,
+  isAuthExpired,
+} from "./auth-expired";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
 // logs. "skip" means no log entry (nothing to do); "success"/"error" produce a
@@ -115,6 +120,12 @@ import { isRateLimit, pauseUntilFrom } from "./rate-limit";
 // green. A red suite gets one repair attempt in the same run; what stays red is
 // not finished, so its .md is parked under failed/ like any other failure.
 //
+// bug-019 gives an expired Claude login the same treatment req-029 gives a rate
+// limit: not a failure of the .md, so it is never parked to failed/, and the
+// loop pauses instead of retrying minutes apart — a login does not come back on
+// its own, so the pause is long and the Verlauf names what to do (`claude
+// login`) instead of the raw OAuth error text.
+//
 // req-020 takes two decisions away from this file. WHICH branch a step commits
 // on is no longer `dev` by definition — prepareRepoOnConvention reads it from
 // the target repo's own devops.md and hands it back, and every commit of this
@@ -135,7 +146,14 @@ export type StepDecision =
    * .md stays in ready/ (never parked to failed/), and the loop pauses until
    * `pauseUntil` (epoch ms) before trying the queue again.
    */
-  | { kind: "rate-limited"; message: string; pauseUntil: number; md?: string | null };
+  | { kind: "rate-limited"; message: string; pauseUntil: number; md?: string | null }
+  /**
+   * The Claude run failed because the worker's login expired (bug-019). NOT a
+   * failure either: same handling as "rate-limited", but the pause is long
+   * (AUTH_EXPIRED_PAUSE_MS) since only a human running `claude login` resolves
+   * it, and `message` is already the actionable Verlauf text.
+   */
+  | { kind: "auth-expired"; message: string; pauseUntil: number; md?: string | null };
 
 /** What the Verlauf leads with when a repo could not be made ready (req-020). */
 export const PREPARE_FAILED_MESSAGE = "Repo vorbereiten fehlgeschlagen";
@@ -383,6 +401,21 @@ export async function executeStep(
   const outcome = await claude(prompt);
 
   if (!outcome.ok) {
+    // An expired login is NOT a failure either (bug-019): every run after the
+    // first hits the exact same wall, so retrying achieves nothing until a
+    // human re-authenticates. Same mechanics as the rate-limit case below —
+    // discard, keep the .md in ready/, pause the loop — but with a long pause
+    // and an actionable message instead of the raw OAuth error text. Checked
+    // before the rate-limit patterns since the two failure texts do not overlap.
+    if (isAuthExpired(outcome.summary)) {
+      await d.discardChanges(dir).catch(() => {});
+      return {
+        kind: "auth-expired",
+        message: AUTH_EXPIRED_MESSAGE,
+        pauseUntil: d.now().getTime() + AUTH_EXPIRED_PAUSE_MS,
+        md: runMd(),
+      };
+    }
     // A rate/usage limit is NOT a failure (req-029): the requirement is fine,
     // the account is just throttled. Do NOT park to failed/ — discard the
     // half-done work so the next attempt starts clean (bug-002), leave the .md

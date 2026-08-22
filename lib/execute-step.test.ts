@@ -230,6 +230,42 @@ describe("executeStep (req-006)", () => {
     expect(d.message).toContain("Rate-Limit");
   });
 
+  it("bug-019: an expired-login claude failure -> auth-expired, .md stays in ready, no park", async () => {
+    const moveMd = vi.fn(async () => {});
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary:
+            "Claude-Lauf fehlgeschlagen: Failed to authenticate: OAuth session expired and could not be refreshed",
+          report: "",
+        })),
+        moveMd,
+        discardChanges,
+        now: () => new Date(Date.UTC(2026, 7, 22, 9, 25, 0)),
+      }),
+    );
+    expect(d.kind).toBe("auth-expired");
+    if (d.kind !== "auth-expired") throw new Error("expected auth-expired");
+    // The .md is NOT parked to failed/ — it stays in ready/ for a later retry.
+    expect(moveMd).not.toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(discardChanges).toHaveBeenCalled(); // half-done work dropped
+    // A clear, actionable Verlauf entry — not the raw OAuth error text.
+    expect(d.message).toContain("claude login");
+    expect(d.message).not.toContain("OAuth");
+    // A long pause, well ahead of the usual empty/rate-limit pauses.
+    expect(d.pauseUntil).toBeGreaterThan(Date.UTC(2026, 7, 22, 9, 25, 0) + 60 * 60_000);
+  });
+
   it("recurring type already ran today -> skip", async () => {
     const ranToday: RunLogEntry[] = [
       {
