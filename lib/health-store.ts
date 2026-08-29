@@ -6,23 +6,32 @@ import {
   DEFAULT_HEALTH_SETTINGS,
   normalizeSettings,
 } from "./health-settings";
+import { type AlertState, normalizeAlertState } from "./telegram-alerts";
 
 // Persistence for the Zustandsübersicht (req-032). Same seam pattern as the
 // other stores: file for zero-infra dev, Postgres when configured, memory for
-// tests. Two blobs, one store — the last results and the settings are read
-// together on every page load, so splitting them into two stores would only
-// double the plumbing.
+// tests. Three blobs, one store — the last results and the settings are read
+// together on every page load, so splitting them into separate stores would
+// only double the plumbing.
+//
+// The third blob is the Telegram alert state (req-033): which check has failed
+// how often in a row, and which failure has already been reported. It is kept
+// next to the results rather than in memory because a restart of the app must
+// not re-announce an outage that was reported hours ago.
 
 export interface HealthStore {
   getResults(): Promise<AppHealth[]>;
   setResults(rows: AppHealth[]): Promise<void>;
   getSettings(): Promise<HealthSettings>;
   setSettings(settings: HealthSettings): Promise<HealthSettings>;
+  getAlertState(): Promise<AlertState>;
+  setAlertState(state: AlertState): Promise<void>;
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
 const RESULTS_FILE = path.join(DATA_DIR, "health-results.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "health-settings.json");
+const ALERTS_FILE = path.join(DATA_DIR, "health-alerts.json");
 
 export function createFileHealthStore(): HealthStore {
   return {
@@ -56,15 +65,28 @@ export function createFileHealthStore(): HealthStore {
       );
       return settings;
     },
+    async getAlertState() {
+      try {
+        return normalizeAlertState(JSON.parse(await fs.readFile(ALERTS_FILE, "utf8")));
+      } catch {
+        return {};
+      }
+    },
+    async setAlertState(state) {
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await fs.writeFile(ALERTS_FILE, JSON.stringify(state, null, 2), "utf8");
+    },
   };
 }
 
 export function createMemoryHealthStore(initial?: {
   results?: AppHealth[];
   settings?: HealthSettings;
+  alerts?: AlertState;
 }): HealthStore {
   let results = [...(initial?.results ?? [])];
   let settings = normalizeSettings(initial?.settings);
+  let alerts = normalizeAlertState(initial?.alerts);
   return {
     async getResults() {
       return [...results];
@@ -78,6 +100,12 @@ export function createMemoryHealthStore(initial?: {
     async setSettings(next) {
       settings = next;
       return { ...settings, checks: { ...settings.checks } };
+    },
+    async getAlertState() {
+      return { ...alerts };
+    },
+    async setAlertState(next) {
+      alerts = { ...next };
     },
   };
 }

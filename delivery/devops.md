@@ -60,6 +60,37 @@ Deploy-Workflows) startet den `cloudflared`-Dienst mit; er hält die
 ausgehende Verbindung zu Cloudflare, worüber die jeweilige Domain die App
 erreicht. Kein Eingriff in Router/Firewall nötig.
 
+## Telegram-Meldungen und -Befehle (req-033)
+
+appbaua meldet einen Ausfall einer überwachten App per Telegram und nimmt
+über denselben Chat `/status` und `/neustart` entgegen. Ohne die beiden
+Variablen unten passiert davon nichts — die Überwachung selbst
+(req-032) läuft unverändert weiter.
+
+**Einmalige manuelle Konto-Schritte (macht der Nutzer, nicht der
+Worker):**
+
+1. In Telegram `@BotFather` anschreiben, `/newbot`, Namen vergeben. Er
+   gibt den Bot-Schlüssel aus.
+2. Dem neuen Bot einmal selbst schreiben (z.B. `/start`), damit ein Chat
+   existiert.
+3. `https://api.telegram.org/bot<SCHLÜSSEL>/getUpdates` aufrufen und die
+   `chat.id` aus der Antwort notieren.
+4. Beides als `TELEGRAM_BOT_TOKEN` und `TELEGRAM_CHAT_ID` in
+   `deploy/dev.env` bzw. `deploy/prod.env` eintragen — NICHT ins Repo
+   committen.
+
+**Je Umgebung ein eigener Bot.** Sonst kämen dev und prod im selben Chat
+an, und eine Meldung ließe nicht erkennen, welche Umgebung sie betrifft —
+bei `/neustart` wäre das der Unterschied zwischen einem Testsystem und
+einem laufenden prod-Container.
+
+**Was den Bot schützt.** Nichts außer der Chat-Kennung: ein Bot ist
+öffentlich ansprechbar, jeder der seinen Namen kennt kann ihm schreiben.
+appbaua antwortet ausschließlich auf Nachrichten aus dem hinterlegten
+Chat und verwirft alle anderen wortlos. Der Schlüssel gehört deshalb
+genauso behandelt wie der GitHub-Token.
+
 ## Notfall: ausgesperrt (Passkey UND Backup-Codes verloren)
 
 Der Passkey-Schutz (req-023) richtet sich gegen jemanden, der nur die URL

@@ -108,9 +108,11 @@ CREATE TABLE IF NOT EXISTS preview (
   rows JSONB NOT NULL DEFAULT '[]'::jsonb
 );
 
--- Zustandsübersicht der überwachten Apps (req-032). Two rows, both whole JSON
+-- Zustandsübersicht der überwachten Apps (req-032). Three rows, all whole JSON
 -- blobs: 'results' holds the last check results per app (rewritten wholesale
--- after every round), 'settings' the intervals and the per-Prüfart switches.
+-- after every round), 'settings' the intervals and the per-Prüfart switches,
+-- and 'alerts' what Telegram has already reported (req-033) — so a restart of
+-- the app does not re-announce an outage that was reported hours ago.
 CREATE TABLE IF NOT EXISTS health (
   id   TEXT PRIMARY KEY,
   data JSONB NOT NULL DEFAULT '{}'::jsonb

@@ -12,6 +12,7 @@ import { type CheckDeps, roundIsDue, runRound } from "./health-checks";
 import { type HealthSettings, normalizeSettings } from "./health-settings";
 import { getHealthStore } from "./health-store";
 import { fetchHealthMd } from "./health-md-source";
+import { notifyAfterRound } from "./telegram-service";
 
 // Anwendungsdienst der Zustandsübersicht (req-032). Die Routen bleiben dünn und
 // rufen hierher; die Tests fassen diese Funktionen direkt an.
@@ -83,6 +84,11 @@ export async function runDueChecks(deps?: Partial<CheckDeps>): Promise<boolean> 
     if (!roundIsDue(repos, previous, settings, full.now())) return false;
     const results = await runRound(repos, previous, settings, full);
     await store.setResults(results);
+    // Erst speichern, dann melden (req-033): die Zustandsseite zeigt einen
+    // Ausfall auch dann, wenn die Nachricht nicht durchkommt.
+    await notifyAfterRound(results, { now: full.now }).catch(() => {
+      /* eine gescheiterte Meldung darf die Überwachung nicht anhalten */
+    });
     return true;
   } finally {
     roundRunning = false;

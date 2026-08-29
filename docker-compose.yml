@@ -15,6 +15,9 @@
 #                   this environment's cloudflared tunnel token (req-024),
 #                   generated in the Cloudflare dashboard per tunnel — dev and
 #                   prod each get their OWN tunnel and token
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+#                   optional (req-033): bot key from @BotFather and the ONE chat
+#                   appbaua reports to and accepts commands from
 # DATABASE_URL is assembled from the POSTGRES_* vars below.
 
 services:
@@ -72,6 +75,14 @@ services:
       # Zustandsübersicht (req-032): der Weg zur Docker-Engine führt über den
       # health-agent, NICHT über einen Socket in diesem Container (siehe dort).
       HEALTH_AGENT_URL: http://health-agent:3100
+      # Telegram (req-033): Bot-Schlüssel und die EINE zugelassene Chat-Kennung.
+      # Beide optional — fehlen sie, meldet appbaua nichts und nimmt keine
+      # Befehle entgegen; die Überwachung selbst läuft unverändert weiter.
+      # Ein Bot ist öffentlich ansprechbar, der ganze Schutz liegt darin, dass
+      # nur diese Chat-Kennung akzeptiert wird. dev und prod sollten je einen
+      # EIGENEN Bot bekommen, sonst kämen beide Umgebungen im selben Chat an.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:
       # Read-only Blick auf das Host-/proc für die System-Kacheln (req-009) —
       # kein Docker-Socket. Dort stehen ALLE Prozesse des Rechners, also auch

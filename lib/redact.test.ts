@@ -11,16 +11,20 @@ const FINE_GRAINED =
 const BASIC = Buffer.from(`x-access-token:${PAT}`, "utf8").toString("base64");
 
 const savedToken = process.env.GITHUB_TOKEN;
+const savedBot = process.env.TELEGRAM_BOT_TOKEN;
 
 // Start every case from a known environment — the filter reads GITHUB_TOKEN,
 // and whatever the test host happens to have set must not decide the outcome.
 beforeEach(() => {
   delete process.env.GITHUB_TOKEN;
+  delete process.env.TELEGRAM_BOT_TOKEN;
 });
 
 afterEach(() => {
   if (savedToken === undefined) delete process.env.GITHUB_TOKEN;
   else process.env.GITHUB_TOKEN = savedToken;
+  if (savedBot === undefined) delete process.env.TELEGRAM_BOT_TOKEN;
+  else process.env.TELEGRAM_BOT_TOKEN = savedBot;
 });
 
 describe("redact (bug-003)", () => {
@@ -50,6 +54,14 @@ describe("redact (bug-003)", () => {
     expect(redact(`push failed: bad credentials (${opaque})`)).toBe(
       `push failed: bad credentials (${REDACTED})`,
     );
+  });
+
+  it("strips the Telegram bot key, which sits in every Bot-API URL (req-033)", () => {
+    const bot = "8123456789:AAH-nichts-davon-gehoert-in-den-Verlauf";
+    process.env.TELEGRAM_BOT_TOKEN = bot;
+    const out = redact(`fetch failed: https://api.telegram.org/bot${bot}/sendMessage`);
+    expect(out).not.toContain(bot);
+    expect(out).toContain("api.telegram.org");
   });
 
   it("recognises token shapes it was never given", () => {

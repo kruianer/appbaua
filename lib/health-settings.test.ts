@@ -19,6 +19,10 @@ describe("Vorgaben", () => {
       expect(DEFAULT_HEALTH_SETTINGS.checks[kind]).toBe(true);
     }
   });
+
+  it("die Telegram-Meldungen sind zunächst eingeschaltet (req-033)", () => {
+    expect(DEFAULT_HEALTH_SETTINGS.telegram).toBe(true);
+  });
 });
 
 describe("normalizeSettings", () => {
@@ -33,6 +37,17 @@ describe("normalizeSettings", () => {
     expect(s.checks.ai).toBe(false);
     expect(s.checks.web).toBe(false);
     expect(s.checks.container).toBe(true);
+  });
+
+  it("schaltet die Telegram-Meldungen ab, ohne eine Prüfart anzufassen (req-033)", () => {
+    const s = normalizeSettings({ telegram: false });
+    expect(s.telegram).toBe(false);
+    for (const kind of CHECK_KINDS) expect(s.checks[kind]).toBe(true);
+  });
+
+  it("ein vor req-033 gespeicherter Stand kennt das Feld nicht — das heißt nicht 'stumm'", () => {
+    expect(normalizeSettings({ intervalMinutes: 10 }).telegram).toBe(true);
+    expect(normalizeSettings({ telegram: "nein" }).telegram).toBe(true);
   });
 
   it("fängt 0 und negative Abstände ab — das wäre Dauerlast", () => {

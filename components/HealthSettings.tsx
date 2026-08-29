@@ -109,60 +109,102 @@ export function HealthSettings() {
         </div>
 
         {CHECK_KINDS.map((kind) => (
-          <div
+          <Switch
             key={kind}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "var(--space-2)",
-            }}
-          >
-            <span style={{ fontSize: 14 }}>
-              {CHECK_LABELS[kind]}
-              {kind === AI_KIND && (
-                <span style={{ fontSize: 12, color: muted(55) }}> · kostet Geld</span>
-              )}
-            </span>
-            <button
-              role="switch"
-              aria-checked={settings.checks[kind]}
-              aria-label={`Prüfart ${CHECK_LABELS[kind]}`}
-              onClick={() =>
-                void save({
-                  ...settings,
-                  checks: { ...settings.checks, [kind]: !settings.checks[kind] },
-                })
-              }
-              style={{
-                flex: "none",
-                width: 46,
-                height: 28,
-                borderRadius: 999,
-                border: "none",
-                padding: 3,
-                display: "flex",
-                cursor: "pointer",
-                justifyContent: settings.checks[kind] ? "flex-end" : "flex-start",
-                background: settings.checks[kind]
-                  ? "var(--color-accent)"
-                  : "color-mix(in srgb, var(--color-text) 22%, transparent)",
-                transition: "background .15s ease",
-              }}
-            >
-              <span
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 999,
-                  background: "var(--color-bg)",
-                  boxShadow: "0 1px 2px rgba(0,0,0,.4)",
-                }}
-              />
-            </button>
-          </div>
+            label={CHECK_LABELS[kind]}
+            note={kind === AI_KIND ? "kostet Geld" : null}
+            ariaLabel={`Prüfart ${CHECK_LABELS[kind]}`}
+            on={settings.checks[kind]}
+            onToggle={() =>
+              void save({
+                ...settings,
+                checks: { ...settings.checks, [kind]: !settings.checks[kind] },
+              })
+            }
+          />
         ))}
+
+        {/*
+          req-033: getrennt von den Prüfarten oben, und genau deshalb hier unten
+          hinter einer eigenen Zeile. Aus heißt "keine Nachricht" — geprüft und
+          auf der Zustandsseite angezeigt wird ein Ausfall trotzdem.
+        */}
+        <div
+          style={{
+            borderTop: "1px solid color-mix(in srgb, var(--color-text) 12%, transparent)",
+            paddingTop: "var(--space-3)",
+          }}
+        >
+          <Switch
+            label="Telegram-Meldungen"
+            note="Ausfall und Entwarnung"
+            ariaLabel="Telegram-Meldungen"
+            on={settings.telegram}
+            onToggle={() => void save({ ...settings, telegram: !settings.telegram })}
+          />
+        </div>
       </div>
     </>
+  );
+}
+
+function Switch({
+  label,
+  note,
+  ariaLabel,
+  on,
+  onToggle,
+}: {
+  label: string;
+  note: string | null;
+  ariaLabel: string;
+  on: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: "var(--space-2)",
+      }}
+    >
+      <span style={{ fontSize: 14 }}>
+        {label}
+        {note && <span style={{ fontSize: 12, color: muted(55) }}> · {note}</span>}
+      </span>
+      <button
+        role="switch"
+        aria-checked={on}
+        aria-label={ariaLabel}
+        onClick={onToggle}
+        style={{
+          flex: "none",
+          width: 46,
+          height: 28,
+          borderRadius: 999,
+          border: "none",
+          padding: 3,
+          display: "flex",
+          cursor: "pointer",
+          justifyContent: on ? "flex-end" : "flex-start",
+          background: on
+            ? "var(--color-accent)"
+            : "color-mix(in srgb, var(--color-text) 22%, transparent)",
+          transition: "background .15s ease",
+        }}
+      >
+        <span
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 999,
+            background: "var(--color-bg)",
+            boxShadow: "0 1px 2px rgba(0,0,0,.4)",
+          }}
+        />
+      </button>
+    </div>
   );
 }

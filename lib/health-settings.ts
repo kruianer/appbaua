@@ -13,11 +13,19 @@ export type HealthSettings = {
   aiIntervalHours: number;
   /** Jede Prüfart lässt sich ganz abschalten. */
   checks: Record<CheckKind, boolean>;
+  /**
+   * Meldet appbaua Ausfälle per Telegram (req-033)? Bewusst getrennt von den
+   * Schaltern oben: die Meldungen lassen sich abschalten, ohne die Überwachung
+   * selbst abzuschalten — die Zustandsseite zeigt einen Ausfall dann weiterhin,
+   * es kommt nur keine Nachricht.
+   */
+  telegram: boolean;
 };
 
 export const DEFAULT_HEALTH_SETTINGS: HealthSettings = {
   intervalMinutes: 5,
   aiIntervalHours: 24,
+  telegram: true,
   checks: {
     container: true,
     database: true,
@@ -61,6 +69,13 @@ export function normalizeSettings(raw: unknown): HealthSettings {
       MIN_AI_INTERVAL_HOURS,
       DEFAULT_HEALTH_SETTINGS.aiIntervalHours,
     ),
+    // Wie bei den Prüfarten: nur ein ausdrückliches `false` schaltet ab. Ein
+    // fehlendes Feld — etwa aus einem vor req-033 gespeicherten Stand — heißt
+    // "wie vorgesehen", nicht "stumm".
+    telegram:
+      typeof input.telegram === "boolean"
+        ? input.telegram
+        : DEFAULT_HEALTH_SETTINGS.telegram,
     checks,
   };
 }

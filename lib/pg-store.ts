@@ -28,6 +28,7 @@ import {
   DEFAULT_HEALTH_SETTINGS,
   normalizeSettings,
 } from "./health-settings";
+import { type AlertState, normalizeAlertState } from "./telegram-alerts";
 import type { AuthStore } from "./auth-store";
 import type {
   AuthUser,
@@ -461,6 +462,23 @@ export function createPgHealthStore(): HealthStore {
         [JSON.stringify(settings)],
       );
       return settings;
+    },
+    async getAlertState(): Promise<AlertState> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: { entries?: unknown } }>(
+        "SELECT data FROM health WHERE id = 'alerts'",
+      );
+      return normalizeAlertState(res.rows[0]?.data?.entries);
+    },
+    async setAlertState(state: AlertState): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('alerts', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        // In ein Objekt gewickelt, wie bei 'results': die Spalte ist jsonb und
+        // ein leerer Zustand wäre sonst ein nacktes {} ohne Aussagekraft.
+        [JSON.stringify({ entries: state })],
+      );
     },
   };
 }

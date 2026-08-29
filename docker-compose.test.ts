@@ -131,3 +131,21 @@ describe("docker-compose.yml — Cloudflare Tunnel (req-024)", () => {
     expect(block).not.toContain("ports:");
   });
 });
+
+describe("docker-compose.yml — Telegram (req-033)", () => {
+  it("Bot-Schluessel und Chat-Kennung kommen aus der env-Datei, nie aus dem Repo", () => {
+    const app = serviceBlock("app");
+    expect(app).toContain("TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}");
+    expect(app).toContain("TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}");
+    // Ein echter Schluessel ist "<zahlen>:<opaker string>"; hier steht nur der
+    // Name der Variablen.
+    expect(COMPOSE).not.toMatch(/TELEGRAM_BOT_TOKEN\s*[:=]\s*\d+:[A-Za-z0-9._-]{20,}/);
+  });
+
+  it("beide sind optional — ohne sie startet der Stack unveraendert", () => {
+    // Der `:-`-Nachsatz ist der Unterschied zwischen "nicht eingerichtet" und
+    // einem Compose, das ohne die Variablen gar nicht erst hochkommt.
+    expect(COMPOSE).toContain("${TELEGRAM_BOT_TOKEN:-}");
+    expect(COMPOSE).toContain("${TELEGRAM_CHAT_ID:-}");
+  });
+});
