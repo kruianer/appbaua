@@ -79,3 +79,7 @@ ergänzt.
 - **Zugang & Sicherheit** — Zugangsschutz und externe Erreichbarkeit der
   Worker-App: Anmeldung, Sitzungen, sicherer Zugang von außen. (req-023,
   req-024, req-031)
+- **App-Überwachung** — Zustand der auf demselben Rechner betriebenen
+  Apps: Prüfungen, Neustart auf Knopfdruck, Benachrichtigung bei Ausfall,
+  Analyse der Logs. Betrifft fremde Apps, nicht den Worker selbst.
+  (req-032, req-033, req-034, req-035)
