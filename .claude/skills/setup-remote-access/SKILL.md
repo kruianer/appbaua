@@ -81,6 +81,16 @@ E-Mail-Adresse des Betreibers, per Einmal-Code bestaetigt. Sitzungsdauer
 den Tunnel benutzen darf; SSH entscheidet, wer sich anmelden darf. Beides
 zusammen, nie eines statt des anderen.
 
+**Der Zugang haengt nicht am Standort.** Weder Tunnel noch Access kennen
+"heimisches WLAN" — der Betreiber erreicht die Maschine von ueberall
+gleich, ohne VPN und ohne etwas umzustellen. Genau das ist der Zweck:
+Faellt unterwegs etwas aus, ist Hilfe nicht davon abhaengig, dass jemand
+zuhause ist.
+
+Die Access-Regel gehoert deshalb an die IDENTITAET gebunden (E-Mail des
+Betreibers), nicht an eine IP oder ein Land. Eine IP-Einschraenkung waere
+genau die Fessel, die dieser Aufbau aufloesen soll.
+
 **Passwort-Anmeldung am SSH bleibt aus** (`PasswordAuthentication no`),
 `PermitRootLogin no`. Ein oeffentlich erreichbarer SSH-Dienst mit
 Passwortanmeldung wird binnen Stunden durchprobiert.
@@ -105,10 +115,17 @@ Auf dem Arbeitsrechner muss `cloudflared` installiert sein. Beim ersten
 Verbinden oeffnet sich der Browser fuer die Access-Pruefung; danach gilt
 sie 24 Stunden.
 
-Ein rein lokaler Eintrag (`HostName 192.168.x.x`) darf daneben bestehen
-bleiben — er ist schneller, funktioniert aber nur im selben Netz. Wenn
-beide existieren, benenne sie unterscheidbar (`<app>-beelink-lokal` und
-`<app>-beelink`).
+**Ein Eintrag genuegt, und er funktioniert ueberall.** Der
+`ProxyCommand`-Eintrag oben laeuft im heimischen WLAN genauso wie im
+Hotel oder im Zug — die Verbindung geht immer ueber den Tunnel, nie ueber
+eine Adresse im lokalen Netz. Der Betreiber muss also nichts umstellen,
+wenn er den Standort wechselt.
+
+Ein zusaetzlicher rein lokaler Eintrag (`HostName 192.168.x.x`) ist
+moeglich, aber kein Muss: Er spart im eigenen WLAN ein paar
+Millisekunden und funktioniert, wenn Cloudflare gerade stoert. Wenn beide
+existieren, benenne sie unterscheidbar (`<app>-beelink-lokal` und
+`<app>-beelink`) — und nimm den Tunnel-Eintrag als den normalen.
 
 **Der Assistent bekommt KEINEN eigenen Zugang.** Er nutzt die Access-
 Sitzung und den SSH-Schluessel des Betreibers, die in dessen
