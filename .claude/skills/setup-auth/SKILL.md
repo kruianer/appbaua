@@ -57,6 +57,31 @@ der PC braucht also seinen eigenen. Ein angemeldeter Nutzer muss deshalb
 jederzeit einen weiteren Passkey hinzufuegen koennen, und seine Geraete
 in einer Liste sehen (Name, letzte Verwendung, einzeln entfernbar).
 
+### Abmelden und Sitzungen beenden
+
+**Die Sitzung gilt 7 Tage und verlaengert sich bei Nutzung.** Wer die App
+regelmaessig benutzt, meldet sich nie wieder an; nach einer Woche Pause
+kommt einmal Face ID. Die Dauer ist bewusst kurz gehalten: Weil die
+Anmeldung eine Sekunde dauert, kauft eine laengere Sitzung kaum
+Bequemlichkeit — sie verlaengert nur das Fenster, in dem ein verlorenes
+Geraet offen bleibt.
+
+**Abmelden gibt es immer.** Ein Klick, und die App ist gesperrt. Das
+beendet die Sitzung dieses Geraets, nicht den Passkey — beim naechsten
+Mal kommt wieder Face ID und man ist drin.
+
+**Ein entfernter Passkey beendet auch seine Sitzungen.** Wer unter
+"Meine Geraete" das verlorene iPad entfernt, erwartet, dass es damit
+draussen ist. Wuerde nur der Passkey geloescht, koennte der Finder die
+laufende Sitzung bis zu ihrem Ablauf weiterbenutzen — der gefaehrlichste
+Moment waere genau der, in dem der Nutzer glaubt, gehandelt zu haben.
+
+**"Ueberall abmelden" gehoert dazu.** Ein Knopf, der alle Sitzungen des
+Nutzers auf allen Geraeten beendet, auch die gerade benutzte. Der Weg fuer
+den Fall, dass jemand nicht mehr weiss, wo er ueberall angemeldet ist.
+Die Passkeys bleiben dabei bestehen — es ist ein Abmelden, kein
+Aussperren.
+
 ### Wenn das Geraet weg ist
 
 **E-Mail-Link ist der Wiederherstellungsweg.** Nicht Notfallcodes: Codes,
@@ -217,7 +242,10 @@ verloren".
 Passkeys mit Name, Hinzugefuegt-am und Zuletzt-verwendet. Je Eintrag
 "Entfernen", darueber "Dieses Geraet hinzufuegen". Der letzte Passkey
 laesst sich nur entfernen, wenn eine hinterlegte E-Mail-Adresse
-existiert — sonst sperrt sich der Nutzer selbst aus.
+existiert — sonst sperrt sich der Nutzer selbst aus. Unten "Ueberall
+abmelden", mit dem Hinweis, dass danach auch dieses Geraet abgemeldet
+ist. "Abmelden" selbst gehoert an die gewohnte Stelle der App (Menue
+oder Kopfzeile), nicht hierher.
 
 **3. Nutzer** (nur Betreiber). Liste der Nutzer des Mandanten mit Name,
 E-Mail, Rolle, Beitritt und letzter Anmeldung. Aktionen: "Einladen"
@@ -254,7 +282,7 @@ nicht anpassen, nicht nachfragen:
 
 | Was | Wert |
 |---|---|
-| Sitzung (Passkey-Nutzer) | 30 Tage, verlaengert sich bei Nutzung |
+| Sitzung (Passkey-Nutzer) | 7 Tage, verlaengert sich bei Nutzung |
 | Sitzung (Gast) | endet mit dem Gastzugang, nie spaeter |
 | Gastzugang, Vorgabe | 7 Tage |
 | Gastzugang, Hoechstwert | 90 Tage |
@@ -513,7 +541,11 @@ Apps, damit ein Nutzer, der eine kennt, alle kennt.>
   "Zugang verloren". Solange kein Nutzer existiert, zusaetzlich
   "Ersteinrichtung starten" — danach nie wieder.
 - "Meine Geraete": eigene Passkeys mit Name, Hinzugefuegt-am,
-  Zuletzt-verwendet; hinzufuegen und entfernen.
+  Zuletzt-verwendet; hinzufuegen und entfernen. Ein entferntes Geraet
+  verliert auch seine laufende Sitzung. Dazu "Ueberall abmelden", das
+  alle Sitzungen beendet (Passkeys bleiben bestehen).
+- "Abmelden" an gewohnter Stelle der App; beendet nur die Sitzung dieses
+  Geraets, nicht den Passkey.
 - "Nutzer" (nur Betreiber): Nutzer des Mandanten, Einladen per E-Mail,
   offene Einladungen zuruecknehmen, Nutzer entfernen.
 - "Gastzugaenge" (nur Betreiber): erstellen (Zweck, Dauer, Umfang), Link
@@ -523,7 +555,7 @@ Apps, damit ein Nutzer, der eine kennt, alle kennt.>
   dem Server gilt trotzdem.
 
 **Feste Zeiten**
-- Sitzung 30 Tage (verlaengert sich bei Nutzung), Gast-Sitzung endet mit
+- Sitzung 7 Tage (verlaengert sich bei Nutzung), Gast-Sitzung endet mit
   dem Gastzugang.
 - Gastzugang: Vorgabe 7 Tage, hoechstens 90.
 - Wiederherstellungs-Link 15 Minuten, Einladung 7 Tage, Challenge 5
@@ -584,6 +616,16 @@ hier verwendeten Framework ansetzt.>
 - [ ] Given ich habe genau einen Passkey und keine hinterlegte
   E-Mail-Adresse, when ich diesen Passkey entfernen will, then wird das
   abgelehnt, damit ich mich nicht selbst aussperre.
+- [ ] Given ich bin angemeldet, when ich "Abmelden" waehle, then ist die
+  App gesperrt — und beim naechsten Oeffnen komme ich per Face ID wieder
+  hinein, ohne den Passkey neu einzurichten.
+- [ ] Given ich bin auf dem iPad und auf dem Laptop angemeldet, when ich
+  auf dem Laptop unter "Meine Geraete" das iPad entferne, then ist das
+  iPad sofort abgemeldet und zeigt beim naechsten Aufruf die
+  Anmeldeseite.
+- [ ] Given ich bin auf mehreren Geraeten angemeldet, when ich "Ueberall
+  abmelden" waehle, then sind alle Geraete abgemeldet — auch das, an dem
+  ich gerade sitze — und meine Passkeys funktionieren weiterhin.
 - [ ] Given ich habe mein Geraet verloren, when ich einen
   Wiederherstellungs-Link anfordere und oeffne, then kann ich einen
   neuen Passkey registrieren — und der Link ist danach verbraucht.
@@ -638,5 +680,11 @@ hier verwendeten Framework ansetzt.>
   gibt". Genau dann ist sie billig; spaeter ist sie teuer.
 - Notfallcodes zum einzigen Wiederherstellungsweg machen. Sie gehen
   verloren; der E-Mail-Link ist der Hauptweg.
+- Die Sitzung verlaengern, damit der Nutzer sich seltener anmelden muss.
+  Die Anmeldung dauert eine Sekunde — laenger offen zu bleiben kauft
+  keine Bequemlichkeit, sondern verlaengert nur das Fenster, in dem ein
+  verlorenes Geraet noch hineinkommt.
+- Einen Passkey entfernen, ohne dessen Sitzungen zu beenden. Wer ein
+  Geraet entfernt, will es draussen haben — nicht erst in einer Woche.
 - Eine bestehende Anmeldung stillschweigend ueberschreiben. Erst sagen,
   was da ist, dann klaeren.
