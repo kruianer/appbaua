@@ -23,6 +23,9 @@ export const ICONS = {
   // Tasks tab (req-007 moved the cog to the new Einstellungen tab).
   list: '<path d="M8 6h12"/><path d="M8 12h12"/><path d="M8 18h12"/><path d="M4 6h.01"/><path d="M4 12h.01"/><path d="M4 18h.01"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  // Zustandsseite (req-032): der Zustand der überwachten Apps.
+  heart:
+    '<path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7z"/>',
   // "Auf appbaua umstellen/aktualisieren" (req-012).
   sync: '<path d="M20 11a8 8 0 0 0-13.7-5.7L4 7.6"/><path d="M4 4.1v3.5h3.5"/><path d="M4 13a8 8 0 0 0 13.7 5.7L20 16.4"/><path d="M20 19.9v-3.5h-3.5"/>',
   // App logo (req-015): a gear with a check — the worker does the work, and it

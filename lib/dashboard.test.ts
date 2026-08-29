@@ -12,9 +12,9 @@ import type { RunLogEntry } from "./run-log";
 const now = new Date(2026, 6, 22, 14, 30, 0); // Wed 14:30
 
 const repos: Repo[] = [
-  { id: "r1", name: "appbaua", url: "u1", active: true, model: "sonnet" },
-  { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet" },
-  { id: "r3", name: "aus", url: "u3", active: false, model: "sonnet" },
+  { id: "r1", name: "appbaua", url: "u1", active: true, model: "sonnet", monitored: false },
+  { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet", monitored: false },
+  { id: "r3", name: "aus", url: "u3", active: false, model: "sonnet", monitored: false },
 ];
 
 describe("derivePhase", () => {

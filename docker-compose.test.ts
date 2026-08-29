@@ -29,6 +29,15 @@ function bindMounts(yaml: string): string[] {
 /** Host-Seite eines Mounts (`/proc:/host/proc:ro` -> `/proc`). */
 const hostSide = (mount: string): string => mount.split(":")[0];
 
+/** Der Block eines Dienstes bis zum nächsten Dienst auf gleicher Ebene. */
+function serviceBlock(name: string): string {
+  const lines = COMPOSE.split("\n");
+  const start = lines.findIndex((l) => l.trim() === `${name}:`);
+  expect(start).toBeGreaterThan(-1);
+  const next = lines.findIndex((l, i) => i > start && /^  \S/.test(l));
+  return lines.slice(start, next === -1 ? undefined : next).join("\n");
+}
+
 describe("docker-compose.yml — Mounts in den Containern", () => {
   it("AC: kein Container mountet das Host-Wurzelverzeichnis", () => {
     const roots = bindMounts(COMPOSE).filter((m) => hostSide(m) === "/");
@@ -47,22 +56,51 @@ describe("docker-compose.yml — Mounts in den Containern", () => {
   });
 
   it("kein Docker-Socket im App-Container", () => {
-    const sockets = bindMounts(COMPOSE).filter((m) =>
+    // req-032 braucht die Docker-Engine (Container-Prüfung und Neustart auf
+    // Klick) — aber nicht HIER. Sie gehört dem health-agent, einem eigenen
+    // Dienst ohne veröffentlichten Port; der internetzugewandte App-Container
+    // bleibt so klein, wie bug-005 ihn gemacht hat. Deshalb prüft dieser Test
+    // seit req-032 den app-Block statt der ganzen Datei.
+    const sockets = bindMounts(serviceBlock("app")).filter((m) =>
+      hostSide(m).endsWith("docker.sock"),
+    );
+    expect(sockets).toEqual([]);
+  });
+
+  it("auch der worker-Container bekommt den Socket nicht", () => {
+    // Der Worker führt aus, was Claude Code schreibt. Von allen Containern ist
+    // er der letzte, der auf dem Host praktisch root sein sollte.
+    const sockets = bindMounts(serviceBlock("worker")).filter((m) =>
       hostSide(m).endsWith("docker.sock"),
     );
     expect(sockets).toEqual([]);
   });
 });
 
-describe("docker-compose.yml — PID 1 im Worker (bug-018)", () => {
-  /** Der Block eines Dienstes bis zum nächsten Dienst auf gleicher Ebene. */
-  function serviceBlock(name: string): string {
-    const lines = COMPOSE.split("\n");
-    const start = lines.findIndex((l) => l.trim() === `${name}:`);
-    const next = lines.findIndex((l, i) => i > start && /^  \S/.test(l));
-    return lines.slice(start, next === -1 ? undefined : next).join("\n");
-  }
+describe("docker-compose.yml — Health-Agent (req-032)", () => {
+  it("AC: genau ein Dienst hält den Docker-Socket, und das ist der health-agent", () => {
+    const withSocket = bindMounts(serviceBlock("health-agent")).filter((m) =>
+      hostSide(m).endsWith("docker.sock"),
+    );
+    expect(withSocket).toHaveLength(1);
+    // Und sonst niemand in der ganzen Datei.
+    const all = bindMounts(COMPOSE).filter((m) =>
+      hostSide(m).endsWith("docker.sock"),
+    );
+    expect(all).toHaveLength(1);
+  });
 
+  it("AC: der Agent veröffentlicht keinen Port am Host", () => {
+    // Erreichbar nur über das Compose-Netz, also aus der App heraus.
+    expect(serviceBlock("health-agent")).not.toContain("ports:");
+  });
+
+  it("AC: die App spricht über den Agenten mit Docker, nicht selbst", () => {
+    expect(serviceBlock("app")).toContain("HEALTH_AGENT_URL: http://health-agent:3100");
+  });
+});
+
+describe("docker-compose.yml — PID 1 im Worker (bug-018)", () => {
   it("AC: der worker-Dienst laeuft mit einem echten init als PID 1", () => {
     // Ohne das ist PID 1 `npm run worker` — ein Node-Prozess, der geerbte
     // Kinder nie mit wait() abholt. git-Enkelkinder von Claude Code bleiben

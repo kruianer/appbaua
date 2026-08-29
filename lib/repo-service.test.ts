@@ -8,6 +8,7 @@ import {
   reorderRepos,
   setRepoModel,
   toggleRepo,
+  toggleRepoMonitored,
 } from "./repo-service";
 import type { ReachabilityResult } from "./reachability";
 import type { ConvertResult } from "./appbaua-standard";
@@ -106,6 +107,34 @@ describe("req-001 acceptance criteria", () => {
     const after = await toggleRepo(appbaua.id);
     expect(after[0].id).toBe(appbaua.id); // still position 1
     expect(after[0].active).toBe(false); // now inactive
+  });
+
+  it("req-032: a newly added repo is NOT watched — that is switched on deliberately", async () => {
+    const res = await addRepo(
+      { url: "github.com/kruianer/appbaua" },
+      { checkReachable: reachable },
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.repo.monitored).toBe(false);
+  });
+
+  it("req-032: 'überwachen' and 'aktiv' are independent switches", async () => {
+    await addRepo(
+      { url: "github.com/kruianer/livinggardentwin", name: "LivingGardenTwin" },
+      { checkReachable: reachable },
+    );
+    const [lgt] = await listRepos();
+
+    // Watched, but the worker is not to touch it.
+    await toggleRepoMonitored(lgt.id);
+    const afterMonitor = await toggleRepo(lgt.id);
+    expect(afterMonitor[0].monitored).toBe(true);
+    expect(afterMonitor[0].active).toBe(false);
+
+    // And back off again, without touching `active`.
+    const afterOff = await toggleRepoMonitored(lgt.id);
+    expect(afterOff[0].monitored).toBe(false);
+    expect(afterOff[0].active).toBe(false);
   });
 
   it("req-028: setting a repo's model persists it and leaves other repos alone", async () => {

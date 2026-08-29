@@ -1,0 +1,21 @@
+# Health-Agent (req-032): der einzige Prozess mit Zugriff auf die
+# Docker-Engine. Bewusst winzig — kein git, kein Claude Code, kein Browser: er
+# reicht vier eng gefasste Aufrufe an den Socket weiter und sonst nichts.
+
+FROM node:22-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+
+# tsx ist eine Laufzeit-Abhängigkeit; der Agent importiert lib/*.ts direkt.
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY lib ./lib
+COPY agent ./agent
+
+# Läuft als root: der gemountete Socket gehört auf dem Host root:docker, und
+# die GID dieser Gruppe unterscheidet sich je Rechner. Der Container hat sonst
+# nichts — kein Netzwerk nach außen, kein Port, kein Quellcode fremder Repos.
+EXPOSE 3100
+CMD ["npm", "run", "agent"]

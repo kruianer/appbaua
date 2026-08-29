@@ -16,6 +16,12 @@ CREATE INDEX IF NOT EXISTS repos_position_idx ON repos (position);
 -- written before req-028 — the store backfills those to the default (sonnet).
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS model TEXT;
 
+-- Added with req-032: the "überwachen" switch of the Zustandsübersicht. Its own
+-- column, independent of "active" — an app can be watched without the worker
+-- working on it, and worked on without being watched. Existing rows default to
+-- FALSE: watching reaches into a live system and is switched on deliberately.
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Task types (req-002). Predefined types, seeded on first use; the user only
 -- edits priority (position), active and the per-weekday schedule (JSONB:
 -- { mon: {enabled, start, end}, ... }). New types are added via code/seed.
@@ -100,6 +106,14 @@ ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_model TEXT;
 CREATE TABLE IF NOT EXISTS preview (
   id   TEXT PRIMARY KEY,
   rows JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
+-- Zustandsübersicht der überwachten Apps (req-032). Two rows, both whole JSON
+-- blobs: 'results' holds the last check results per app (rewritten wholesale
+-- after every round), 'settings' the intervals and the per-Prüfart switches.
+CREATE TABLE IF NOT EXISTS health (
+  id   TEXT PRIMARY KEY,
+  data JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 -- Passkey authentication (req-023). Person ≠ operator context: a user signs

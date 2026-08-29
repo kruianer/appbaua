@@ -11,6 +11,7 @@ const repo = (over: Partial<Repo> = {}): Repo => ({
   url: "github.com/kruianer/appbaua",
   active: true,
   model: "sonnet",
+  monitored: false,
   ...over,
 });
 

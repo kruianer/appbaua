@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "worker": "tsx worker/index.ts"
+    "worker": "tsx worker/index.ts",
+    "agent": "tsx agent/index.ts"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",

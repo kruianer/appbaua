@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { SystemMonitor } from "./SystemMonitor";
 import { BackupCodesDisplay } from "./BackupCodesDisplay";
+import { HealthSettings } from "./HealthSettings";
 
 // Einstellungsseite (req-007): der Zustand des Mini-PCs (req-009) und das
 // Löschen des ganzen Verlauf-Logs, dazu ein Platzhalter für das, was folgt.
@@ -148,6 +149,9 @@ export function Settings() {
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
       <SystemMonitor />
+
+      {/* req-032: Prüfabstände und Schalter der App-Überwachung. */}
+      <HealthSettings />
 
       <div
         style={{

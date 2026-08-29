@@ -69,6 +69,9 @@ services:
       # Docker-Datenträgers des Hosts — es muss dafür kein Host-Pfad gemountet
       # werden (bug-005).
       HOST_DISK: "/"
+      # Zustandsübersicht (req-032): der Weg zur Docker-Engine führt über den
+      # health-agent, NICHT über einen Socket in diesem Container (siehe dort).
+      HEALTH_AGENT_URL: http://health-agent:3100
     volumes:
       # Read-only Blick auf das Host-/proc für die System-Kacheln (req-009) —
       # kein Docker-Socket. Dort stehen ALLE Prozesse des Rechners, also auch
@@ -114,6 +117,33 @@ services:
       NODE_ENV: production
     volumes:
       - claude-home:/claude-home
+
+  # Zustandsübersicht der überwachten Apps (req-032). Der einzige Dienst mit
+  # Zugriff auf die Docker-Engine — und bewusst NICHT die App.
+  #
+  # Warum getrennt: bug-005 hat den Lesebereich des internetzugewandten
+  # App-Containers klein gemacht, und der Docker-Socket wäre das genaue
+  # Gegenteil davon (wer mit der Engine reden darf, ist auf dem Host praktisch
+  # root). Der Agent nimmt dafür genau vier Aufrufe entgegen — auflisten, EINE
+  # Umgebungsvariable lesen, einen erlaubten Befehl ausführen, einen Container
+  # neu starten — und weist alles andere ab (agent/routes.ts, agent/index.ts).
+  #
+  # Er veröffentlicht keinen Port: erreichbar ist er nur über das
+  # Compose-Netz, also aus der App heraus. Dieselbe Vertrauensgrenze wie beim
+  # db-Dienst.
+  #
+  # Er läuft als root, weil der Socket auf dem Host root:docker gehört und die
+  # GID der docker-Gruppe von Rechner zu Rechner verschieden ist.
+  health-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HEALTH_AGENT_PORT: "3100"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # External access without an open router port (req-024): cloudflared holds
   # an outbound-only connection to Cloudflare's edge, which then routes the

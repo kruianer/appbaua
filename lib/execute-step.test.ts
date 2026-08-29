@@ -28,7 +28,7 @@ import {
   type TestGateResult,
 } from "./test-gate";
 
-const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" };
+const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;

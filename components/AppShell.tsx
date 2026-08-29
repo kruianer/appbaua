@@ -21,15 +21,25 @@ import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
 import { Settings } from "./Settings";
 import { WorkerDashboard } from "./WorkerDashboard";
+import { HealthOverview } from "./HealthOverview";
 
-type Tab = "aktiv" | "verlauf" | "repos" | "settings" | "einstellungen";
+type Tab =
+  | "aktiv"
+  | "zustand"
+  | "verlauf"
+  | "repos"
+  | "settings"
+  | "einstellungen";
 
 // Aktivität is the start view and the first nav entry (req-005).
-// Order: Aktivität, Verlauf, Repos, Tasks, Einstellungen (req-007).
+// Order: Aktivität, Zustand, Verlauf, Repos, Tasks, Einstellungen (req-007,
+// req-032). Zustand sits right behind Aktivität: both answer "läuft alles?",
+// the first about the worker, the second about the watched apps.
 // The "settings" key is the Tasks tab (historical); "einstellungen" is the
 // Einstellungsseite and owns the cog icon, so Tasks shows a list icon.
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "aktiv", label: "Aktivität", icon: "activity" },
+  { key: "zustand", label: "Zustand", icon: "heart" },
   { key: "verlauf", label: "Verlauf", icon: "clock" },
   { key: "repos", label: "Repos", icon: "gitbranch" },
   { key: "settings", label: "Tasks", icon: "list" },
@@ -38,6 +48,7 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
 
 const MODULE_TITLE: Record<Tab, string> = {
   aktiv: "Aktivität",
+  zustand: "Zustand",
   verlauf: "Verlauf",
   repos: "Repo-Verwaltung",
   settings: "Task-Steuerung",
@@ -140,6 +151,19 @@ export function AppShell({
       prev.map((r) => (r.id === id ? { ...r, active: !r.active } : r)),
     );
     const res = await fetch(`/api/repos/${id}`, { method: "PATCH" });
+    if (res.ok) {
+      const data = await res.json();
+      setRepos(data.repos);
+    }
+  }, []);
+
+  // req-032: der Schalter "überwachen" — unabhängig vom Schalter oben, der
+  // steuert, ob der Worker das Repo bearbeitet.
+  const toggleMonitored = useCallback(async (id: string) => {
+    setRepos((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, monitored: !r.monitored } : r)),
+    );
+    const res = await fetch(`/api/repos/${id}/monitored`, { method: "PATCH" });
     if (res.ok) {
       const data = await res.json();
       setRepos(data.repos);
@@ -382,6 +406,11 @@ export function AppShell({
             Was der Worker gerade tut.
           </div>
         )}
+        {tab === "zustand" && (
+          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+            Läuft jede überwachte App — und wenn nicht, woran es hängt.
+          </div>
+        )}
         {tab === "repos" && (
           <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
             Der Worker arbeitet die Liste von oben nach unten ab.
@@ -401,6 +430,8 @@ export function AppShell({
 
       {tab === "aktiv" ? (
         <WorkerDashboard />
+      ) : tab === "zustand" ? (
+        <HealthOverview />
       ) : tab === "repos" ? (
         <>
           {/* List / empty state (Repo-Verwaltung only, no dashboard) */}
@@ -630,6 +661,54 @@ export function AppShell({
                                 </option>
                               ))}
                             </select>
+                            {/* req-032: überwachen — eigener Schalter, eigene
+                                Bedeutung. Eine App kann überwacht werden, ohne
+                                dass der Worker an ihr arbeitet, und umgekehrt. */}
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "var(--space-2)",
+                                flex: "none",
+                                fontSize: 12,
+                                color: muted(70),
+                              }}
+                            >
+                              überwachen
+                              <button
+                                role="switch"
+                                aria-checked={r.monitored}
+                                aria-label={`${r.name} überwachen`}
+                                onClick={() => toggleMonitored(r.id)}
+                                style={{
+                                  flex: "none",
+                                  width: 40,
+                                  height: 24,
+                                  borderRadius: 999,
+                                  border: "none",
+                                  padding: 3,
+                                  display: "flex",
+                                  cursor: "pointer",
+                                  justifyContent: r.monitored
+                                    ? "flex-end"
+                                    : "flex-start",
+                                  background: r.monitored
+                                    ? "var(--color-accent)"
+                                    : "color-mix(in srgb, var(--color-text) 22%, transparent)",
+                                  transition: "background .15s ease",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: 999,
+                                    background: "var(--color-bg)",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,.4)",
+                                  }}
+                                />
+                              </button>
+                            </span>
                             {result && (
                               <span
                                 role="status"

@@ -21,8 +21,8 @@ import type { StepDecision } from "./execute-step";
 const WED_18 = new Date(2026, 6, 22, 18, 0, 0);
 
 const repos: Repo[] = [
-  { id: "r1", name: "appbaua", url: "u1", active: true, model: "sonnet" },
-  { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet" },
+  { id: "r1", name: "appbaua", url: "u1", active: true, model: "sonnet", monitored: false },
+  { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet", monitored: false },
 ];
 
 let logStore: RunLogStore;

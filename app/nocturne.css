@@ -11,6 +11,12 @@
   --color-accent-2: #a7a1db;
   --color-divider: color-mix(in srgb, #e9e9ed 16%, transparent);
 
+  /* Ampel der Zustandsseite (req-032). Nicht Teil der Design-Vorlage — die
+     kennt nur den Akzent —, aber grün/rot ist genau die Aussage, die eine
+     Ampel treffen soll, und der Akzent kann sie nicht ersetzen. */
+  --color-ok: #4ec38a;
+  --color-bad: #e8695f;
+
   --color-neutral-100: #f3f5fe;
   --color-neutral-200: #e4e7f5;
   --color-neutral-300: #cfd3e5;
@@ -57,6 +63,9 @@
   --color-surface: var(--color-neutral-200);
   --color-text: var(--color-neutral-900);
   --color-divider: color-mix(in srgb, var(--color-neutral-900) 16%, transparent);
+  /* Dunkler, damit die Ampel auch auf hellem Grund lesbar bleibt. */
+  --color-ok: #1f8757;
+  --color-bad: #c0392f;
 }
 
 *,

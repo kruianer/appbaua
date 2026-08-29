@@ -46,7 +46,7 @@ describe("looksLikeRepoUrl", () => {
 
 describe("isDuplicate", () => {
   const repos: Repo[] = [
-    { id: "1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" },
+    { id: "1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false },
   ];
   it("detects an existing normalized url", () => {
     expect(isDuplicate(repos, "github.com/kruianer/appbaua")).toBe(true);

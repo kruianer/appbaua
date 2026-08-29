@@ -21,6 +21,13 @@ import {
 } from "./worker-status";
 import type { PreviewStore } from "./preview-store";
 import type { PreviewRow } from "./preview";
+import type { AppHealth } from "./health";
+import type { HealthStore } from "./health-store";
+import {
+  type HealthSettings,
+  DEFAULT_HEALTH_SETTINGS,
+  normalizeSettings,
+} from "./health-settings";
 import type { AuthStore } from "./auth-store";
 import type {
   AuthUser,
@@ -104,7 +111,10 @@ export function createPgStore(): RepoStore {
         url: string;
         active: boolean;
         model: string | null;
-      }>("SELECT id, name, url, active, model FROM repos ORDER BY position ASC");
+        monitored: boolean | null;
+      }>(
+        "SELECT id, name, url, active, model, monitored FROM repos ORDER BY position ASC",
+      );
       return res.rows.map((r) => ({
         id: r.id,
         name: r.name,
@@ -112,6 +122,8 @@ export function createPgStore(): RepoStore {
         active: r.active,
         // Backfill for a row written before req-028 (no model column value yet).
         model: (r.model as Repo["model"]) || DEFAULT_REPO_MODEL,
+        // Same for req-032's switch: a row from before it is not watched.
+        monitored: r.monitored ?? false,
       }));
     },
 
@@ -124,8 +136,8 @@ export function createPgStore(): RepoStore {
         for (let i = 0; i < repos.length; i++) {
           const r = repos[i];
           await client.query(
-            "INSERT INTO repos (id, name, url, active, position, model) VALUES ($1, $2, $3, $4, $5, $6)",
-            [r.id, r.name, r.url, r.active, i, r.model],
+            "INSERT INTO repos (id, name, url, active, position, model, monitored) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            [r.id, r.name, r.url, r.active, i, r.model, r.monitored],
           );
         }
         await client.query("COMMIT");
@@ -411,6 +423,44 @@ export function createPgPreviewStore(): PreviewStore {
          ON CONFLICT (id) DO UPDATE SET rows = EXCLUDED.rows`,
         [JSON.stringify(rows)],
       );
+    },
+  };
+}
+
+export function createPgHealthStore(): HealthStore {
+  return {
+    async getResults(): Promise<AppHealth[]> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: { rows?: AppHealth[] } }>(
+        "SELECT data FROM health WHERE id = 'results'",
+      );
+      return res.rows[0]?.data?.rows ?? [];
+    },
+    async setResults(rows: AppHealth[]): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('results', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        [JSON.stringify({ rows })],
+      );
+    },
+    async getSettings(): Promise<HealthSettings> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: unknown }>(
+        "SELECT data FROM health WHERE id = 'settings'",
+      );
+      return res.rows.length
+        ? normalizeSettings(res.rows[0].data)
+        : { ...DEFAULT_HEALTH_SETTINGS };
+    },
+    async setSettings(settings: HealthSettings): Promise<HealthSettings> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('settings', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        [JSON.stringify(settings)],
+      );
+      return settings;
     },
   };
 }

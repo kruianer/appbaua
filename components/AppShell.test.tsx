@@ -19,8 +19,8 @@ import type { RunLogEntry } from "@/lib/run-log";
 // task types untouched.
 
 const repos: Repo[] = [
-  { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" },
-  { id: "r2", name: "beta", url: "github.com/kruianer/beta", active: true, model: "sonnet" },
+  { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false },
+  { id: "r2", name: "beta", url: "github.com/kruianer/beta", active: true, model: "sonnet", monitored: false },
 ];
 
 function logEntry(): RunLogEntry {
@@ -92,6 +92,15 @@ beforeEach(() => {
       );
       return jsonResponse({ repos: serverRepos });
     }
+    // Mirrors PATCH /api/repos/:id/monitored (req-032).
+    const repoWatchMatch = /^\/api\/repos\/([^/]+)\/monitored$/.exec(url);
+    if (repoWatchMatch && init?.method === "PATCH") {
+      const id = repoWatchMatch[1];
+      serverRepos = serverRepos.map((r) =>
+        r.id === id ? { ...r, monitored: !r.monitored } : r,
+      );
+      return jsonResponse({ repos: serverRepos });
+    }
     // Mirrors PATCH /api/repos/:id/model (req-028).
     const repoModelMatch = /^\/api\/repos\/([^/]+)\/model$/.exec(url);
     if (repoModelMatch && init?.method === "PATCH") {
@@ -153,7 +162,10 @@ function renderShell() {
 }
 
 describe("AppShell navigation (req-007)", () => {
-  it("AC: the bottom navigation has five entries in order", async () => {
+  // req-032 hat "Zustand" hinter "Aktivität" ergänzt: beide beantworten
+  // "läuft alles?", die erste über den Worker, die zweite über die
+  // überwachten Apps.
+  it("AC: the bottom navigation has six entries in order", async () => {
     renderShell();
     await screen.findByText("Leerlauf — nichts zu tun"); // dashboard settled
     const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
@@ -162,6 +174,7 @@ describe("AppShell navigation (req-007)", () => {
       .map((b) => b.textContent);
     expect(labels).toEqual([
       "Aktivität",
+      "Zustand",
       "Verlauf",
       "Repos",
       "Tasks",
@@ -454,6 +467,24 @@ describe("Repo-Zeile — aufklappbar (req-030)", () => {
     );
     expect(convertButton()).toBeInTheDocument();
     expect(modelSelect()).toBeInTheDocument();
+  });
+
+  // req-032: der Schalter "überwachen" wohnt in derselben zweiten Zeile.
+  it("req-032: der Überwachen-Schalter ist unabhängig vom Aktiv-Schalter", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+    await user.click(nameToggle(document.body, "r1"));
+
+    const watch = screen.getByRole("switch", { name: "appbaua überwachen" });
+    const active = screen.getByRole("switch", { name: "appbaua aktiv/inaktiv" });
+    expect(watch).toHaveAttribute("aria-checked", "false"); // Vorgabe: aus
+    expect(active).toHaveAttribute("aria-checked", "true");
+
+    await user.click(watch);
+
+    await waitFor(() => expect(watch).toHaveAttribute("aria-checked", "true"));
+    // Der andere Schalter hat sich dabei nicht bewegt.
+    expect(active).toHaveAttribute("aria-checked", "true");
   });
 
   it("AC: nach ausgelöster Umstellung bleibt der Bereich mit der Ergebnismeldung offen", async () => {

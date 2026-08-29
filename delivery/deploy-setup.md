@@ -122,6 +122,24 @@ an ihrer Kommandozeile; ändert sich die einmal, lässt sich das Muster über
 Fehlt ein Mount, zeigt die betreffende Kachel `n/v` — die übrigen laufen
 weiter.
 
+### Zustandsübersicht: der health-agent (req-032)
+
+Die Zustandsseite prüft die überwachten Apps und startet auf Klick einen
+einzelnen Container neu. Beides braucht die Docker-Engine — und die bekommt
+**nicht** der App-Container, sondern ein eigener Dienst `health-agent`
+(`Dockerfile.agent`). Er ist der einzige mit
+`/var/run/docker.sock:/var/run/docker.sock`, veröffentlicht keinen Port und ist
+damit nur über das Compose-Netz erreichbar; die App spricht ihn über
+`HEALTH_AGENT_URL` an, das die Compose-Datei bereits setzt.
+
+Auf dem Host ist dafür **nichts** einzurichten: der Deploy bringt den Dienst
+mit. Er nimmt genau vier Aufrufe entgegen (auflisten, EINE Umgebungsvariable
+lesen, `pg_isready`/`psql` ausführen, einen Container neu starten) und weist
+alles andere ab.
+
+Läuft der Agent nicht, melden die Container-Prüfungen „Docker nicht
+erreichbar“ — die App und alle übrigen Seiten laufen unverändert weiter.
+
 > Hinweis: `GITHUB_TOKEN` hier ist der PAT für den Repo-Erreichbarkeits-
 > test der App (req-001) — NICHT der Runner-Registrierungs-Token.
 
