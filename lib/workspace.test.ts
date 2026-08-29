@@ -4,9 +4,12 @@ import path from "node:path";
 import {
   authEnv,
   basicAuthHeader,
+  NETWORK_RETRY_DELAY_MS,
   REBASED_DETAIL,
+  REMOTE_PROBE_TIMEOUT_MS,
   commitAndPush,
   isStaleBranchPush,
+  isTransientNetworkError,
   prepareRepo,
   prepareRepoOnConvention,
   prepareRepoOnDevOrDefault,
@@ -316,6 +319,232 @@ describe("Push auf veraltetem Stand: einmal rebasen statt aufgeben (bug-017)", (
     for (const call of calls) {
       for (const arg of call.args) expect(arg).not.toContain(PAT);
     }
+  });
+});
+
+// bug-020: an einzelner Netzwerk-Aussetzer beim Verbinden zu GitHub hat den
+// ganzen Lauf für das betroffene Repo beendet — an fünf von sieben Tagen. Die
+// Gegenprobe zeigte jedes Mal ein einwandfrei erreichbares Repo. Ein zweiter
+// Versuch nach kurzer Pause rettet den Lauf; bei einem Zugangsfehler bleibt es
+// beim sofortigen Abbruch.
+describe("Netzwerk-Aussetzer beendet den Lauf nicht mehr (bug-020)", () => {
+  /** Der gemeldete Aussetzer, wörtlich aus dem Verlauf. */
+  const OUTAGE =
+    "fatal: unable to access 'https://github.com/kruianer/livinggardenkeeper.git/': " +
+    "Failed to connect to github.com:443 after 134549 ms: Could not connect to server";
+
+  /** Ein Zugangsfehler: beim zweiten Mal scheitert er genauso. */
+  const DENIED =
+    "remote: Repository not found.\nfatal: repository " +
+    "'https://github.com/kruianer/livinggardenkeeper.git/' not found";
+
+  /** Die Pause wird eigens geprüft; die übrigen Tests sollen sie nicht absitzen. */
+  const noWait = async () => {};
+
+  const isSymref = (args: string[]) => args.includes("--symref");
+  const isBranchProbe = (args: string[]) =>
+    args[0] === "ls-remote" && !isSymref(args);
+  const matching = (calls: GitCall[], pred: (args: string[]) => boolean) =>
+    calls.filter((c) => pred(c.args));
+
+  /** Ein Remote ohne `dev`, dessen HEAD auf `def` zeigt. */
+  const noDevHeadAt = (def: string) => (args: string[]) => {
+    if (args[0] !== "ls-remote") return undefined;
+    return isSymref(args)
+      ? { stdout: `ref: refs/heads/${def}\tHEAD\n1234abc\tHEAD\n` }
+      : { ok: false, code: 2 };
+  };
+
+  /** Lässt den ERSTEN passenden Aufruf mit `stderr` scheitern, spätere nicht. */
+  function failsOnce(
+    match: (args: string[]) => boolean,
+    stderr: string,
+    rest: (args: string[]) => Partial<RunResult> | undefined = () => undefined,
+  ) {
+    let seen = 0;
+    return fakeGit((args) => {
+      if (!match(args)) return rest(args);
+      seen += 1;
+      return seen === 1 ? { ok: false, code: 128, stderr } : rest(args);
+    });
+  }
+
+  it("erkennt einen Aussetzer, aber keinen Zugangsfehler", () => {
+    expect(isTransientNetworkError(OUTAGE)).toBe(true);
+    expect(isTransientNetworkError("Connection timed out")).toBe(true);
+    expect(isTransientNetworkError("Could not resolve host: github.com")).toBe(true);
+    // Was `run` selbst gekappt hat, ist dieselbe hängende Verbindung.
+    expect(isTransientNetworkError("something\n[timeout]")).toBe(true);
+
+    // Diese scheitern beim zweiten Mal genauso — Wiederholen wäre nur Wartezeit.
+    expect(isTransientNetworkError(DENIED)).toBe(false);
+    expect(isTransientNetworkError("Invalid username or password")).toBe(false);
+    expect(isTransientNetworkError("Permission to repo denied")).toBe(false);
+    expect(isTransientNetworkError("Authentication failed")).toBe(false);
+  });
+
+  it("AC: nach einem Aussetzer beim Default-Branch läuft der Schritt weiter", async () => {
+    const { runImpl, calls } = failsOnce(isSymref, OUTAGE, noDevHeadAt("main"));
+
+    const { branch } = await prepareRepoOnDevOrDefault(FRESH, PAT, {
+      runImpl,
+      sleepImpl: noWait,
+    });
+
+    expect(branch).toBe("main");
+    expect(matching(calls, isSymref)).toHaveLength(2);
+  });
+
+  it("AC: ein Zugangsfehler wird NICHT wiederholt", async () => {
+    const { runImpl, calls } = fakeGit((args) =>
+      args[0] !== "ls-remote"
+        ? undefined
+        : isSymref(args)
+          ? { ok: false, code: 128, stderr: DENIED }
+          : { ok: false, code: 2 },
+    );
+
+    const err = await prepareRepoOnDevOrDefault(FRESH, PAT, {
+      runImpl,
+      sleepImpl: noWait,
+    }).catch((e) => e);
+
+    expect(String(err)).toContain("default branch unknown");
+    expect(matching(calls, isSymref)).toHaveLength(1);
+  });
+
+  it("AC: genau ein zweiter Versuch — bleibt es dabei, gilt das Repo als nicht erreichbar", async () => {
+    // Sonst zöge eine echte Störung den Stillstand nur in die Länge.
+    const { runImpl, calls } = fakeGit((args) =>
+      args[0] !== "ls-remote"
+        ? undefined
+        : isSymref(args)
+          ? { ok: false, code: 128, stderr: OUTAGE }
+          : { ok: false, code: 2 },
+    );
+
+    const err = await prepareRepoOnDevOrDefault(FRESH, PAT, {
+      runImpl,
+      sleepImpl: noWait,
+    }).catch((e) => e);
+
+    expect(String(err)).toContain("default branch unknown");
+    expect(String(err)).toContain("Could not connect to server");
+    expect(matching(calls, isSymref)).toHaveLength(2);
+  });
+
+  it("ein Aussetzer beim Klonen bekommt denselben zweiten Versuch", async () => {
+    const { runImpl, calls } = failsOnce((a) => a[0] === "clone", OUTAGE);
+
+    await prepareRepo(FRESH, PAT, { runImpl, sleepImpl: noWait });
+
+    expect(matching(calls, (a) => a[0] === "clone")).toHaveLength(2);
+  });
+
+  it("ein Aussetzer beim Aktualisieren einer vorhandenen Arbeitskopie ebenso", async () => {
+    const { runImpl, calls } = failsOnce((a) => a[0] === "fetch", OUTAGE);
+
+    await prepareRepo(EXISTING, PAT, { runImpl, sleepImpl: noWait });
+
+    expect(matching(calls, (a) => a[0] === "fetch")).toHaveLength(2);
+  });
+
+  it("ein Aussetzer bei der Branch-Abfrage schickt ihn nicht auf den falschen Branch", async () => {
+    // Ohne zweiten Versuch läse sich der Aussetzer als "das Repo hat kein dev" —
+    // und der Schritt landete auf dem Default-Branch, obwohl es dev gibt.
+    const { runImpl, calls } = failsOnce(isBranchProbe, OUTAGE);
+
+    const { branch } = await prepareRepoOnDevOrDefault(FRESH, PAT, {
+      runImpl,
+      sleepImpl: noWait,
+    });
+
+    expect(branch).toBe("dev");
+    expect(matching(calls, isBranchProbe)).toHaveLength(2);
+    expect(calls.some((c) => isSymref(c.args))).toBe(false);
+  });
+
+  it("wartet kurz, bevor er es noch einmal versucht", async () => {
+    const waits: number[] = [];
+    const { runImpl } = failsOnce((a) => a[0] === "clone", OUTAGE);
+
+    await prepareRepo(FRESH, PAT, {
+      runImpl,
+      sleepImpl: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    expect(waits).toEqual([NETWORK_RETRY_DELAY_MS]);
+  });
+
+  it("ohne Aussetzer wird nichts wiederholt und nicht gewartet", async () => {
+    const waits: number[] = [];
+    const { runImpl, calls } = fakeGit();
+
+    await prepareRepo(FRESH, PAT, {
+      runImpl,
+      sleepImpl: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    expect(waits).toEqual([]);
+    expect(matching(calls, (a) => a[0] === "clone")).toHaveLength(1);
+    expect(matching(calls, isBranchProbe)).toHaveLength(1);
+  });
+
+  it("eine hängende Ref-Abfrage wird gekappt, statt zwei Minuten zu kosten", async () => {
+    // git kennt keinen eigenen Connect-Timeout — im Verlauf hing der Aufruf
+    // 134549 ms. Die Ref-Abfrage überträgt kaum Daten, also darf sie eine harte
+    // Obergrenze haben; clone und fetch bewegen echte Daten und behalten ihr
+    // offenes Ende.
+    const { runImpl, calls } = fakeGit(noDevHeadAt("main"));
+
+    await prepareRepoOnDevOrDefault(FRESH, PAT, { runImpl, sleepImpl: noWait });
+
+    const probes = matching(calls, (a) => a[0] === "ls-remote");
+    expect(probes.length).toBeGreaterThan(0);
+    for (const p of probes) expect(p.opts.timeoutMs).toBe(REMOTE_PROBE_TIMEOUT_MS);
+    expect(REMOTE_PROBE_TIMEOUT_MS).toBeLessThan(134_549);
+    for (const name of ["clone", "fetch"]) {
+      for (const c of matching(calls, (a) => a[0] === name)) {
+        expect(c.opts.timeoutMs).toBeUndefined();
+      }
+    }
+  });
+
+  it("der zweite Versuch ist beglaubigt und trägt den Token nicht im Argument (bug-003)", async () => {
+    const { runImpl, calls } = failsOnce(isSymref, OUTAGE, noDevHeadAt("main"));
+
+    await prepareRepoOnDevOrDefault(FRESH, PAT, { runImpl, sleepImpl: noWait });
+
+    for (const p of matching(calls, isSymref)) {
+      expect(p.opts.env?.GIT_CONFIG_VALUE_0).toBe(basicAuthHeader(PAT));
+    }
+    for (const call of calls) {
+      for (const arg of call.args) expect(arg).not.toContain(PAT);
+    }
+  });
+
+  it("auch der Konventions-Pfad übersteht einen Aussetzer (req-020)", async () => {
+    const { runImpl, calls } = failsOnce(isBranchProbe, OUTAGE);
+
+    const { branch } = await prepareRepoOnConvention(FRESH, PAT, {
+      runImpl,
+      sleepImpl: noWait,
+      readFileImpl: async () =>
+        [
+          "## Environments",
+          "",
+          "| Environment | Branch | URL |",
+          "|---|---|---|",
+          "| dev | dev | https://dev.example.com |",
+        ].join("\n"),
+    });
+
+    expect(branch).toBe("dev");
+    expect(matching(calls, isBranchProbe)).toHaveLength(2);
   });
 });
 

@@ -77,3 +77,43 @@ Wichtig dabei, damit die Wiederholung nicht schadet:
 Ein Repro-Test sollte den Fehlertext oben verwenden und festhalten, dass
 bei einem Netzwerkfehler ein zweiter Versuch stattfindet, bei einem
 Zugangsfehler dagegen nicht.
+
+# Behoben am 2026-08-29
+
+Jeder git-Aufruf in `lib/workspace.ts`, der den Rechner verlässt, läuft
+jetzt über `runRemote` — dieselbe Bauart wie der Push-Retry aus bug-017,
+nur eine Ebene tiefer, damit kein zweiter Mechanismus danebensteht:
+Aufruf, und bei einem Netzwerkfehler nach kurzer Pause GENAU EIN zweiter
+Versuch.
+
+Bewusst eng gefasst:
+
+- **Nur bei Netzwerkfehlern.** `isTransientNetworkError` erkennt "Failed
+  to connect", "Could not connect to server", "Connection timed out",
+  "Could not resolve host", "Connection reset by peer" und Verwandte. Ein
+  fehlender Zugang, ein unbekanntes Repo oder ein abgelehnter Token wird
+  NICHT wiederholt — die scheitern beim zweiten Mal genauso.
+- **Genau ein zweiter Versuch**, mit 5 Sekunden Pause davor
+  (`NETWORK_RETRY_DELAY_MS`). Bei einer echten Störung wird der Stillstand
+  so nicht länger als nötig.
+- **Vier Stellen statt der drei genannten.** Zu `clone`, `fetch` und dem
+  `ls-remote --symref` in `defaultBranch` kommt die Branch-Abfrage
+  `remoteHasBranch`: dort war ein Aussetzer bisher gar kein Abbruch,
+  sondern eine falsche Antwort — er las sich als "das Repo hat kein dev"
+  und schickte den Schritt auf den Default-Branch.
+
+Zur Wartezeit: git kennt keinen eigenen Connect-Timeout (`http.*` bietet
+nur `lowSpeedLimit`/`lowSpeedTime`, und die greifen erst während der
+Übertragung, nicht beim Verbindungsaufbau). Die Obergrenze musste also
+von uns kommen — `run` kann das über `timeoutMs` bereits. Sie gilt für
+die beiden `ls-remote`-Abfragen: `REMOTE_PROBE_TIMEOUT_MS` = 30 s. Eine
+Ref-Liste sind ein paar Kilobyte; was nach einer halben Minute nicht
+geantwortet hat, antwortet auch nach zwei Minuten nicht. Damit kostet der
+gemeldete Fall statt 134 s (und mit Retry über vier Minuten) höchstens
+30 s + 5 s + 30 s. `clone` und `fetch` bewegen echte Daten und behalten
+ihr offenes Ende — eine pauschale Frist würde dort große Repos abwürgen.
+
+Getestet in `lib/workspace.test.ts` (12 Fälle mit dem Fehlertext von
+oben, u.a. "Zugangsfehler wird nicht wiederholt", "genau ein zweiter
+Versuch", "ohne Aussetzer wird nicht gewartet"). Gegenprobe gemacht: mit
+ausgehebelter Wiederholung fallen 8 der 12 um.
