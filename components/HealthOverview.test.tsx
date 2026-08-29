@@ -3,6 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { HealthOverview } from "./HealthOverview";
 import type { AppHealth } from "@/lib/health";
+import type { HeartbeatView } from "@/lib/heartbeat-service";
 
 // Die Zustandsseite aus Sicht des Nutzers (req-032): was auf einer Karte steht,
 // und was ein Klick auf "Neu starten" auslöst.
@@ -53,17 +54,24 @@ const pending: AppHealth = {
 };
 
 let apps: AppHealth[];
+let heartbeat: HeartbeatView | undefined;
 let restartCalls: { repoId: string; container: string }[];
 
 beforeEach(() => {
   apps = [broken];
+  heartbeat = {
+    configured: true,
+    intervalMinutes: 5,
+    acceptedAt: AT,
+    error: null,
+  };
   restartCalls = [];
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url === "/api/health/restart" && init?.method === "POST") {
       restartCalls.push(JSON.parse(String(init.body)));
       return { ok: true, json: async () => ({ container: "ok" }) };
     }
-    return { ok: true, json: async () => ({ apps }) };
+    return { ok: true, json: async () => ({ apps, heartbeat }) };
   });
 });
 
@@ -132,6 +140,32 @@ describe("Zustandsseite (req-032)", () => {
         { repoId: "r1", container: "lgt-prod-monitoring-watchdog" },
       ]),
     );
+  });
+
+  it("AC (req-034): zeigt, wann der Wächter den letzten Herzschlag annahm", async () => {
+    render(<HealthOverview />);
+    expect(
+      await screen.findByText(/Herzschlag angenommen \d\d:\d\d · alle 5 Min/),
+    ).toBeInTheDocument();
+  });
+
+  it("sagt es, wenn gar kein Wächter hinterlegt ist (req-034)", async () => {
+    heartbeat = { configured: false, intervalMinutes: 5, acceptedAt: null, error: null };
+    render(<HealthOverview />);
+    expect(
+      await screen.findByText("Herzschlag: kein Wächter hinterlegt"),
+    ).toBeInTheDocument();
+  });
+
+  it("nennt den Grund, wenn der letzte Herzschlag nicht ankam (req-034)", async () => {
+    heartbeat = {
+      configured: true,
+      intervalMinutes: 5,
+      acceptedAt: AT,
+      error: "Wächter antwortet mit 403",
+    };
+    render(<HealthOverview />);
+    expect(await screen.findByText(/Wächter antwortet mit 403/)).toBeInTheDocument();
   });
 
   it("bricht die Rückfrage ab, ohne etwas anzufassen", async () => {

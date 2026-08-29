@@ -24,6 +24,11 @@ import type { PreviewRow } from "./preview";
 import type { AppHealth } from "./health";
 import type { HealthStore } from "./health-store";
 import {
+  type HeartbeatStatus,
+  EMPTY_HEARTBEAT_STATUS,
+  normalizeHeartbeatStatus,
+} from "./heartbeat";
+import {
   type HealthSettings,
   DEFAULT_HEALTH_SETTINGS,
   normalizeSettings,
@@ -478,6 +483,23 @@ export function createPgHealthStore(): HealthStore {
         // In ein Objekt gewickelt, wie bei 'results': die Spalte ist jsonb und
         // ein leerer Zustand wäre sonst ein nacktes {} ohne Aussagekraft.
         [JSON.stringify({ entries: state })],
+      );
+    },
+    async getHeartbeat(): Promise<HeartbeatStatus> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: unknown }>(
+        "SELECT data FROM health WHERE id = 'heartbeat'",
+      );
+      return res.rows.length
+        ? normalizeHeartbeatStatus(res.rows[0].data)
+        : { ...EMPTY_HEARTBEAT_STATUS };
+    },
+    async setHeartbeat(status: HeartbeatStatus): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('heartbeat', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        [JSON.stringify(status)],
       );
     },
   };

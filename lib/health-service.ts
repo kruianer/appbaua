@@ -12,6 +12,7 @@ import { type CheckDeps, roundIsDue, runRound } from "./health-checks";
 import { type HealthSettings, normalizeSettings } from "./health-settings";
 import { getHealthStore } from "./health-store";
 import { fetchHealthMd } from "./health-md-source";
+import { type HeartbeatView, readHeartbeatView } from "./heartbeat-service";
 import { notifyAfterRound } from "./telegram-service";
 
 // Anwendungsdienst der Zustandsübersicht (req-032). Die Routen bleiben dünn und
@@ -20,6 +21,8 @@ import { notifyAfterRound } from "./telegram-service";
 export type HealthOverview = {
   apps: AppHealth[];
   settings: HealthSettings;
+  /** Der Herzschlag zum Wächter beim Hoster (req-034). */
+  heartbeat: HeartbeatView;
 };
 
 function defaultDeps(): CheckDeps {
@@ -42,10 +45,11 @@ function defaultDeps(): CheckDeps {
  */
 export async function readHealthOverview(): Promise<HealthOverview> {
   const store = getHealthStore();
-  const [repos, stored, settings] = await Promise.all([
+  const [repos, stored, settings, heartbeat] = await Promise.all([
     listRepos(),
     store.getResults(),
     store.getSettings(),
+    readHeartbeatView(),
   ]);
   const byId = new Map(stored.map((r) => [r.repoId, r]));
   const apps = repos
@@ -58,7 +62,7 @@ export async function readHealthOverview(): Promise<HealthOverview> {
         ? { ...hit, repoName: repo.name, repoUrl: repo.url }
         : pendingHealth(repo);
     });
-  return { apps, settings };
+  return { apps, settings, heartbeat };
 }
 
 /** Läuft gerade eine Runde? Zwei parallele Runden wären doppelte Arbeit. */

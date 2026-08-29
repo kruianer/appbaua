@@ -91,6 +91,42 @@ appbaua antwortet ausschließlich auf Nachrichten aus dem hinterlegten
 Chat und verwirft alle anderen wortlos. Der Schlüssel gehört deshalb
 genauso behandelt wie der GitHub-Token.
 
+## Ausfallwächter beim Webhoster (req-034)
+
+Die Meldungen aus req-033 laufen auf demselben Beelink wie die überwachten
+Apps. Fällt dieser Rechner selbst aus — Strom, Internet, appbaua tot —,
+fällt der Melder mit ihm weg und niemand erfährt davon. Genau dagegen
+steht ein winziger PHP-Wächter beim Webhoster (all-inkl): appbaua meldet
+sich alle paar Minuten bei ihm, und bleibt diese Meldung länger als 15
+Minuten aus, schickt **er** die Telegram-Nachricht.
+
+Er beantwortet nur eine Frage — lebt der Rechner noch? Über die
+überwachten Apps weiß er nichts, prüft nichts selbst und steuert nichts.
+Fällt der Hoster selbst aus, gibt es keine Meldung; dieser Fall bleibt
+bewusst offen.
+
+**Einmalige manuelle Schritte (macht der Nutzer, nicht der Worker):**
+Die Dateien liegen im Repo unter `watchdog/`, die vollständige Anleitung
+in [../watchdog/README.md](../watchdog/README.md). In Kurzform:
+
+1. `watchdog/private/*` in ein Verzeichnis **außerhalb** des
+   Web-Verzeichnisses hochladen, `watchdog/public/*` hinein.
+2. `config.php` aus `config.sample.php` anlegen — Bot-Schlüssel und
+   Chat-Kennung wie oben, dazu eine frisch erzeugte Kennung für den
+   Herzschlag. Diese Datei gehört NIE ins Repo.
+3. `WATCHDOG_URL` und `WATCHDOG_TOKEN` in `deploy/dev.env` bzw.
+   `deploy/prod.env` eintragen und die Umgebung neu deployen.
+4. Im Kundenmenü des Hosters (KAS → Cronjobs) einen Cronjob alle 5
+   Minuten auf `check.php` anlegen. Ohne ihn merkt niemand, dass der
+   Herzschlag ausblieb — der Hoster bietet keine Hintergrunddienste.
+
+**Je Umgebung ein eigener Wächter**, mit eigener Kennung und eigenem
+`label`. Sonst hielte ein laufendes dev den prod-Rechner für lebendig.
+
+**Kontrolle:** Die Zustandsseite von appbaua zeigt oben, wann der Wächter
+den letzten Herzschlag angenommen hat. Ein gescheiterter Versand steht
+zusätzlich im Verlauf.
+
 ## Notfall: ausgesperrt (Passkey UND Backup-Codes verloren)
 
 Der Passkey-Schutz (req-023) richtet sich gegen jemanden, der nur die URL

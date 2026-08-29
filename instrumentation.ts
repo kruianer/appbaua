@@ -7,7 +7,12 @@
 // hinschaut, und der Bot muss auf Befehle warten, ohne dass ein Browser offen
 // ist. Beides braucht einen mitlaufenden Takt, siehe lib/telegram-monitor.ts.
 //
-// Ohne hinterlegte Telegram-Zugangsdaten startet nichts; die App verhält sich
+// Dazu kommt mit req-034 der Herzschlag nach draußen: appbaua meldet sich
+// regelmäßig bei einem Wächter beim Webhoster, damit der Totalausfall DIESES
+// Rechners überhaupt jemandem auffällt. Er hängt an einer eigenen Konfiguration
+// und läuft auch dann, wenn Telegram hier gar nicht eingerichtet ist.
+//
+// Ohne hinterlegte Zugangsdaten startet jeweils nichts; die App verhält sich
 // dann exakt wie vorher.
 
 export async function register(): Promise<void> {
@@ -22,5 +27,7 @@ export async function register(): Promise<void> {
     if (process.env.NEXT_PHASE === "phase-production-build") return;
     const { startTelegramMonitor } = await import("./lib/telegram-monitor");
     startTelegramMonitor();
+    const { startHeartbeat } = await import("./lib/heartbeat-service");
+    startHeartbeat();
   }
 }

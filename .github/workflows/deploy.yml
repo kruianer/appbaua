@@ -23,6 +23,15 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
+
+      # Der Ausfallwächter (req-034) ist PHP — beim Hoster gibt es nichts
+      # anderes. Ist auf dem Runner ein php da, fahren seine Tests echtes PHP;
+      # sonst überspringt Vitest genau diese Fälle. Der Versuch darf den Lauf
+      # deshalb NICHT rot machen.
+      - name: PHP für die Wächter-Tests (best effort)
+        continue-on-error: true
+        run: sudo apt-get install -y --no-install-recommends php-cli || true
+
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test

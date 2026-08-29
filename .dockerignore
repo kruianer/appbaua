@@ -13,3 +13,5 @@ coverage
 .claude
 Dockerfile
 docker-compose*.yml
+# Der Ausfallwächter (req-034) läuft beim Webhoster, nicht in diesem Image.
+watchdog

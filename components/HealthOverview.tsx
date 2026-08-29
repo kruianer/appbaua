@@ -9,12 +9,17 @@ import {
   CHECK_LABELS,
   LAMP_LABELS,
 } from "@/lib/health";
+import type { HeartbeatView } from "@/lib/heartbeat-service";
 import { Icon } from "./Icon";
 
 // Zustandsseite (req-032): je überwachter App eine Karte mit Ampel und den
 // einzelnen Prüfungen darunter. Neu gestartet wird ausschließlich auf Klick —
 // und auch dann erst nach einer Rückfrage, weil der Neustart echte laufende
 // Systeme trifft, auch prod-Umgebungen fremder Apps.
+//
+// Ganz oben steht der Herzschlag (req-034): der Wächter beim Hoster ist das
+// einzige Stück Überwachung, das den Ausfall DIESES Rechners überlebt, und man
+// muss sehen können, dass die Strecke dorthin wirklich steht.
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
@@ -64,8 +69,44 @@ function failingContainers(app: AppHealth): ContainerInfo[] {
   return out;
 }
 
+/**
+ * Die Zeile über den Karten: wann der Wächter beim Hoster den letzten
+ * Herzschlag angenommen hat (req-034). "Angenommen" heißt: der Wächter hat
+ * geantwortet — nur das beweist, dass die Strecke nach draußen steht.
+ */
+function HeartbeatLine({ heartbeat }: { heartbeat: HeartbeatView }) {
+  const { configured, acceptedAt, error, intervalMinutes } = heartbeat;
+  const text = !configured
+    ? "Herzschlag: kein Wächter hinterlegt"
+    : acceptedAt
+      ? `Herzschlag angenommen ${hhmm(acceptedAt)} · alle ${intervalMinutes} Min`
+      : "Herzschlag: noch nicht angenommen";
+
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+        fontSize: 12,
+        padding: "7px 11px",
+        marginBottom: "var(--space-2)",
+        borderRadius: "var(--radius-md)",
+        color: muted(70),
+        border: `1px solid ${muted(15)}`,
+      }}
+    >
+      <Icon name="heart" size={15} />
+      <span>{text}</span>
+      {error && <span style={{ color: "var(--color-bad)" }}>— {error}</span>}
+    </div>
+  );
+}
+
 export function HealthOverview() {
   const [apps, setApps] = useState<AppHealth[] | null>(null);
+  const [heartbeat, setHeartbeat] = useState<HeartbeatView | null>(null);
   const [pending, setPending] = useState<{ repoId: string; container: string } | null>(
     null,
   );
@@ -76,8 +117,12 @@ export function HealthOverview() {
     try {
       const res = await fetch("/api/health", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { apps: AppHealth[] };
+      const data = (await res.json()) as {
+        apps: AppHealth[];
+        heartbeat?: HeartbeatView;
+      };
       setApps(data.apps ?? []);
+      setHeartbeat(data.heartbeat ?? null);
     } catch {
       /* letzten bekannten Stand stehen lassen */
     }
@@ -137,6 +182,8 @@ export function HealthOverview() {
           <span>{note}</span>
         </div>
       )}
+
+      {heartbeat && <HeartbeatLine heartbeat={heartbeat} />}
 
       {apps !== null && apps.length === 0 && (
         <div

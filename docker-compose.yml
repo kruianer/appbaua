@@ -18,6 +18,10 @@
 #   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 #                   optional (req-033): bot key from @BotFather and the ONE chat
 #                   appbaua reports to and accepts commands from
+#   WATCHDOG_URL, WATCHDOG_TOKEN, WATCHDOG_INTERVAL_MINUTES
+#                   optional (req-034): where the Ausfallwächter at the
+#                   webhoster listens and the shared token — see
+#                   watchdog/README.md
 # DATABASE_URL is assembled from the POSTGRES_* vars below.
 
 services:
@@ -83,6 +87,15 @@ services:
       # EIGENEN Bot bekommen, sonst kämen beide Umgebungen im selben Chat an.
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Herzschlag zum Ausfallwächter beim Webhoster (req-034). Die Meldungen
+      # oben nützen nichts, wenn DIESER Rechner ausfällt — dann sind sie mit
+      # weg. Der Wächter läuft deshalb außerhalb und merkt, wenn der Herzschlag
+      # ausbleibt. Alle drei optional; ohne Adresse und Kennung schlägt appbaua
+      # keinen Herzschlag und läuft unverändert weiter. Einrichtung beim Hoster:
+      # watchdog/README.md.
+      WATCHDOG_URL: ${WATCHDOG_URL:-}
+      WATCHDOG_TOKEN: ${WATCHDOG_TOKEN:-}
+      WATCHDOG_INTERVAL_MINUTES: ${WATCHDOG_INTERVAL_MINUTES:-}
     volumes:
       # Read-only Blick auf das Host-/proc für die System-Kacheln (req-009) —
       # kein Docker-Socket. Dort stehen ALLE Prozesse des Rechners, also auch
