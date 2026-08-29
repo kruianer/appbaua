@@ -7,10 +7,11 @@
 // Gegenteil (wer mit der Engine reden darf, ist auf dem Host praktisch root).
 // Also bekommt ihn ein Dienst, der sonst nichts kann und nichts sieht.
 //
-// Er nimmt genau vier Aufrufe entgegen:
+// Er nimmt genau fünf Aufrufe entgegen:
 //   GET  /containers                 alle Container (auch gestoppte)
 //   GET  /containers/:id/env?name=X  EINE Umgebungsvariable
 //   POST /containers/:id/exec        ein Befehl aus der Erlaubnisliste
+//   GET  /containers/:id/logs?tail=N die letzten N Logzeilen (req-035)
 //   POST /containers/:id/restart     Neustart genau dieses Containers
 // Alles andere ist 404. Insbesondere gibt es keinen Durchgriff auf die
 // Engine-API und keinen Weg, einen beliebigen Befehl zu starten.
@@ -21,6 +22,9 @@ import { route } from "./routes";
 
 const PORT = Number(process.env.HEALTH_AGENT_PORT || 3100);
 const docker = createSocketDocker();
+
+/** Obergrenze der Logzeilen, die der Agent je Aufruf herausgibt (req-035). */
+const MAX_AGENT_LOG_LINES = 500;
 
 type Handler = () => Promise<unknown>;
 
@@ -72,6 +76,16 @@ const server = http.createServer(async (req, res) => {
       // Entscheidung aber an der Grenze, an der sie hingehört.
       if (!isAllowedCommand(body.cmd)) throw new Error("Befehl nicht erlaubt");
       return docker.exec(target.id, body.cmd);
+    },
+    logs: async () => {
+      if (target.kind !== "logs") return {};
+      // Immer begrenzt, auch wenn der Aufrufer nichts oder Unsinn schickt: der
+      // Agent soll kein ganzes Tageslog durch das Compose-Netz schieben.
+      const asked = Number(url.searchParams.get("tail") ?? MAX_AGENT_LOG_LINES);
+      const tail = Number.isFinite(asked)
+        ? Math.min(MAX_AGENT_LOG_LINES, Math.max(1, Math.floor(asked)))
+        : MAX_AGENT_LOG_LINES;
+      return { logs: await docker.logs(target.id, tail) };
     },
     restart: async () => {
       if (target.kind !== "restart") return {};

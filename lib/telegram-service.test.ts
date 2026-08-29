@@ -51,6 +51,9 @@ function dockerStub(containers: DockerContainer[]): DockerClient {
     async exec() {
       return { exitCode: 0, output: "" };
     },
+    async logs() {
+      return "";
+    },
     async restart() {},
   };
 }
@@ -118,6 +121,55 @@ describe("notifyAfterRound", () => {
     // Der Ausfall selbst ist trotzdem bekannt — nur eben still.
     const state = await getHealthStore().getAlertState();
     expect(state[alertKey("r1", "container")].fails).toBe(2);
+  });
+
+  it("AC (req-035): der Befund der Log-Analyse geht MIT der Ausfallmeldung hinaus", async () => {
+    const { client, sent } = clientStub();
+    const analyzed: string[] = [];
+    const deps = {
+      client,
+      analyze: async (alert: { repoId: string }) => {
+        analyzed.push(alert.repoId);
+        return "Der Container wird wegen Speichermangels getötet.";
+      },
+    };
+
+    await notifyAfterRound(healthOf("fail", T(0)), deps);
+    // Noch keine Meldung — also auch noch keine Analyse, die Geld kostet.
+    expect(analyzed).toEqual([]);
+
+    await notifyAfterRound(healthOf("fail", T(5)), deps);
+    expect(analyzed).toEqual(["r1"]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("Speichermangels");
+  });
+
+  it("ohne Befund bleibt die Ausfallmeldung, wie sie war (req-035)", async () => {
+    const { client, sent } = clientStub();
+    const deps = { client, analyze: async () => null };
+
+    await notifyAfterRound(healthOf("fail", T(0)), deps);
+    await notifyAfterRound(healthOf("fail", T(5)), deps);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toBe(
+      "🔴 LivingGardenTwin — Container fehlgeschlagen\nlgt-prod-monitoring-watchdog (Neustart-Schleife)",
+    );
+  });
+
+  it("eine gescheiterte Analyse hält die Meldung nicht auf (req-035)", async () => {
+    const { client, sent } = clientStub();
+    const deps = {
+      client,
+      analyze: async () => {
+        throw new Error("Anbieter antwortet nicht");
+      },
+    };
+
+    await notifyAfterRound(healthOf("fail", T(0)), deps);
+    await notifyAfterRound(healthOf("fail", T(5)), deps);
+
+    expect(sent).toHaveLength(1);
   });
 
   it("ohne eingerichteten Bot passiert nichts, und nichts geht kaputt", async () => {

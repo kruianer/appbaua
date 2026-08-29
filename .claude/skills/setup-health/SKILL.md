@@ -160,6 +160,10 @@ appbaua-Worker (req-032).
 
 - Anbieter: <openai | anthropic | ...>
 - Schluessel aus: `<UMGEBUNGSVARIABLE>`
+- Modell: <optional, z.B. gpt-4o-mini — nur wenn die KI-Log-Analyse
+  (req-035) ein bestimmtes Modell benutzen soll; ohne Angabe waehlt
+  appbaua eines>
+
 
 ## Nicht pruefen
 

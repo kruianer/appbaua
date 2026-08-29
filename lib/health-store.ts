@@ -12,6 +12,7 @@ import {
   EMPTY_HEARTBEAT_STATUS,
   normalizeHeartbeatStatus,
 } from "./heartbeat";
+import { type AnalysisState, normalizeAnalyses } from "./log-analysis";
 
 // Persistence for the Zustandsübersicht (req-032). Same seam pattern as the
 // other stores: file for zero-infra dev, Postgres when configured, memory for
@@ -28,6 +29,11 @@ import {
 // last accepted a beat, and why the last attempt failed. Same reason for
 // persisting it: the Zustandsseite must show the real last contact after a
 // restart, not "noch nie" for the first five minutes.
+//
+// The fifth is the last log analysis per repo (req-035). Persisted for two
+// reasons: the card must still show the last finding after a restart, and the
+// stored timestamp is what keeps the daily analysis from running again — every
+// run costs money.
 
 export interface HealthStore {
   getResults(): Promise<AppHealth[]>;
@@ -38,6 +44,8 @@ export interface HealthStore {
   setAlertState(state: AlertState): Promise<void>;
   getHeartbeat(): Promise<HeartbeatStatus>;
   setHeartbeat(status: HeartbeatStatus): Promise<void>;
+  getAnalyses(): Promise<AnalysisState>;
+  setAnalyses(state: AnalysisState): Promise<void>;
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -45,6 +53,7 @@ const RESULTS_FILE = path.join(DATA_DIR, "health-results.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "health-settings.json");
 const ALERTS_FILE = path.join(DATA_DIR, "health-alerts.json");
 const HEARTBEAT_FILE = path.join(DATA_DIR, "health-heartbeat.json");
+const ANALYSES_FILE = path.join(DATA_DIR, "health-analyses.json");
 
 export function createFileHealthStore(): HealthStore {
   return {
@@ -102,6 +111,17 @@ export function createFileHealthStore(): HealthStore {
       await fs.mkdir(DATA_DIR, { recursive: true });
       await fs.writeFile(HEARTBEAT_FILE, JSON.stringify(status, null, 2), "utf8");
     },
+    async getAnalyses() {
+      try {
+        return normalizeAnalyses(JSON.parse(await fs.readFile(ANALYSES_FILE, "utf8")));
+      } catch {
+        return {};
+      }
+    },
+    async setAnalyses(state) {
+      await fs.mkdir(DATA_DIR, { recursive: true });
+      await fs.writeFile(ANALYSES_FILE, JSON.stringify(state, null, 2), "utf8");
+    },
   };
 }
 
@@ -110,11 +130,13 @@ export function createMemoryHealthStore(initial?: {
   settings?: HealthSettings;
   alerts?: AlertState;
   heartbeat?: HeartbeatStatus;
+  analyses?: AnalysisState;
 }): HealthStore {
   let results = [...(initial?.results ?? [])];
   let settings = normalizeSettings(initial?.settings);
   let alerts = normalizeAlertState(initial?.alerts);
   let heartbeat = normalizeHeartbeatStatus(initial?.heartbeat);
+  let analyses = normalizeAnalyses(initial?.analyses);
   return {
     async getResults() {
       return [...results];
@@ -140,6 +162,12 @@ export function createMemoryHealthStore(initial?: {
     },
     async setHeartbeat(next) {
       heartbeat = { ...next };
+    },
+    async getAnalyses() {
+      return { ...analyses };
+    },
+    async setAnalyses(next) {
+      analyses = { ...next };
     },
   };
 }

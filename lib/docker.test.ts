@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   ALLOWED_EXEC_COMMANDS,
   createRemoteDocker,
+  demuxDockerLogs,
   isAllowedCommand,
   mapContainers,
   parseEnvList,
@@ -70,6 +71,34 @@ describe("isAllowedCommand — die Erlaubnisliste für exec", () => {
   });
 });
 
+describe("demuxDockerLogs — Docker rahmt die Logausgabe (req-035)", () => {
+  /** Ein Rahmen: 1 Byte Strom, 3 Byte 0, 4 Byte Länge, dann der Text. */
+  function frame(stream: number, text: string): Buffer {
+    const body = Buffer.from(text, "utf8");
+    const head = Buffer.alloc(8);
+    head[0] = stream;
+    head.writeUInt32BE(body.length, 4);
+    return Buffer.concat([head, body]);
+  }
+
+  it("setzt Standardausgabe und Standardfehler in ihrer Reihenfolge zusammen", () => {
+    const raw = Buffer.concat([
+      frame(1, "startup ok\n"),
+      frame(2, "ERROR out of memory\n"),
+    ]);
+    expect(demuxDockerLogs(raw)).toBe("startup ok\nERROR out of memory\n");
+  });
+
+  it("lässt ungerahmte Ausgabe unangetastet — ein Container mit TTY liefert die", () => {
+    const raw = Buffer.from("einfach nur Text\nzweite Zeile\n", "utf8");
+    expect(demuxDockerLogs(raw)).toBe("einfach nur Text\nzweite Zeile\n");
+  });
+
+  it("verträgt eine leere Antwort", () => {
+    expect(demuxDockerLogs(Buffer.alloc(0))).toBe("");
+  });
+});
+
 describe("createRemoteDocker — die App spricht über den health-agent", () => {
   function stubFetch(handler: (url: string, init?: RequestInit) => unknown) {
     return (async (url: string, init?: RequestInit) => ({
@@ -104,6 +133,19 @@ describe("createRemoteDocker — die App spricht über den health-agent", () => 
     expect(urls[0]).toBe(
       "http://health-agent:3100/containers/abc/env?name=OPENAI_API_KEY",
     );
+  });
+
+  it("holt die letzten Logzeilen — begrenzt und nur lesend (req-035)", async () => {
+    const urls: string[] = [];
+    const docker = createRemoteDocker(
+      "http://health-agent:3100",
+      stubFetch((url) => {
+        urls.push(url);
+        return { logs: "Zeile 1\nZeile 2" };
+      }),
+    );
+    expect(await docker.logs("abc", 200)).toBe("Zeile 1\nZeile 2");
+    expect(urls[0]).toBe("http://health-agent:3100/containers/abc/logs?tail=200");
   });
 
   it("schickt den Neustart an genau einen Container", async () => {

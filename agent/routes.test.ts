@@ -4,18 +4,23 @@ import { route } from "./routes";
 // Der Health-Agent ist der einzige Prozess mit dem Docker-Socket (req-032).
 // Was er annimmt und was er abweist, ist damit eine Sicherheitsaussage.
 
-describe("route — genau vier Aufrufe, sonst nichts", () => {
+describe("route — genau fünf Aufrufe, sonst nichts", () => {
   it("kennt die Container-Liste", () => {
     expect(route("GET", "/containers")).toEqual({ kind: "list" });
   });
 
-  it("kennt die drei Aufrufe an einen einzelnen Container", () => {
+  it("kennt die vier Aufrufe an einen einzelnen Container", () => {
     expect(route("GET", "/containers/abc/env")).toEqual({ kind: "env", id: "abc" });
     expect(route("POST", "/containers/abc/exec")).toEqual({ kind: "exec", id: "abc" });
+    expect(route("GET", "/containers/abc/logs")).toEqual({ kind: "logs", id: "abc" });
     expect(route("POST", "/containers/abc/restart")).toEqual({
       kind: "restart",
       id: "abc",
     });
+  });
+
+  it("das Log wird nur gelesen (req-035) — POST ist keins", () => {
+    expect(route("POST", "/containers/abc/logs")).toBeNull();
   });
 
   it("weist ein falsches Verb ab — ein Neustart ist kein GET", () => {

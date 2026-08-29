@@ -7,6 +7,7 @@ import {
   DEFAULT_HEALTH_SETTINGS,
   MIN_AI_INTERVAL_HOURS,
   MIN_INTERVAL_MINUTES,
+  MIN_LOG_ANALYSIS_INTERVAL_HOURS,
 } from "@/lib/health-settings";
 
 // Abschnitt "App-Überwachung" der Einstellungsseite (req-032): wie oft geprüft
@@ -142,6 +143,69 @@ export function HealthSettings() {
             on={settings.telegram}
             onToggle={() => void save({ ...settings, telegram: !settings.telegram })}
           />
+        </div>
+
+        {/*
+          req-035: die KI liest die Logs. Eigener Block, weil jeder Durchlauf
+          beim Anbieter der App Geld kostet — beide Wege lassen sich einzeln
+          abschalten, der Knopf auf der Karte bleibt davon unberührt.
+        */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: "var(--space-3)",
+            borderTop: "1px solid color-mix(in srgb, var(--color-text) 12%, transparent)",
+            paddingTop: "var(--space-3)",
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 13, color: muted(70) }}>
+            Die KI der jeweiligen App sieht deren Logs durch und fasst zusammen,
+            was auffällt. Jeder Durchlauf kostet Geld.
+          </p>
+
+          <Switch
+            label="Log-Analyse regelmäßig"
+            note="kostet Geld"
+            ariaLabel="Log-Analyse regelmäßig"
+            on={settings.logAnalysis}
+            onToggle={() =>
+              void save({ ...settings, logAnalysis: !settings.logAnalysis })
+            }
+          />
+
+          <Switch
+            label="Log-Analyse bei Ausfall"
+            note="Ursache kommt mit der Meldung"
+            ariaLabel="Log-Analyse bei Ausfall"
+            on={settings.logAnalysisOnFailure}
+            onToggle={() =>
+              void save({
+                ...settings,
+                logAnalysisOnFailure: !settings.logAnalysisOnFailure,
+              })
+            }
+          />
+
+          <div className="field">
+            <label htmlFor="health-log-analysis-interval">
+              Abstand der Log-Analyse (Stunden)
+            </label>
+            <input
+              id="health-log-analysis-interval"
+              className="input"
+              type="number"
+              min={MIN_LOG_ANALYSIS_INTERVAL_HOURS}
+              value={settings.logAnalysisIntervalHours}
+              onChange={(e) =>
+                setSettings((s) => ({
+                  ...s,
+                  logAnalysisIntervalHours: Number(e.target.value),
+                }))
+              }
+              onBlur={() => void save(settings)}
+            />
+          </div>
         </div>
       </div>
     </>

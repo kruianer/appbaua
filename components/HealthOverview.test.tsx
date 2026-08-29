@@ -56,6 +56,9 @@ const pending: AppHealth = {
 let apps: AppHealth[];
 let heartbeat: HeartbeatView | undefined;
 let restartCalls: { repoId: string; container: string }[];
+let analyzeCalls: { repoId: string }[];
+/** Was die Analyse auf die Karte legt, sobald sie gelaufen ist (req-035). */
+let analysisResult: AppHealth["analysis"];
 
 beforeEach(() => {
   apps = [broken];
@@ -66,10 +69,17 @@ beforeEach(() => {
     error: null,
   };
   restartCalls = [];
+  analyzeCalls = [];
+  analysisResult = null;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url === "/api/health/restart" && init?.method === "POST") {
       restartCalls.push(JSON.parse(String(init.body)));
       return { ok: true, json: async () => ({ container: "ok" }) };
+    }
+    if (url === "/api/health/analyze" && init?.method === "POST") {
+      analyzeCalls.push(JSON.parse(String(init.body)));
+      apps = apps.map((a) => ({ ...a, analysis: analysisResult }));
+      return { ok: true, json: async () => ({ analysis: analysisResult }) };
     }
     return { ok: true, json: async () => ({ apps, heartbeat }) };
   });
@@ -166,6 +176,55 @@ describe("Zustandsseite (req-032)", () => {
     };
     render(<HealthOverview />);
     expect(await screen.findByText(/Wächter antwortet mit 403/)).toBeInTheDocument();
+  });
+
+  it("AC (req-035): der Knopf startet die Analyse, das Ergebnis steht auf derselben Karte", async () => {
+    analysisResult = {
+      repoId: "r1",
+      at: AT,
+      trigger: "manual",
+      status: "finding",
+      summary: "Der Watchdog stirbt alle 20 Sekunden an fehlendem Speicher.",
+    };
+    const user = userEvent.setup();
+    render(<HealthOverview />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /Logs analysieren/ }),
+    );
+
+    await waitFor(() => expect(analyzeCalls).toEqual([{ repoId: "r1" }]));
+    expect(
+      await screen.findByText(
+        "Der Watchdog stirbt alle 20 Sekunden an fehlendem Speicher.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/KI-Log-Analyse \(\d\d:\d\d\)/)).toBeInTheDocument();
+  });
+
+  it("AC (req-035): ohne Auffälligkeit steht genau das mit Zeitpunkt auf der Karte", async () => {
+    apps = [
+      {
+        ...broken,
+        analysis: {
+          repoId: "r1",
+          at: AT,
+          trigger: "scheduled",
+          status: "clear",
+          summary: "keine Auffälligkeiten",
+        },
+      },
+    ];
+    render(<HealthOverview />);
+
+    expect(await screen.findByText("keine Auffälligkeiten")).toBeInTheDocument();
+    expect(screen.getByText(/KI-Log-Analyse \(\d\d:\d\d\)/)).toBeInTheDocument();
+  });
+
+  it("AC (req-035): ohne Analyse steht auch kein Analyse-Ergebnis auf der Karte", async () => {
+    render(<HealthOverview />);
+    await screen.findByText("Container");
+    expect(screen.queryByText(/KI-Log-Analyse/)).not.toBeInTheDocument();
   });
 
   it("bricht die Rückfrage ab, ohne etwas anzufassen", async () => {

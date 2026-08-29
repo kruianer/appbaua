@@ -105,6 +105,9 @@ function dockerStub(
         ? { exitCode: 0, output: new Date(NOW.getTime() - 5 * 60_000).toISOString() }
         : { exitCode: 0, output: "" };
     },
+    async logs() {
+      return "";
+    },
     async restart(id) {
       restarts.push(id);
     },

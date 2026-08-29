@@ -23,6 +23,12 @@ describe("Vorgaben", () => {
   it("die Telegram-Meldungen sind zunächst eingeschaltet (req-033)", () => {
     expect(DEFAULT_HEALTH_SETTINGS.telegram).toBe(true);
   });
+
+  it("AC: die Log-Analyse läuft zunächst einmal täglich (req-035)", () => {
+    expect(DEFAULT_HEALTH_SETTINGS.logAnalysis).toBe(true);
+    expect(DEFAULT_HEALTH_SETTINGS.logAnalysisOnFailure).toBe(true);
+    expect(DEFAULT_HEALTH_SETTINGS.logAnalysisIntervalHours).toBe(24);
+  });
 });
 
 describe("normalizeSettings", () => {
@@ -50,9 +56,28 @@ describe("normalizeSettings", () => {
     expect(normalizeSettings({ telegram: "nein" }).telegram).toBe(true);
   });
 
+  it("schaltet die Log-Analyse einzeln ab, ohne die Überwachung anzufassen (req-035)", () => {
+    const s = normalizeSettings({ logAnalysis: false });
+    expect(s.logAnalysis).toBe(false);
+    // Der Weg bei einem Ausfall ist getrennt schaltbar und bleibt an.
+    expect(s.logAnalysisOnFailure).toBe(true);
+    for (const kind of CHECK_KINDS) expect(s.checks[kind]).toBe(true);
+
+    const both = normalizeSettings({ logAnalysis: false, logAnalysisOnFailure: false });
+    expect(both.logAnalysisOnFailure).toBe(false);
+  });
+
+  it("ein vor req-035 gespeicherter Stand kennt die Felder nicht — das heißt nicht 'aus'", () => {
+    const s = normalizeSettings({ intervalMinutes: 10 });
+    expect(s.logAnalysis).toBe(true);
+    expect(s.logAnalysisOnFailure).toBe(true);
+    expect(s.logAnalysisIntervalHours).toBe(24);
+  });
+
   it("fängt 0 und negative Abstände ab — das wäre Dauerlast", () => {
     expect(normalizeSettings({ intervalMinutes: 0 }).intervalMinutes).toBe(1);
     expect(normalizeSettings({ aiIntervalHours: -5 }).aiIntervalHours).toBe(1);
+    expect(normalizeSettings({ logAnalysisIntervalHours: 0 }).logAnalysisIntervalHours).toBe(1);
   });
 
   it("fällt bei Unsinn auf die Vorgabe zurück, statt eine Prüfart abzuschalten", () => {

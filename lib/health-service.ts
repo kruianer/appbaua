@@ -14,6 +14,11 @@ import { getHealthStore } from "./health-store";
 import { fetchHealthMd } from "./health-md-source";
 import { type HeartbeatView, readHeartbeatView } from "./heartbeat-service";
 import { notifyAfterRound } from "./telegram-service";
+import {
+  type AnalysisDeps,
+  analyzeOnFailure,
+  runDueAnalyses,
+} from "./log-analysis-service";
 
 // Anwendungsdienst der Zustandsübersicht (req-032). Die Routen bleiben dünn und
 // rufen hierher; die Tests fassen diese Funktionen direkt an.
@@ -45,11 +50,12 @@ function defaultDeps(): CheckDeps {
  */
 export async function readHealthOverview(): Promise<HealthOverview> {
   const store = getHealthStore();
-  const [repos, stored, settings, heartbeat] = await Promise.all([
+  const [repos, stored, settings, heartbeat, analyses] = await Promise.all([
     listRepos(),
     store.getResults(),
     store.getSettings(),
     readHeartbeatView(),
+    store.getAnalyses(),
   ]);
   const byId = new Map(stored.map((r) => [r.repoId, r]));
   const apps = repos
@@ -58,9 +64,12 @@ export async function readHealthOverview(): Promise<HealthOverview> {
       const hit = byId.get(repo.id);
       // Name und URL kommen immer aus der Repo-Liste: wurde ein Repo
       // umbenannt, soll die Karte nicht den alten Namen zeigen.
-      return hit
+      const app = hit
         ? { ...hit, repoName: repo.name, repoUrl: repo.url }
         : pendingHealth(repo);
+      // Die Log-Analyse (req-035) hängt an der Karte, wird aber getrennt
+      // gespeichert: sie läuft in ihrem eigenen, viel längeren Takt.
+      return { ...app, analysis: analyses[repo.id] ?? null };
     });
   return { apps, settings, heartbeat };
 }
@@ -90,13 +99,43 @@ export async function runDueChecks(deps?: Partial<CheckDeps>): Promise<boolean> 
     await store.setResults(results);
     // Erst speichern, dann melden (req-033): die Zustandsseite zeigt einen
     // Ausfall auch dann, wenn die Nachricht nicht durchkommt.
-    await notifyAfterRound(results, { now: full.now }).catch(() => {
+    await notifyAfterRound(results, {
+      now: full.now,
+      // req-035: zu einem gemeldeten Ausfall lässt appbaua die KI der App deren
+      // Logs durchsehen; ein Befund geht mit der Nachricht hinaus.
+      analyze: (alert) => analyzeOnFailure(alert.repoId, alert.text, analysisDeps(full)),
+    }).catch(() => {
       /* eine gescheiterte Meldung darf die Überwachung nicht anhalten */
     });
     return true;
   } finally {
     roundRunning = false;
   }
+}
+
+/**
+ * Die Prüfungen und die Log-Analyse greifen auf dieselben Dinge zu (Docker, die
+ * health.md, die Uhr) — ein Test, der die Prüfrunde verdrahtet, verdrahtet
+ * damit auch die Analyse.
+ */
+function analysisDeps(deps: CheckDeps): Partial<AnalysisDeps> {
+  return {
+    docker: deps.docker,
+    fetchImpl: deps.fetchImpl,
+    readHealthMd: deps.readHealthMd,
+    now: deps.now,
+  };
+}
+
+/**
+ * Die regelmäßige Log-Analyse anstoßen, wenn sie fällig ist (req-035). Eigener
+ * Takt neben runDueChecks: sie soll auch dann laufen, wenn gerade keine Prüfung
+ * ansteht, und darf umgekehrt keine Prüfrunde aufhalten.
+ */
+export async function runDueLogAnalyses(
+  deps?: Partial<AnalysisDeps>,
+): Promise<number> {
+  return runDueAnalyses(deps);
 }
 
 export async function readHealthSettings(): Promise<HealthSettings> {

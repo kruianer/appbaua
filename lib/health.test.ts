@@ -127,6 +127,20 @@ describe("parseHealthMd", () => {
     });
   });
 
+  it("nimmt ein Modell mit, wenn die health.md eines nennt (req-035)", () => {
+    const md = [
+      "## KI-Anbieter",
+      "- Anbieter: anthropic",
+      "- Schluessel aus: `ANTHROPIC_API_KEY`",
+      "- Modell: claude-haiku-4-5",
+    ].join("\n");
+    expect(parseHealthMd(md).ai).toEqual({
+      provider: "anthropic",
+      keyEnv: "ANTHROPIC_API_KEY",
+      model: "claude-haiku-4-5",
+    });
+  });
+
   it("liest 'Nicht prüfen' als Container-Namen, ohne die Begründung", () => {
     expect(parseHealthMd(HEALTH_MD).ignore).toEqual(["lgt-prod-backup"]);
   });

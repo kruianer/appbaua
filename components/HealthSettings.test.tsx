@@ -64,3 +64,57 @@ describe("HealthSettings — Telegram-Meldungen", () => {
     expect((saved[0] as { checks: Record<string, boolean> }).checks.container).toBe(false);
   });
 });
+
+describe("HealthSettings — Log-Analyse (req-035)", () => {
+  it("AC: die regelmäßige Analyse lässt sich abschalten", async () => {
+    stubApi();
+    render(<HealthSettings />);
+
+    const scheduled = await screen.findByRole("switch", {
+      name: "Log-Analyse regelmäßig",
+    });
+    await waitFor(() => expect(scheduled).toHaveAttribute("aria-checked", "true"));
+    await userEvent.click(scheduled);
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toMatchObject({ logAnalysis: false, logAnalysisOnFailure: true });
+  });
+
+  it("AC: die Analyse bei Ausfällen lässt sich getrennt abschalten", async () => {
+    stubApi();
+    render(<HealthSettings />);
+
+    const onFailure = await screen.findByRole("switch", {
+      name: "Log-Analyse bei Ausfall",
+    });
+    await userEvent.click(onFailure);
+
+    await waitFor(() => expect(saved).toHaveLength(1));
+    expect(saved[0]).toMatchObject({ logAnalysisOnFailure: false, logAnalysis: true });
+  });
+
+  it("AC: der Abstand der regelmäßigen Analyse ist einstellbar", async () => {
+    stubApi();
+    render(<HealthSettings />);
+
+    const field = await screen.findByLabelText("Abstand der Log-Analyse (Stunden)");
+    await waitFor(() => expect(field).toHaveValue(24));
+
+    await userEvent.clear(field);
+    await userEvent.type(field, "168");
+    await userEvent.tab();
+
+    await waitFor(() => expect(saved.length).toBeGreaterThan(0));
+    expect(saved[saved.length - 1]).toMatchObject({ logAnalysisIntervalHours: 168 });
+  });
+
+  it("zeigt den gespeicherten Stand — abgeschaltet bleibt abgeschaltet", async () => {
+    stubApi({ ...DEFAULT_HEALTH_SETTINGS, logAnalysis: false });
+    render(<HealthSettings />);
+
+    const scheduled = await screen.findByRole("switch", {
+      name: "Log-Analyse regelmäßig",
+    });
+    await waitFor(() => expect(scheduled).toHaveAttribute("aria-checked", "false"));
+  });
+});

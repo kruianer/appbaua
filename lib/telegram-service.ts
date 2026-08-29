@@ -41,6 +41,12 @@ export type NotifyDeps = {
   /** null, solange Bot-Schlüssel und Chat-Kennung fehlen. */
   client: TelegramClient | null;
   now: () => Date;
+  /**
+   * Die Log-Analyse zu einem gemeldeten Ausfall (req-035): gibt sie einen
+   * Befund zurück, geht er MIT der Nachricht hinaus. Vorgabe: keine Analyse —
+   * wer sie will, reicht sie herein (health-service tut das).
+   */
+  analyze: (alert: Alert) => Promise<string | null>;
 };
 
 function defaultClient(): TelegramClient | null {
@@ -98,22 +104,38 @@ export async function notifyAfterRound(
   const now = deps?.now ?? (() => new Date());
   const client = deps?.client !== undefined ? deps.client : defaultClient();
 
+  const analyze = deps?.analyze ?? (async () => null);
+
   const store = getHealthStore();
   const [settings, before] = await Promise.all([
     store.getSettings(),
     store.getAlertState(),
   ]);
   const { alerts, state } = planAlerts(results, before);
+  if (alerts.length === 0) {
+    await store.setAlertState(state);
+    return [];
+  }
+
+  // Erst die Analyse, dann der Versand (req-035): die Ursache soll in derselben
+  // Nachricht stehen, nicht in einer zweiten hinterher. Sie läuft auch, wenn
+  // die Meldungen abgeschaltet sind — ihr Ergebnis gehört auf die Karte.
+  const enriched: Alert[] = [];
+  for (const alert of alerts) {
+    const summary =
+      alert.kind === "down" ? await analyze(alert).catch(() => null) : null;
+    enriched.push(summary ? { ...alert, text: `${alert.text}\n\n${summary}` } : alert);
+  }
 
   const silent = !settings.telegram || client === null;
-  if (silent || alerts.length === 0) {
+  if (silent) {
     await store.setAlertState(state);
     return [];
   }
 
   const sent: Alert[] = [];
   const next: AlertState = { ...state };
-  for (const alert of alerts) {
+  for (const alert of enriched) {
     try {
       await client.send(alert.text);
       sent.push(alert);

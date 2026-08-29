@@ -10,6 +10,7 @@ import {
   LAMP_LABELS,
 } from "@/lib/health";
 import type { HeartbeatView } from "@/lib/heartbeat-service";
+import type { LogAnalysis } from "@/lib/log-analysis";
 import { Icon } from "./Icon";
 
 // Zustandsseite (req-032): je überwachter App eine Karte mit Ampel und den
@@ -69,6 +70,49 @@ function failingContainers(app: AppHealth): ContainerInfo[] {
   return out;
 }
 
+/** Farbe des Analyse-Ergebnisses: ein Befund sticht heraus, sonst gedämpft. */
+const ANALYSIS_COLOR: Record<LogAnalysis["status"], string> = {
+  finding: "var(--color-bad)",
+  clear: "var(--color-ok)",
+  error: muted(55),
+};
+
+/**
+ * Was die KI zuletzt aus den Logs gelesen hat (req-035), mit Zeitpunkt. Steht
+ * unter den Prüfungen: die sagen, DASS etwas kaputt ist, das hier sagt, was.
+ */
+function AnalysisBlock({ analysis }: { analysis: LogAnalysis }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        fontSize: 13,
+        padding: "8px 10px",
+        borderRadius: "var(--radius-md)",
+        border: `1px solid ${muted(15)}`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontSize: 11,
+          color: muted(50),
+        }}
+      >
+        <Icon name="activity" size={14} />
+        <span>KI-Log-Analyse ({hhmm(analysis.at)})</span>
+      </div>
+      <span style={{ color: ANALYSIS_COLOR[analysis.status], wordBreak: "break-word" }}>
+        {analysis.summary}
+      </span>
+    </div>
+  );
+}
+
 /**
  * Die Zeile über den Karten: wann der Wächter beim Hoster den letzten
  * Herzschlag angenommen hat (req-034). "Angenommen" heißt: der Wächter hat
@@ -112,6 +156,8 @@ export function HealthOverview() {
   );
   const [restarting, setRestarting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  /** Für welche App gerade eine Analyse läuft (req-035) — sie dauert Sekunden. */
+  const [analyzing, setAnalyzing] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -158,6 +204,31 @@ export function HealthOverview() {
       setRestarting(false);
     }
   }, [pending, restarting, load]);
+
+  const analyze = useCallback(
+    async (repoId: string) => {
+      if (analyzing) return;
+      setAnalyzing(repoId);
+      try {
+        const res = await fetch("/api/health/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ repoId }),
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          setNote(data.error ?? "Analyse fehlgeschlagen.");
+        }
+        // Das Ergebnis steht danach auf der Karte — auch ein Fehlschlag.
+        await load();
+      } catch {
+        setNote("Analyse fehlgeschlagen.");
+      } finally {
+        setAnalyzing(null);
+      }
+    },
+    [analyzing, load],
+  );
 
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
@@ -301,16 +372,34 @@ export function HealthOverview() {
               ))}
             </div>
 
-            {failingContainers(app).map((c) => (
+            {app.analysis && <AnalysisBlock analysis={app.analysis} />}
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+              {failingContainers(app).map((c) => (
+                <button
+                  key={c.name}
+                  className="btn btn-secondary"
+                  onClick={() => setPending({ repoId: app.repoId, container: c.name })}
+                  style={{ fontSize: 12, padding: "6px 10px" }}
+                >
+                  <Icon name="sync" size={15} /> {c.name} neu starten
+                </button>
+              ))}
+              {/*
+                Ohne Rückfrage: die Analyse liest nur und ändert nichts an der
+                App (req-035). Sie kostet aber Geld, deshalb steht sie hinter
+                einem Klick und läuft nicht von allein bei jedem Verdacht.
+              */}
               <button
-                key={c.name}
                 className="btn btn-secondary"
-                onClick={() => setPending({ repoId: app.repoId, container: c.name })}
-                style={{ alignSelf: "flex-start", fontSize: 12, padding: "6px 10px" }}
+                onClick={() => void analyze(app.repoId)}
+                disabled={analyzing !== null}
+                style={{ fontSize: 12, padding: "6px 10px" }}
               >
-                <Icon name="sync" size={15} /> {c.name} neu starten
+                <Icon name="activity" size={15} />{" "}
+                {analyzing === app.repoId ? "Analyse läuft …" : "Logs analysieren"}
               </button>
-            ))}
+            </div>
           </div>
         ))}
       </div>

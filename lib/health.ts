@@ -10,6 +10,8 @@
 // The kind is called `zigbee`, its label says both, and the parser reads
 // `## Datenfluss`.
 
+import type { LogAnalysis } from "./log-analysis";
+
 /** The five Prüfarten of req-032, in the order the card shows them. */
 export const CHECK_KINDS = [
   "container",
@@ -76,6 +78,12 @@ export type AppHealth = {
   checks: CheckResult[];
   /** Newest checkedAt across the checks, null while nothing has run. */
   checkedAt: string | null;
+  /**
+   * Was die KI der App zuletzt aus deren Logs gelesen hat (req-035). Wird beim
+   * Lesen der Übersicht dazugelegt, nicht in der Prüfrunde geschrieben — eine
+   * Analyse hat ihren eigenen, viel längeren Takt.
+   */
+  analysis?: LogAnalysis | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -117,6 +125,12 @@ export type AiSpec = {
   provider: string;
   /** NAME of the env var carrying the key — never the key itself. */
   keyEnv: string;
+  /**
+   * Optional: das Modell, das die Log-Analyse benutzen soll (req-035). Ohne
+   * Angabe entscheidet appbaua (DEFAULT_ANALYSIS_MODELS) — die Kosten trägt
+   * der Betreiber der App, also darf ihre health.md das überschreiben.
+   */
+  model?: string;
 };
 
 export type HealthSpec = {
@@ -279,6 +293,7 @@ export function parseHealthMd(text: string | null): HealthSpec {
       if (k === "anbieter" || k === "provider") ai.provider = unquote(value).toLowerCase();
       else if (k === "schluesselaus" || k === "schluessel" || k === "key")
         ai.keyEnv = unquote(value);
+      else if (k === "modell" || k === "model") ai.model = unquote(value);
       continue;
     }
 
@@ -327,7 +342,11 @@ export function parseHealthMd(text: string | null): HealthSpec {
     };
   }
   if (ai.provider && ai.keyEnv) {
-    spec.ai = { provider: ai.provider, keyEnv: ai.keyEnv };
+    spec.ai = {
+      provider: ai.provider,
+      keyEnv: ai.keyEnv,
+      ...(ai.model ? { model: ai.model } : {}),
+    };
   }
   if (
     sawContainerSection &&

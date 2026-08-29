@@ -34,6 +34,7 @@ import {
   normalizeSettings,
 } from "./health-settings";
 import { type AlertState, normalizeAlertState } from "./telegram-alerts";
+import { type AnalysisState, normalizeAnalyses } from "./log-analysis";
 import type { AuthStore } from "./auth-store";
 import type {
   AuthUser,
@@ -500,6 +501,23 @@ export function createPgHealthStore(): HealthStore {
         `INSERT INTO health (id, data) VALUES ('heartbeat', $1)
          ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
         [JSON.stringify(status)],
+      );
+    },
+    async getAnalyses(): Promise<AnalysisState> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: { entries?: unknown } }>(
+        "SELECT data FROM health WHERE id = 'analyses'",
+      );
+      return normalizeAnalyses(res.rows[0]?.data?.entries);
+    },
+    async setAnalyses(state: AnalysisState): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('analyses', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        // Wie bei 'alerts' in ein Objekt gewickelt: die Spalte ist jsonb, und
+        // ein leerer Stand wäre sonst ein nacktes {}.
+        [JSON.stringify({ entries: state })],
       );
     },
   };

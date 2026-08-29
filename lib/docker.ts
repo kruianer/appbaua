@@ -56,6 +56,12 @@ export interface DockerClient {
   env(id: string, name: string): Promise<string | null>;
   /** Einen erlaubten Befehl IM Container ausführen und die Ausgabe einsammeln. */
   exec(id: string, cmd: string[]): Promise<ExecResult>;
+  /**
+   * Die letzten `tail` Zeilen des Logs eines Containers (req-035). Nur lesend,
+   * und immer begrenzt: ein Tageslog einer großen App will niemand durch den
+   * Agenten schieben.
+   */
+  logs(id: string, tail: number): Promise<string>;
   /** Genau diesen einen Container neu starten — nur auf Klick (req-032). */
   restart(id: string): Promise<void>;
 }
@@ -92,7 +98,29 @@ export function parseEnvList(list: string[]): Record<string, string> {
   return out;
 }
 
-type Response = { status: number; body: string };
+type Response = { status: number; body: string; raw: Buffer };
+
+/**
+ * Docker rahmt die Ausgabe eines Logs in 8-Byte-Köpfe (Strom, Länge), sofern
+ * der Container kein TTY hat. Ohne Entrahmen stehen diese Bytes mitten im Text.
+ *
+ * Sieht der Anfang nicht nach einem Rahmen aus, wird der Text unverändert
+ * zurückgegeben — genau das liefert ein Container MIT TTY.
+ */
+export function demuxDockerLogs(raw: Buffer): string {
+  const parts: string[] = [];
+  let offset = 0;
+  while (offset + 8 <= raw.length) {
+    const stream = raw[offset];
+    const framed =
+      stream <= 2 && raw[offset + 1] === 0 && raw[offset + 2] === 0 && raw[offset + 3] === 0;
+    if (!framed) return raw.toString("utf8");
+    const size = raw.readUInt32BE(offset + 4);
+    parts.push(raw.subarray(offset + 8, offset + 8 + size).toString("utf8"));
+    offset += 8 + size;
+  }
+  return parts.length > 0 ? parts.join("") : raw.toString("utf8");
+}
 
 function request(
   socketPath: string,
@@ -116,14 +144,16 @@ function request(
         timeout: DOCKER_TIMEOUT_MS,
       },
       (res) => {
-        let text = "";
-        res.setEncoding("utf8");
-        res.on("data", (chunk) => {
-          text += chunk;
+        // Roh eingesammelt: das Log kommt gerahmt und in Zeichen umgewandelt
+        // wären seine Kopfbytes nicht mehr zu finden (req-035).
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => {
+          chunks.push(chunk);
         });
-        res.on("end", () =>
-          resolve({ status: res.statusCode ?? 0, body: text }),
-        );
+        res.on("end", () => {
+          const raw = Buffer.concat(chunks);
+          resolve({ status: res.statusCode ?? 0, body: raw.toString("utf8"), raw });
+        });
       },
     );
     req.on("timeout", () => req.destroy(new Error("Docker antwortet nicht")));
@@ -196,6 +226,20 @@ export function createSocketDocker(
       return { exitCode: info.ExitCode, output: started.body.trim() };
     },
 
+    async logs(id, tail) {
+      const res = expectOk(
+        await request(
+          socketPath,
+          "GET",
+          `/containers/${encodeURIComponent(id)}/logs?stdout=1&stderr=1&tail=${encodeURIComponent(
+            String(Math.max(1, Math.floor(tail))),
+          )}`,
+        ),
+        "Log lesen",
+      );
+      return demuxDockerLogs(res.raw);
+    },
+
     async restart(id) {
       expectOk(
         await request(
@@ -252,6 +296,14 @@ export function createRemoteDocker(
         cmd,
       })) as ExecResult;
       return { exitCode: data.exitCode ?? null, output: data.output ?? "" };
+    },
+    async logs(id, tail) {
+      const data = (await call(
+        `/containers/${encodeURIComponent(id)}/logs?tail=${encodeURIComponent(
+          String(Math.max(1, Math.floor(tail))),
+        )}`,
+      )) as { logs?: string };
+      return data.logs ?? "";
     },
     async restart(id) {
       await post(`/containers/${encodeURIComponent(id)}/restart`);

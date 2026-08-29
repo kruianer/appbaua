@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { readHealthOverview, runDueChecks } from "@/lib/health-service";
+import {
+  readHealthOverview,
+  runDueChecks,
+  runDueLogAnalyses,
+} from "@/lib/health-service";
 
 // Zustandsübersicht (req-032). Die Antwort ist IMMER der zuletzt gespeicherte
 // Stand — die fällige Prüfrunde wird nur angestoßen und nicht abgewartet.
@@ -15,6 +19,12 @@ export async function GET() {
   const overview = await readHealthOverview();
   void runDueChecks().catch(() => {
     /* eine gescheiterte Runde darf die Seite nicht mitreißen */
+  });
+  // Dasselbe für die regelmäßige Log-Analyse (req-035): angestoßen, nicht
+  // abgewartet — sie dauert Sekunden und ihr Ergebnis kommt mit der nächsten
+  // Abfrage auf die Karte.
+  void runDueLogAnalyses().catch(() => {
+    /* eine gescheiterte Analyse darf die Überwachung nicht mitreißen */
   });
   return NextResponse.json(overview);
 }

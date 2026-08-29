@@ -20,12 +20,25 @@ export type HealthSettings = {
    * es kommt nur keine Nachricht.
    */
   telegram: boolean;
+  /**
+   * Lässt die KI der App regelmäßig deren Logs durchsehen (req-035)? Aus heißt:
+   * es wird kein Aufruf gemacht — der Knopf auf der Karte bleibt davon
+   * unberührt, denn der ist eine ausdrückliche Entscheidung des Nutzers.
+   */
+  logAnalysis: boolean;
+  /** Und dasselbe bei einem gemeldeten Ausfall (req-035). Getrennt schaltbar. */
+  logAnalysisOnFailure: boolean;
+  /** Abstand der regelmäßigen Log-Analyse in Stunden (Vorgabe 24). */
+  logAnalysisIntervalHours: number;
 };
 
 export const DEFAULT_HEALTH_SETTINGS: HealthSettings = {
   intervalMinutes: 5,
   aiIntervalHours: 24,
   telegram: true,
+  logAnalysis: true,
+  logAnalysisOnFailure: true,
+  logAnalysisIntervalHours: 24,
   checks: {
     container: true,
     database: true,
@@ -38,6 +51,7 @@ export const DEFAULT_HEALTH_SETTINGS: HealthSettings = {
 /** Untergrenzen: ein Intervall von 0 wäre Dauerlast, eines von 1 Minute reicht. */
 export const MIN_INTERVAL_MINUTES = 1;
 export const MIN_AI_INTERVAL_HOURS = 1;
+export const MIN_LOG_ANALYSIS_INTERVAL_HOURS = 1;
 
 function clampNumber(raw: unknown, min: number, fallback: number): number {
   const n = Number(raw);
@@ -69,15 +83,26 @@ export function normalizeSettings(raw: unknown): HealthSettings {
       MIN_AI_INTERVAL_HOURS,
       DEFAULT_HEALTH_SETTINGS.aiIntervalHours,
     ),
+    logAnalysisIntervalHours: clampNumber(
+      input.logAnalysisIntervalHours,
+      MIN_LOG_ANALYSIS_INTERVAL_HOURS,
+      DEFAULT_HEALTH_SETTINGS.logAnalysisIntervalHours,
+    ),
     // Wie bei den Prüfarten: nur ein ausdrückliches `false` schaltet ab. Ein
     // fehlendes Feld — etwa aus einem vor req-033 gespeicherten Stand — heißt
     // "wie vorgesehen", nicht "stumm".
-    telegram:
-      typeof input.telegram === "boolean"
-        ? input.telegram
-        : DEFAULT_HEALTH_SETTINGS.telegram,
+    telegram: flag(input.telegram, DEFAULT_HEALTH_SETTINGS.telegram),
+    logAnalysis: flag(input.logAnalysis, DEFAULT_HEALTH_SETTINGS.logAnalysis),
+    logAnalysisOnFailure: flag(
+      input.logAnalysisOnFailure,
+      DEFAULT_HEALTH_SETTINGS.logAnalysisOnFailure,
+    ),
     checks,
   };
+}
+
+function flag(raw: unknown, fallback: boolean): boolean {
+  return typeof raw === "boolean" ? raw : fallback;
 }
 
 /** Wie lange ein Ergebnis dieser Prüfart als frisch gilt, in Millisekunden. */

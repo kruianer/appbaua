@@ -52,6 +52,9 @@ function dockerStub(containers: DockerContainer[]) {
     async exec() {
       return { exitCode: 0, output: "" };
     },
+    async logs() {
+      return "";
+    },
     async restart(id) {
       restarts.push(id);
     },
