@@ -108,18 +108,53 @@ unter **DNS → Records** nach `ssh` suchen.
 
 ### A6. Als Dienst einrichten
 
+**Nicht `cloudflared service install` verwenden.** Nachgeprüft am
+08.09.: `cloudflared.service` ist auf diesem Rechner bereits vom
+CellarVoice-prod-Tunnel belegt, und `service install` würde ihn
+überschreiben — CellarVoice wäre damit offline. Jeder Tunnel bekommt
+seinen eigenen Dienst.
+
+Datei anlegen:
+
 ```
-sudo cloudflared service install
-sudo systemctl enable --now cloudflared
+sudo nano /etc/systemd/system/cloudflared-ssh.service
+```
+
+Inhalt:
+
+```ini
+[Unit]
+Description=cloudflared (SSH-Zugang zum Beelink)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=kruianer
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel run beelink-ssh
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=5
+StartLimitIntervalSec=120
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Starten:
+
+```
+sudo systemctl daemon-reload
+sudo systemctl enable --now cloudflared-ssh
 ```
 
 Der Tunnel startet damit automatisch mit der Maschine — genau wie die
-App-Tunnel.
+App-Tunnel, aber ohne ihnen ins Gehege zu kommen.
 
 ### A7. Prüfen, dass er läuft
 
 ```
-systemctl status cloudflared --no-pager | head -12
+systemctl status cloudflared-ssh --no-pager | head -12
 ```
 
 Erwartet: `active (running)` und in den Zeilen darunter mehrere
