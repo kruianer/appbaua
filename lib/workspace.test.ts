@@ -11,6 +11,8 @@ import {
   isStaleBranchPush,
   isTransientNetworkError,
   prepareRepo,
+  pushStages,
+  unpushedCommitCount,
   prepareRepoOnConvention,
   prepareRepoOnDevOrDefault,
   remoteUrl,
@@ -911,5 +913,79 @@ describe("Branch-Konvention des Zielrepos (req-020)", () => {
     for (const call of calls) {
       for (const arg of call.args) expect(arg).not.toContain(PAT);
     }
+  });
+});
+
+// req-036: Bricht ein Lauf ab, bleiben die fertigen Etappen als Commits stehen
+// (`reset --hard` setzt auf HEAD zurück, nicht dahinter). Sie lägen dann aber
+// nur im Container — beim nächsten Neuaufsetzen wären sie weg. Also werden sie
+// gepusht, bevor der Lauf endet.
+describe("Etappen eines abgebrochenen Laufs retten (req-036)", () => {
+  /** Antwortet `rev-list --count` mit n. */
+  const withCount = (n: number, pushOk = true) =>
+    fakeGit((args) => {
+      if (args[0] === "rev-list") return { stdout: `${n}\n` };
+      if (args[0] === "push" && !pushOk)
+        return { ok: false, code: 1, stderr: "remote hung up" };
+      return undefined;
+    });
+
+  it("AC: fertige Etappen werden gepusht", async () => {
+    const { runImpl, calls } = withCount(3);
+    const res = await pushStages(repoDir(FRESH), "main", PAT, { runImpl });
+
+    expect(res.pushed).toBe(3);
+    expect(res.detail).toContain("3 Etappe(n) gesichert");
+    expect(sub(calls, "push")?.args).toEqual(["push", "origin", "main"]);
+  });
+
+  it("AC: ohne Etappen wird nicht gepusht", async () => {
+    const { runImpl, calls } = withCount(0);
+    const res = await pushStages(repoDir(FRESH), "main", PAT, { runImpl });
+
+    expect(res.pushed).toBe(0);
+    expect(calls.some((c) => c.args[0] === "push")).toBe(false);
+  });
+
+  it("AC: es wird NICHTS committet — halbfertige Arbeit gehoert verworfen", async () => {
+    const { runImpl, calls } = withCount(2);
+    await pushStages(repoDir(FRESH), "main", PAT, { runImpl });
+
+    expect(calls.some((c) => c.args[0] === "commit")).toBe(false);
+    expect(calls.some((c) => c.args[0] === "add")).toBe(false);
+  });
+
+  it("ein fehlgeschlagener Push wirft nicht, sondern berichtet", async () => {
+    // Die Arbeit liegt dann weiterhin lokal und wird beim nächsten
+    // erfolgreichen Lauf mitgepusht. Ein Absturz hier würde einen bereits
+    // gescheiterten Lauf ein zweites Mal scheitern lassen.
+    const { runImpl } = withCount(2, false);
+    const res = await pushStages(repoDir(FRESH), "main", PAT, { runImpl });
+
+    expect(res.pushed).toBe(0);
+    expect(res.detail).toContain("liegen lokal");
+    expect(res.detail).not.toContain(PAT);
+  });
+
+  it("kennt git den Remote-Zweig nicht, gilt: nichts zu retten", async () => {
+    const { runImpl, calls } = fakeGit((args) =>
+      args[0] === "rev-list"
+        ? { ok: false, code: 128, stderr: "unknown revision" }
+        : undefined,
+    );
+    const res = await pushStages(repoDir(FRESH), "main", PAT, { runImpl });
+
+    expect(res.pushed).toBe(0);
+    expect(calls.some((c) => c.args[0] === "push")).toBe(false);
+  });
+
+  it("unpushedCommitCount zaehlt gegen den Remote-Zweig", async () => {
+    const { runImpl, calls } = withCount(5);
+    expect(await unpushedCommitCount(repoDir(FRESH), "dev", { runImpl })).toBe(5);
+    expect(sub(calls, "rev-list")?.args).toEqual([
+      "rev-list",
+      "--count",
+      "origin/dev..HEAD",
+    ]);
   });
 });

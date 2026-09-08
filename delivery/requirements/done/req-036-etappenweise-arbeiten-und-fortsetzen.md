@@ -97,3 +97,62 @@ Kriterien er erledigt hat und bei welchem er abbrach.
 - Rückgängigmachen einzelner Etappen über die Oberfläche.
 - Automatisches Aufräumen unfertiger Etappen-Commits, wenn ein Paket
   endgültig aufgegeben wird.
+
+# Umsetzung am 2026-09-08
+
+Selbst umgesetzt statt vom Worker: Er scheiterte zweimal daran, beide
+Male an der Netzstörung, gegen die dieses Requirement schützen soll.
+
+**Was fertig ist**
+
+`lib/acceptance-criteria.ts` liest die Kästchen einer .md, findet das
+nächste offene, setzt ein Häkchen und baut daraus die Commit-Nachricht.
+Zwei Entscheidungen darin waren nicht selbstverständlich:
+
+- Gelesen wird NUR der Abschnitt unter der Kriterien-Überschrift. Unter
+  "Out of Scope" stehen ebenfalls Kästchen — würden sie mitzählen, hakte
+  der Worker Abgrenzungen ab, also Arbeit, die niemand verlangt hat.
+- `markDone` ersetzt nur das Kästchen und lässt den Rest der Zeile
+  Zeichen für Zeichen stehen. Ein Neu-Schreiben verlöre bei mehrzeiligen
+  Kriterien den Rest.
+
+Der Auftragstext in `lib/claude-runner.ts` verbot das Committen
+ausdrücklich — das war die eigentliche Sperre. Er beschreibt jetzt die
+Etappen und behält nur das Push-Verbot: Der Worker kennt den Zweig, trägt
+die Zugangsdaten und ist die einzige Stelle, die einen abgelehnten Push
+wiederholen kann (bug-017).
+
+`pushStages` in `lib/workspace.ts` sichert bei einem Abbruch, was Claude
+selbst committet hat — und committet dabei bewusst NICHTS: Was noch offen
+ist, ist eine halbfertige Etappe und gehört verworfen.
+
+Angewendet an fünf Stellen in `execute-step.ts`: abgelaufene Anmeldung,
+Rate-Limit, Netzabbruch (mit und ohne Zähler) und der gewöhnliche
+Fehlschlag — letzterer ist der wichtigste, denn dort landet die
+60-Minuten-Grenze.
+
+**Zwei Dinge, die ich beim Bauen geprüft und anders gefunden habe**
+
+`discardChanges` musste NICHT geändert werden. `git reset --hard` ohne
+Ziel setzt auf HEAD zurück, und HEAD ist nach einer Etappe bereits der
+neue Stand — committete Etappen überleben also von selbst. In einem
+Wegwerf-Repo nachgestellt und bestätigt. Was fehlte, war allein das
+Pushen.
+
+Wiederkehrende Typen (Code-Review, Security) werden ausgenommen. Sie
+haben kein Arbeitspaket und damit keine Etappen; sie anzufassen hätte ihr
+Verhalten geändert — ein bestehender Test hat das aufgedeckt.
+
+14 Tests für die Kriterien-Logik, 6 für `pushStages`, 4 für den
+Abbruch-Weg. 1142 Tests grün, Typecheck und Lint sauber.
+
+**Was NICHT umgesetzt ist**
+
+Das Fortsetzen ist Claudes Sache: Der Auftragstext sagt ihm, beim ersten
+offenen Kriterium zu beginnen, und die Häkchen stehen in der Datei. Der
+Worker prüft das aber nicht nach — er zählt weder, wie weit ein Lauf kam,
+noch stellt er sicher, dass wirklich fortgesetzt statt neu begonnen wird.
+Ob das reicht, zeigt erst der Betrieb.
+
+Ebenfalls offen: Der Verlauf nennt zwar die geretteten Etappen, aber
+nicht, bei welchem Kriterium ein Lauf abbrach.

@@ -17,6 +17,7 @@ import {
   NO_CHANGES_DETAIL,
   commitAndPush,
   discardChanges,
+  pushStages,
   headCommit,
   listReady,
   moveMd,
@@ -200,6 +201,11 @@ export type ExecuteDeps = {
   moveMd: typeof moveMd;
   /** Drop what a failed run left in the working copy (bug-002). */
   discardChanges: typeof discardChanges;
+  /**
+   * Fertige Etappen eines abgebrochenen Laufs sichern (req-036). Ohne das
+   * laegen sie nur im Arbeitsverzeichnis des Containers.
+   */
+  pushStages: typeof pushStages;
   /** Which commit a filed report describes (req-010). */
   headCommit: typeof headCommit;
   /** Write the report file into the repo working copy (req-010). */
@@ -226,6 +232,41 @@ export type ExecuteDeps = {
   token: string | undefined;
 };
 
+/**
+ * Fertige Etappen sichern, bevor der Rest verworfen wird (req-036).
+ *
+ * Reihenfolge und Fehlerbehandlung sind hier das Entscheidende:
+ *
+ *  - Erst pushen, dann verwerfen. `discardChanges` setzt zwar nur auf HEAD
+ *    zurück und lässt Commits stehen — aber gepusht werden müssen sie
+ *    trotzdem, sonst liegen sie nur im Container.
+ *  - Nie werfen. Diese Funktion läuft ausschliesslich auf einem Weg, der
+ *    ohnehin schon schiefgegangen ist; ein Fehler beim Retten darf daraus
+ *    keinen zweiten machen. Konnte nicht gepusht werden, bleibt die Arbeit
+ *    lokal und geht beim nächsten erfolgreichen Lauf mit.
+ *
+ * Gibt einen Zusatz für die Verlaufsmeldung zurück, oder "" wenn es nichts zu
+ * sichern gab.
+ */
+async function keepStages(
+  d: ExecuteDeps,
+  dir: string,
+  branch: string,
+  token: string,
+  hasWorkItem: boolean,
+): Promise<string> {
+  // Ein wiederkehrender Typ (Code-Review, Security) hat kein Arbeitspaket und
+  // damit keine Etappen. Ihn anzufassen waere nicht nur nutzlos, sondern
+  // aenderte sein Verhalten: Ein gescheiterter Review-Lauf raeumt heute
+  // bewusst NICHTS auf, weil es nichts aufzuraeumen gibt.
+  if (!hasWorkItem) return "";
+  const res = await d
+    .pushStages(dir, branch, token)
+    .catch(() => ({ pushed: 0, detail: "" }));
+  await d.discardChanges(dir).catch(() => {});
+  return res.detail ? ` — ${res.detail}` : "";
+}
+
 const defaultDeps = (): ExecuteDeps => ({
   prepareRepo: prepareRepoOnConvention,
   listReady,
@@ -233,6 +274,7 @@ const defaultDeps = (): ExecuteDeps => ({
   commitAndPush,
   moveMd,
   discardChanges,
+  pushStages,
   headCommit,
   writeRepoFile,
   readRepoFile,
@@ -436,10 +478,10 @@ export async function executeStep(
     // and an actionable message instead of the raw OAuth error text. Checked
     // before the rate-limit patterns since the two failure texts do not overlap.
     if (isAuthExpired(outcome.summary)) {
-      await d.discardChanges(dir).catch(() => {});
+      const kept = await keepStages(d, dir, branch, token, Boolean(src.base && mdName));
       return {
         kind: "auth-expired",
-        message: AUTH_EXPIRED_MESSAGE,
+        message: `${AUTH_EXPIRED_MESSAGE}${kept}`,
         pauseUntil: d.now().getTime() + AUTH_EXPIRED_PAUSE_MS,
         md: runMd(),
       };
@@ -450,10 +492,10 @@ export async function executeStep(
     // in ready/ (the in-progress claim was never committed, so discarding
     // restores it), and tell the loop to pause until the limit resets.
     if (isRateLimit(outcome.summary)) {
-      await d.discardChanges(dir).catch(() => {});
+      const kept = await keepStages(d, dir, branch, token, Boolean(src.base && mdName));
       return {
         kind: "rate-limited",
-        message: `Rate-Limit: ${outcome.summary}`,
+        message: `Rate-Limit: ${outcome.summary}${kept}`,
         pauseUntil: pauseUntilFrom(outcome.summary, d.now().getTime()),
         md: runMd(),
       };
@@ -488,22 +530,28 @@ export async function executeStep(
           };
         }
         await d.setNetworkAbortCounts({ ...counts, [key]: attempts }).catch(() => {});
-        await d.discardChanges(dir).catch(() => {});
+        const kept = await keepStages(d, dir, branch, token, Boolean(src.base && mdName));
         return {
           kind: "network-abort",
-          message: `${NETWORK_ABORT_MESSAGE} (Versuch ${attempts}/${NETWORK_ABORT_MAX_ATTEMPTS}): ${outcome.summary}`,
+          message: `${NETWORK_ABORT_MESSAGE} (Versuch ${attempts}/${NETWORK_ABORT_MAX_ATTEMPTS}): ${outcome.summary}${kept}`,
           pauseUntil: d.now().getTime() + NETWORK_ABORT_PAUSE_MS,
           md: runMd(),
         };
       }
-      await d.discardChanges(dir).catch(() => {});
+      const keptNa = await keepStages(d, dir, branch, token, Boolean(src.base && mdName));
       return {
         kind: "network-abort",
-        message: `${NETWORK_ABORT_MESSAGE}: ${outcome.summary}`,
+        message: `${NETWORK_ABORT_MESSAGE}: ${outcome.summary}${keptNa}`,
         pauseUntil: d.now().getTime() + NETWORK_ABORT_PAUSE_MS,
         md: runMd(),
       };
     }
+    // Auch ein echter Fehlschlag darf fertige Etappen nicht mitnehmen
+    // (req-036). Der haeufigste Fall hier ist die 60-Minuten-Grenze: Die .md
+    // wandert zu Recht nach failed/, weil sie so nicht durchlaeuft — aber was
+    // in der Stunde fertig wurde, ist deswegen nicht wertlos. parkFailed
+    // verwirft als Erstes, deshalb muss das Sichern davor passieren.
+    const keptErr = await keepStages(d, dir, branch, token, Boolean(src.base && mdName));
     // Park the .md under failed/ and push that move (file-driven only), so the
     // same task is not picked up again on the next pass (bug-002).
     const parked =
@@ -512,7 +560,7 @@ export async function executeStep(
         : "";
     return {
       kind: "error",
-      message: `${PHASE_CLAUDE}: ${outcome.summary}${parked}`,
+      message: `${PHASE_CLAUDE}: ${outcome.summary}${keptErr}${parked}`,
       md: runMd(),
     };
   }

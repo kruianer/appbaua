@@ -530,6 +530,69 @@ export async function discardChanges(dir: string): Promise<void> {
   await run("git", ["clean", "-fd"], { cwd: dir });
 }
 
+/**
+ * Wie viele Commits liegen lokal, die das Remote noch nicht hat?
+ *
+ * Das sind seit req-036 die fertigen Etappen eines Laufs, der abgebrochen ist,
+ * bevor er pushen konnte. Sie zu erkennen ist die Voraussetzung dafür, sie zu
+ * retten — sonst wären sie zwar nicht verworfen (`reset --hard` setzt auf HEAD
+ * zurück und lässt Commits stehen), aber sie lägen nur im Arbeitsverzeichnis
+ * des Containers und wären beim nächsten Neuaufsetzen weg.
+ *
+ * 0 bei jedem Zweifel: Kennt git den Remote-Zweig nicht, ist die Frage nicht
+ * beantwortbar, und "es gibt nichts zu retten" ist die harmlosere Annahme als
+ * ein Push ins Ungewisse.
+ */
+export async function unpushedCommitCount(
+  dir: string,
+  branch: string,
+  deps: WorkspaceDeps = {},
+): Promise<number> {
+  const git = deps.runImpl ?? run;
+  const res = await git(
+    "git",
+    ["rev-list", "--count", `origin/${branch}..HEAD`],
+    { cwd: dir },
+  );
+  if (!res.ok) return 0;
+  const n = Number(res.stdout.trim());
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Die fertigen Etappen eines abgebrochenen Laufs pushen (req-036).
+ *
+ * Anders als `commitAndPush` committet das hier NICHTS: Was noch nicht
+ * committet ist, ist eine halbfertige Etappe, und die gehört verworfen, nicht
+ * gesichert. Gepusht wird nur, was Claude selbst als fertig committet hat.
+ *
+ * Schlägt der Push fehl, ist das kein Grund, den Lauf anders zu bewerten — die
+ * Arbeit liegt dann weiterhin lokal und wird beim nächsten erfolgreichen Lauf
+ * mitgepusht. Deshalb gibt diese Funktion nur Auskunft und wirft nie.
+ */
+export async function pushStages(
+  dir: string,
+  branch: string,
+  token: string,
+  deps: WorkspaceDeps = {},
+): Promise<{ pushed: number; detail: string }> {
+  const git = deps.runImpl ?? run;
+  const count = await unpushedCommitCount(dir, branch, deps);
+  if (count === 0) return { pushed: 0, detail: "" };
+
+  const res = await git("git", ["push", "origin", branch], {
+    cwd: dir,
+    env: authEnv(token),
+  });
+  if (!res.ok) {
+    return {
+      pushed: 0,
+      detail: `${count} Etappe(n) liegen lokal, Push fehlgeschlagen: ${redact(res.stderr, [token])}`,
+    };
+  }
+  return { pushed: count, detail: `${count} Etappe(n) gesichert` };
+}
+
 export type PushOptions = WorkspaceDeps & {
   /**
    * Which branch to push to. Defaults to `dev`, the branch the worker commits
