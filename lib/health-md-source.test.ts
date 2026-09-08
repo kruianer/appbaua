@@ -84,3 +84,64 @@ describe("fetchHealthMd", () => {
     expect(calls).toBe(2);
   });
 });
+
+// Gefunden am 08.09. im Betrieb: Die Zustandsseite meldete "kein Abschnitt
+// ## Datenbank in der health.md", obwohl die Datei einwandfrei im Repo lag.
+// Ursache war ein einzelner fehlgeschlagener Aufruf — bei einer stockenden
+// Leitung reicht einer. Er wurde wie "Datei existiert nicht" behandelt UND
+// zehn Minuten zwischengespeichert, also war die Überwachung so lange blind
+// und schob es dem Betreiber in die Schuhe.
+describe("health.md — nicht lesbar ist nicht dasselbe wie nicht vorhanden", () => {
+  /** Antwortet mit einem Serverfehler statt mit 404. */
+  function stubFailing(status: number) {
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls += 1;
+      return { ok: false, status, text: async () => "" };
+    }) as unknown as typeof fetch;
+    return { fetchImpl, calls: () => calls };
+  }
+
+  it("AC: ein Serverfehler wird NICHT als 'keine Datei' zwischengespeichert", async () => {
+    const fail = stubFailing(502);
+    expect(await fetchHealthMd(repo, { token: "t", fetchImpl: fail.fetchImpl })).toBeNull();
+
+    // Der zweite Aufruf muss es erneut versuchen — käme die Antwort aus dem
+    // Zwischenspeicher, bliebe die Überwachung zehn Minuten blind.
+    const ok = stub({ dev: "# Health-Checks\n\n## Datenbank\n" });
+    const text = await fetchHealthMd(repo, { token: "t", fetchImpl: ok.fetchImpl });
+    expect(text).toContain("## Datenbank");
+  });
+
+  it("AC: ein 404 heisst wirklich 'keine Datei' und wird gespeichert", async () => {
+    // Der Unterschied zum Fall darüber: Hier hat GitHub belastbar geantwortet.
+    const nichts = stub({});
+    expect(await fetchHealthMd(repo, { token: "t", fetchImpl: nichts.fetchImpl })).toBeNull();
+    const vorher = nichts.urls.length;
+
+    await fetchHealthMd(repo, { token: "t", fetchImpl: nichts.fetchImpl });
+    expect(nichts.urls.length).toBe(vorher); // aus dem Zwischenspeicher
+  });
+
+  it("auch ein 403 (Token-Problem) gilt als 'nicht nachsehen koennen'", async () => {
+    const fail = stubFailing(403);
+    expect(await fetchHealthMd(repo, { token: "t", fetchImpl: fail.fetchImpl })).toBeNull();
+
+    const ok = stub({ dev: "# Health-Checks\n\n## Web\n" });
+    expect(await fetchHealthMd(repo, { token: "t", fetchImpl: ok.fetchImpl })).toContain(
+      "## Web",
+    );
+  });
+
+  it("eine abgerissene Verbindung wird ebenfalls nicht gespeichert", async () => {
+    const fetchImpl = (async () => {
+      throw new Error("fetch failed");
+    }) as unknown as typeof fetch;
+    expect(await fetchHealthMd(repo, { token: "t", fetchImpl })).toBeNull();
+
+    const ok = stub({ dev: "# Health-Checks\n\n## Datenbank\n" });
+    expect(await fetchHealthMd(repo, { token: "t", fetchImpl: ok.fetchImpl })).toContain(
+      "## Datenbank",
+    );
+  });
+});

@@ -44,7 +44,14 @@ async function fetchRef(
       },
     },
   );
-  if (!res.ok) return null;
+  // 404 heisst: Die Datei gibt es wirklich nicht — eine belastbare Antwort, die
+  // zwischengespeichert werden darf. Alles andere (403, 500, 502, ein
+  // abgebrochener Aufruf) heisst nur: Wir konnten nicht nachsehen. Das als
+  // "keine Datei" zu speichern hiesse, die Ueberwachung fuer zehn Minuten blind
+  // zu machen und dabei "nicht konfiguriert" zu melden — was wie ein Fehler des
+  // Betreibers aussieht, obwohl nur die Leitung stockte.
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`health.md nicht lesbar: HTTP ${res.status}`);
   return res.text();
 }
 
@@ -69,6 +76,8 @@ export async function fetchHealthMd(
 
   let text: string | null = null;
   try {
+    // Erst dev — dort legt der setup-health-Skill die Datei ab. Nur wenn sie
+    // dort nachweislich fehlt (404), wird der Standard-Branch gefragt.
     text =
       (await fetchRef(ownerRepo, "dev", token, doFetch)) ??
       (await fetchRef(ownerRepo, null, token, doFetch));
