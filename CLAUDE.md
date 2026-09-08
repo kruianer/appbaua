@@ -27,6 +27,13 @@ Richtung dafür steht — falls vorhanden — in
 [delivery/idea-direction.md](delivery/idea-direction.md) und wird vom
 Nutzer gepflegt. Ohne diese Datei schlägt der Worker frei vor.
 
+## Health
+
+Woran man erkennt, dass diese App funktioniert, steht in
+[delivery/health.md](delivery/health.md) (angelegt über den Skill
+`setup-health`). Der Worker liest sie bei der Zustandsübersicht
+(req-032) und prüft danach — was dort nicht steht, wird nicht geprüft.
+
 ## Security
 
 Der Worker prüft dieses Repo höchstens einmal pro Tag auf Sicherheit
