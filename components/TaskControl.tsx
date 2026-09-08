@@ -158,7 +158,15 @@ export function TaskControl({
   );
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
+    <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              // bug-021: vertikal scrollen ja, seitlich verschieben nein.
+              overflowX: "clip",
+              padding: "0 20px 14px",
+            }}
+          >
       {/* Global worker main switch (req-003) */}
       <div
         className="card elev-md"

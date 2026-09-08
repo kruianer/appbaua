@@ -21,8 +21,8 @@ import type { StepDecision } from "./execute-step";
 const WED_18 = new Date(2026, 6, 22, 18, 0, 0);
 
 const repos: Repo[] = [
-  { id: "r1", name: "appbaua", url: "u1", active: true, model: "sonnet" },
-  { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet" },
+  { id: "r1", name: "appbaua", url: "u1", active: true, model: "sonnet", monitored: false },
+  { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet", monitored: false },
 ];
 
 let logStore: RunLogStore;
@@ -293,6 +293,82 @@ describe("worker loop — Dauerfehler pausiert (bug-002)", () => {
     // The wait matches the reset distance, not the 5-minute empty pause.
     expect(slept[0]).toBe(resetMs - WED_18.getTime());
     expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
+  });
+
+  it("bug-019: an auth-expired step pauses with its own reason, not the empty pause", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const stop = new Error("stop");
+    const pauseMs = 6 * 60 * 60_000;
+    const resumeMs = WED_18.getTime() + pauseMs;
+    const pauseArgs: Array<{ iso: string | null; reason?: string | null }> = [];
+    const slept: number[] = [];
+    const d = deps({
+      runStep: async (): Promise<StepDecision> => ({
+        kind: "auth-expired",
+        message: "Anmeldung abgelaufen. Bitte im Worker-Container `claude login` ausführen.",
+        pauseUntil: resumeMs,
+      }),
+      setPauseUntil: async (iso, reason) => {
+        pauseArgs.push({ iso, reason });
+      },
+      sleep: async (ms: number) => {
+        slept.push(ms);
+        throw stop; // leave the endless loop after the first pause
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    expect(pauseArgs[0].iso).toBe(new Date(resumeMs).toISOString());
+    expect(pauseArgs[0].reason).toContain("Anmeldung");
+    expect(slept[0]).toBe(resumeMs - WED_18.getTime());
+    expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
+  });
+
+  it("req-038: a network-abort step pauses briefly, with its own reason, not the empty pause", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const stop = new Error("stop");
+    const pauseMs = 3 * 60_000;
+    const resumeMs = WED_18.getTime() + pauseMs;
+    const pauseArgs: Array<{ iso: string | null; reason?: string | null }> = [];
+    const slept: number[] = [];
+    const d = deps({
+      runStep: async (): Promise<StepDecision> => ({
+        kind: "network-abort",
+        message: "Netzabbruch (Versuch 1/3): API Error: Connection closed mid-response",
+        pauseUntil: resumeMs,
+        md: "bug-001.md",
+      }),
+      setPauseUntil: async (iso, reason) => {
+        pauseArgs.push({ iso, reason });
+      },
+      sleep: async (ms: number) => {
+        slept.push(ms);
+        throw stop; // leave the endless loop after the first pause
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    expect(pauseArgs[0].iso).toBe(new Date(resumeMs).toISOString());
+    expect(pauseArgs[0].reason).toContain("Netzabbruch");
+    expect(slept[0]).toBe(resumeMs - WED_18.getTime());
+    expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
+  });
+
+  it("req-038: a network-abort step logs as 'idle' with the reason, not a generic error", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const resumeMs = WED_18.getTime() + 3 * 60_000;
+    await runOnce(
+      { n: 0 },
+      deps({
+        runStep: async (): Promise<StepDecision> => ({
+          kind: "network-abort",
+          message: "Netzabbruch (Versuch 1/3): API Error: Connection closed mid-response",
+          pauseUntil: resumeMs,
+          md: "bug-001.md",
+        }),
+      }),
+    );
+    const [row] = await logStore.list(0, 1);
+    expect(row.status).toBe("idle"); // recognisable as waiting, not a failure
+    expect(row.message).toContain("Netzabbruch");
   });
 
   it("a pass that blows up entirely pauses too", async () => {

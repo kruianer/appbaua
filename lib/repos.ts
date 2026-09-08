@@ -29,6 +29,14 @@ export type Repo = {
    * until changed; a new run picks it up, a running step finishes with its own.
    */
   model: RepoModel;
+  /**
+   * Whether this repo's app shows up on the Zustandsseite and gets checked
+   * (req-032). Deliberately independent of `active`: an app can be watched
+   * without the worker touching it, and worked on without being watched.
+   * Off by default — the checks reach into a live system, so being watched is
+   * something the operator switches on, not something a new repo inherits.
+   */
+  monitored: boolean;
 };
 
 /**

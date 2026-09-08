@@ -27,8 +27,15 @@ import {
   STACK_FILE,
   type TestGateResult,
 } from "./test-gate";
+import {
+  NETWORK_ABORT_MAX_ATTEMPTS,
+  NETWORK_ABORT_MESSAGE,
+  NETWORK_ABORT_PAUSE_MS,
+  networkAbortKey,
+} from "./network-abort";
+import type { NetworkAbortCounts } from "./network-abort-store";
 
-const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet" };
+const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
@@ -110,6 +117,21 @@ function writerFake() {
   return vi.fn(async (_dir: string, _rel: string, _content: string) => {});
 }
 
+/**
+ * In-memory fake for the network-abort counter (req-038), so a test can drive
+ * several executeStep() calls in a row and see the count actually persist
+ * between them — the same thing the real store guarantees across a restart.
+ */
+function networkAbortCountsFake(initial: NetworkAbortCounts = {}) {
+  let counts = { ...initial };
+  return {
+    get: vi.fn(async () => ({ ...counts })),
+    set: vi.fn(async (next: NetworkAbortCounts) => {
+      counts = { ...next };
+    }),
+  };
+}
+
 function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
   return {
     token: "tok",
@@ -134,6 +156,10 @@ function deps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
     runTestGate: vi.fn(async (_dir: string, _stack: string | null) => green()),
     setCurrentMd: vi.fn(async (_md: string | null) => {}),
     setCurrentOutput: vi.fn(async (_text: string | null) => {}),
+    ...(() => {
+      const fake = networkAbortCountsFake();
+      return { getNetworkAbortCounts: fake.get, setNetworkAbortCounts: fake.set };
+    })(),
     ...over,
   };
 }
@@ -228,6 +254,103 @@ describe("executeStep (req-006)", () => {
     expect(discardChanges).toHaveBeenCalled(); // half-done work dropped
     expect(d.pauseUntil).toBe(Date.UTC(2026, 6, 26, 21, 0, 0)); // resets-at honoured
     expect(d.message).toContain("Rate-Limit");
+  });
+
+  it("bug-019: an expired-login claude failure -> auth-expired, .md stays in ready, no park", async () => {
+    const moveMd = vi.fn(async () => {});
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary:
+            "Claude-Lauf fehlgeschlagen: Failed to authenticate: OAuth session expired and could not be refreshed",
+          report: "",
+        })),
+        moveMd,
+        discardChanges,
+        now: () => new Date(Date.UTC(2026, 7, 22, 9, 25, 0)),
+      }),
+    );
+    expect(d.kind).toBe("auth-expired");
+    if (d.kind !== "auth-expired") throw new Error("expected auth-expired");
+    // The .md is NOT parked to failed/ — it stays in ready/ for a later retry.
+    expect(moveMd).not.toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(discardChanges).toHaveBeenCalled(); // half-done work dropped
+    // A clear, actionable Verlauf entry — not the raw OAuth error text.
+    expect(d.message).toContain("claude login");
+    expect(d.message).not.toContain("OAuth");
+    // A long pause, well ahead of the usual empty/rate-limit pauses.
+    expect(d.pauseUntil).toBeGreaterThan(Date.UTC(2026, 7, 22, 9, 25, 0) + 60 * 60_000);
+  });
+
+  it("req-038: a dropped connection to the KI provider -> network-abort, .md stays in ready, no park", async () => {
+    const moveMd = vi.fn(async () => {});
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const counts = networkAbortCountsFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "API Error: Connection closed mid-response",
+          report: "",
+        })),
+        moveMd,
+        discardChanges,
+        getNetworkAbortCounts: counts.get,
+        setNetworkAbortCounts: counts.set,
+        now: () => new Date(Date.UTC(2026, 8, 7, 12, 0, 0)),
+      }),
+    );
+    expect(d.kind).toBe("network-abort");
+    if (d.kind !== "network-abort") throw new Error("expected network-abort");
+    // The .md is NOT parked to failed/ — it stays in ready/ for a later retry.
+    expect(moveMd).not.toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(discardChanges).toHaveBeenCalled(); // half-done work dropped
+    // Recognisable as a network abort, not a generic error.
+    expect(d.message).toContain(NETWORK_ABORT_MESSAGE);
+    // Short pause — minutes, not hours (unlike rate-limit/auth-expired).
+    expect(d.pauseUntil).toBe(Date.UTC(2026, 8, 7, 12, 0, 0) + NETWORK_ABORT_PAUSE_MS);
+    // The attempt got counted for this package.
+    expect(await counts.get()).toEqual({
+      [networkAbortKey("appbaua", "bug-001.md")]: 1,
+    });
+  });
+
+  it("req-038: a red test suite still fails normally — the new handling is network-abort-only", async () => {
+    const moveMd = vi.fn(async () => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runTestGate: vi.fn(async () => red("2 Tests rot")),
+        moveMd,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
   });
 
   it("recurring type already ran today -> skip", async () => {
@@ -745,6 +868,10 @@ describe("executeStep — fehlgeschlagene .md wird persistiert (bug-002)", () =>
     expect(d.kind).toBe("error");
     expect(order).toEqual([
       "move delivery/bugs/ready/bug-001.md -> delivery/bugs/in-progress/bug-001.md",
+      // req-036: Erst die fertigen Etappen sichern — danach erst wird
+      // verworfen. Der Push dieser Etappen laeuft ueber pushStages, nicht ueber
+      // commitAndPush, und taucht deshalb hier nicht als "push" auf.
+      "discard",
       // everything the failed attempt left behind goes first — the commit must
       // carry the move and nothing else
       "discard",
@@ -823,6 +950,145 @@ describe("executeStep — fehlgeschlagene .md wird persistiert (bug-002)", () =>
     );
     expect(d.kind).toBe("success");
     expect(discardChanges).not.toHaveBeenCalled();
+  });
+});
+
+// req-038: a connection abort (to the KI provider or to GitHub) is not a
+// failure of the package — same shape as a rate limit (req-029) or an expired
+// login (bug-019), but the pause is short and the counter of consecutive
+// aborts for the SAME package must survive a worker restart.
+describe("executeStep — Netzabbruch (req-038)", () => {
+  const networkAbort = () =>
+    vi.fn(async () => ({
+      ok: false,
+      summary: "API Error: Connection closed mid-response",
+      report: "",
+    }));
+
+  it("AC: three consecutive network aborts for the same package all stay network-abort, none parked", async () => {
+    const moveMd = vi.fn(async () => {});
+    const counts = networkAbortCountsFake();
+    for (let i = 1; i <= 3; i++) {
+      const d = await executeStep(
+        repo,
+        bug,
+        [],
+        deps({
+          listReady: folders({ ready: ["bug-001.md"] }),
+          runClaude: networkAbort(),
+          moveMd,
+          getNetworkAbortCounts: counts.get,
+          setNetworkAbortCounts: counts.set,
+        }),
+      );
+      expect(d.kind).toBe("network-abort");
+      expect(await counts.get()).toEqual({
+        [networkAbortKey("appbaua", "bug-001.md")]: i,
+      });
+    }
+    expect(moveMd).not.toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+  });
+
+  it("AC: the 4th consecutive network abort for the same package parks it and names the attempt count", async () => {
+    const moveMd = vi.fn(async () => {});
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "auf dev gepusht" }));
+    const counts = networkAbortCountsFake({
+      [networkAbortKey("appbaua", "bug-001.md")]: NETWORK_ABORT_MAX_ATTEMPTS,
+    });
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: networkAbort(),
+        moveMd,
+        commitAndPush,
+        getNetworkAbortCounts: counts.get,
+        setNetworkAbortCounts: counts.set,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") return;
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(commitAndPush).toHaveBeenCalled();
+    expect(d.message).toContain(NETWORK_ABORT_MESSAGE);
+    expect(d.message).toContain(String(NETWORK_ABORT_MAX_ATTEMPTS + 1));
+    // The counter is cleared once the package is parked — a later resubmission
+    // starts fresh instead of inheriting this run's count.
+    expect(await counts.get()).toEqual({});
+  });
+
+  it("AC: the counter is per package — a different .md starts fresh", async () => {
+    const counts = networkAbortCountsFake({
+      [networkAbortKey("appbaua", "bug-001.md")]: NETWORK_ABORT_MAX_ATTEMPTS,
+    });
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-002.md"] }),
+        runClaude: networkAbort(),
+        getNetworkAbortCounts: counts.get,
+        setNetworkAbortCounts: counts.set,
+      }),
+    );
+    expect(d.kind).toBe("network-abort"); // not parked — bug-002 never aborted before
+    expect(await counts.get()).toEqual({
+      [networkAbortKey("appbaua", "bug-001.md")]: NETWORK_ABORT_MAX_ATTEMPTS,
+      [networkAbortKey("appbaua", "bug-002.md")]: 1,
+    });
+  });
+
+  it("AC: a package that later succeeds lands in done/ with its attempt counter reset", async () => {
+    const moveMd = vi.fn(async () => {});
+    const counts = networkAbortCountsFake({
+      [networkAbortKey("appbaua", "bug-001.md")]: 2,
+    });
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({ ok: true, summary: "erledigt", report: "" })),
+        moveMd,
+        getNetworkAbortCounts: counts.get,
+        setNetworkAbortCounts: counts.set,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(moveMd).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/in-progress/bug-001.md",
+      "delivery/bugs/done/bug-001.md",
+    );
+    expect(await counts.get()).toEqual({});
+  });
+
+  it("a network abort on a recurring task pauses without touching any package counter", async () => {
+    const counts = networkAbortCountsFake();
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      deps({
+        runClaude: networkAbort(),
+        getNetworkAbortCounts: counts.get,
+        setNetworkAbortCounts: counts.set,
+      }),
+    );
+    expect(d.kind).toBe("network-abort");
+    expect(counts.set).not.toHaveBeenCalled();
   });
 });
 
@@ -2394,5 +2660,86 @@ describe("executeStep — Branch des Zielrepos und sichtbare Fehler (req-020)", 
     expect(sec.kind).toBe("error");
     if (sec.kind !== "error") return;
     expect(sec.message).toContain("delivery/security/"); // Bericht bleibt auffindbar
+  });
+});
+
+// req-036: Der eigentliche Punkt des Requirements. Bricht ein Lauf ab, war
+// bisher alles verloren — am 07.09. kostete das 16 Minuten fertige Arbeit an
+// einem Paket, an dem nichts falsch war. Jetzt werden die Etappen, die Claude
+// selbst committet hat, gesichert, bevor der Rest verworfen wird.
+describe("executeStep — fertige Etappen ueberleben einen Abbruch (req-036)", () => {
+  /** Ein Claude-Lauf, der an der 60-Minuten-Grenze scheitert. */
+  const timeout = () =>
+    vi.fn(async () => ({ ok: false, summary: "Timeout (60 min)", report: "" }));
+
+  /** Ein Lauf, der an der Zeitgrenze scheitert, mit zwei fertigen Etappen. */
+  function abortedDeps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
+    return deps({
+      listReady: folders({ ready: ["bug-001.md"] }),
+      runClaude: timeout(),
+      pushStages: vi.fn(async () => ({
+        pushed: 2,
+        detail: "2 Etappe(n) gesichert",
+      })),
+      ...over,
+    });
+  }
+
+  it("AC: die Etappen werden gesichert, bevor verworfen wird", async () => {
+    const order: string[] = [];
+    const pushStages = vi.fn(async () => {
+      order.push("etappen sichern");
+      return { pushed: 2, detail: "2 Etappe(n) gesichert" };
+    });
+    const discardChanges = vi.fn(async () => {
+      order.push("verwerfen");
+    });
+
+    await executeStep(repo, bug, [], abortedDeps({ pushStages, discardChanges }));
+
+    // Die Reihenfolge ist der ganze Punkt: andersherum waeren die Etappen zwar
+    // als Commits noch da, aber nur im Container — und beim naechsten
+    // Neuaufsetzen weg.
+    expect(order[0]).toBe("etappen sichern");
+    expect(order[1]).toBe("verwerfen");
+  });
+
+  it("AC: der Verlauf sagt, dass Arbeit gerettet wurde", async () => {
+    const d = await executeStep(repo, bug, [], abortedDeps());
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") throw new Error("unerwartet");
+    expect(d.message).toContain("2 Etappe(n) gesichert");
+  });
+
+  it("gab es nichts zu sichern, steht auch nichts im Verlauf", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      abortedDeps({
+        pushStages: vi.fn(async () => ({ pushed: 0, detail: "" })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") throw new Error("unerwartet");
+    expect(d.message).not.toContain("Etappe");
+  });
+
+  it("ein fehlgeschlagenes Sichern laesst den Lauf nicht zusaetzlich scheitern", async () => {
+    // Diese Funktion laeuft nur auf einem Weg, der ohnehin schiefging. Ein
+    // Fehler beim Retten darf daraus keinen zweiten machen.
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      abortedDeps({
+        pushStages: vi.fn(async () => {
+          throw new Error("Remote nicht erreichbar");
+        }),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") throw new Error("unerwartet");
+    expect(d.message).toContain("Timeout");
   });
 });

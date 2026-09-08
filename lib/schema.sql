@@ -16,6 +16,12 @@ CREATE INDEX IF NOT EXISTS repos_position_idx ON repos (position);
 -- written before req-028 — the store backfills those to the default (sonnet).
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS model TEXT;
 
+-- Added with req-032: the "überwachen" switch of the Zustandsübersicht. Its own
+-- column, independent of "active" — an app can be watched without the worker
+-- working on it, and worked on without being watched. Existing rows default to
+-- FALSE: watching reaches into a live system and is switched on deliberately.
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Task types (req-002). Predefined types, seeded on first use; the user only
 -- edits priority (position), active and the per-weekday schedule (JSONB:
 -- { mon: {enabled, start, end}, ... }). New types are added via code/seed.
@@ -65,6 +71,22 @@ CREATE INDEX IF NOT EXISTS run_log_started_idx ON run_log (started_at DESC);
 -- line rather than a made-up placeholder, so this column has no DEFAULT.
 ALTER TABLE run_log ADD COLUMN IF NOT EXISTS md TEXT;
 
+-- Added with req-037. error_kind: die Art eines Fehlers ('network',
+-- 'rate-limit', 'auth', 'test-red', 'timeout', 'resources', 'other') als
+-- eigenes Merkmal statt nur als Prosa in message — damit sich Haeufungen
+-- filtern lassen, ohne im Text zu suchen. NULL bei erfolgreichen Laeufen und
+-- bei Zeilen von vor req-037, deshalb kein DEFAULT.
+ALTER TABLE run_log ADD COLUMN IF NOT EXISTS error_kind TEXT;
+
+-- Was unmittelbar nach einem Netzwerkfehler gemessen wurde: war das Ziel
+-- erreichbar, und wie lange dauerte der Verbindungsaufbau? Als JSON-Text, weil
+-- der Inhalt je Fehlerart verschieden ist und sich weiterentwickeln darf, ohne
+-- dass die Tabelle wandert.
+ALTER TABLE run_log ADD COLUMN IF NOT EXISTS diagnostics TEXT;
+
+CREATE INDEX IF NOT EXISTS run_log_error_kind_idx
+  ON run_log (error_kind) WHERE error_kind IS NOT NULL;
+
 -- Live worker status (req-005). Single row keyed "worker". Holds the currently
 -- running step (repo/task_type/started_at) while it runs, and pause_until while
 -- the worker is in its 5-minute empty pause. All null = idle.
@@ -100,6 +122,29 @@ ALTER TABLE worker_status ADD COLUMN IF NOT EXISTS current_model TEXT;
 CREATE TABLE IF NOT EXISTS preview (
   id   TEXT PRIMARY KEY,
   rows JSONB NOT NULL DEFAULT '[]'::jsonb
+);
+
+-- Zustandsübersicht der überwachten Apps (req-032). Four rows, all whole JSON
+-- blobs: 'results' holds the last check results per app (rewritten wholesale
+-- after every round), 'settings' the intervals and the per-Prüfart switches,
+-- 'alerts' what Telegram has already reported (req-033) — so a restart of
+-- the app does not re-announce an outage that was reported hours ago — and
+-- 'heartbeat' when the watchdog at the webhoster last accepted a beat
+-- (req-034), for the same reason: after a restart the Zustandsseite must show
+-- the real last contact, not "noch nie".
+CREATE TABLE IF NOT EXISTS health (
+  id   TEXT PRIMARY KEY,
+  data JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+-- Consecutive network-abort counter per package (req-038). Single row keyed
+-- "worker", one JSON blob mapping "<repo>::<md>" -> how many times in a row
+-- that package just failed on a dropped connection. Must survive a worker
+-- restart, unlike the rate-limit/auth-expired pause which only holds the loop
+-- in memory for its own short wait.
+CREATE TABLE IF NOT EXISTS network_abort_counts (
+  id     TEXT PRIMARY KEY,
+  counts JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 -- Passkey authentication (req-023). Person ≠ operator context: a user signs

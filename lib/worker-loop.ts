@@ -7,6 +7,7 @@ import { getWorkerState } from "./worker-state";
 import { getRunLogStore, isIdleSummary } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
 import { executeStep, type StepDecision } from "./execute-step";
+import { errorKindOf } from "./error-kind";
 import { redact } from "./redact";
 import {
   clearRunningStep,
@@ -35,12 +36,24 @@ export const EMPTY_PAUSE_MS = 5 * 60_000;
 /** Prefix the pause status carries when the wait is a rate limit (req-029). */
 export const RATE_LIMIT_PAUSE_PREFIX = "Pause wegen Rate-Limit bis";
 
+/** Prefix the pause status carries when the wait is an expired login (bug-019). */
+export const AUTH_EXPIRED_PAUSE_PREFIX = "Pause wegen abgelaufener Anmeldung bis";
+
+/** Prefix the pause status carries when the wait is a network abort (req-038). */
+export const NETWORK_ABORT_PAUSE_PREFIX = "Pause wegen Netzabbruch bis";
+
 /**
  * Outcome of one pass. `succeeded` counts steps that got work done (bug-002).
- * `rateLimitUntil` (epoch ms) is set only when a step hit a rate limit and the
- * loop should wait until then instead of the usual empty pause (req-029).
+ * `pauseUntil` (epoch ms) is set only when a step hit a rate limit, an expired
+ * login, or a network abort, and the loop should wait until then instead of
+ * the usual empty pause (req-029, bug-019, req-038); `pauseReason` is the
+ * prefix that pause carries.
  */
-export type PassResult = { succeeded: number; rateLimitUntil?: number };
+export type PassResult = {
+  succeeded: number;
+  pauseUntil?: number;
+  pauseReason?: string;
+};
 
 /** "DD.MM. HH:MM" for the idle-summary message (req-021). */
 function stampDe(iso: string): string {
@@ -128,8 +141,12 @@ export async function runOnce(
   let succeeded = 0;
   /** How many rows this pass wrote — what decides whether it stayed silent. */
   let logged = 0;
-  /** Set when a step hit a rate limit (req-029): epoch ms to resume at. */
-  let rateLimitUntilMs: number | null = null;
+  /**
+   * Set when a step hit a rate limit or an expired login (req-029, bug-019):
+   * epoch ms to resume at, and the pause prefix to show while waiting.
+   */
+  let pauseUntilMs: number | null = null;
+  let pauseReason: string | null = null;
   for (const step of steps) {
     // Stop if the switch was flipped off mid-run (after finishing current step
     // is handled by the loop; here we simply stop starting new steps).
@@ -172,11 +189,16 @@ export async function runOnce(
       continue;
     }
 
-    if (decision.kind === "rate-limited") {
-      // A rate/usage limit hit (req-029): the .md is untouched in ready/, and
-      // every other step this pass would hit the same wall. Record it as its own
+    if (
+      decision.kind === "rate-limited" ||
+      decision.kind === "auth-expired" ||
+      decision.kind === "network-abort"
+    ) {
+      // A rate limit, an expired login, or a network abort hit (req-029,
+      // bug-019, req-038): the .md is untouched in ready/, and every other step
+      // this pass would likely hit the same wall. Record it as its own
       // (non-error) row, then stop the pass and hand the resume time up so the
-      // loop pauses until the limit resets — not the usual 5-minute empty pause.
+      // loop pauses until it resolves — not the usual 5-minute empty pause.
       await log.append({
         startedAt,
         endedAt,
@@ -186,7 +208,13 @@ export async function runOnce(
         message: redact(decision.message),
         md: decision.md ?? null,
       });
-      rateLimitUntilMs = decision.pauseUntil;
+      pauseUntilMs = decision.pauseUntil;
+      pauseReason =
+        decision.kind === "rate-limited"
+          ? RATE_LIMIT_PAUSE_PREFIX
+          : decision.kind === "auth-expired"
+            ? AUTH_EXPIRED_PAUSE_PREFIX
+            : NETWORK_ABORT_PAUSE_PREFIX;
       break;
     }
 
@@ -201,6 +229,11 @@ export async function runOnce(
       message: redact(decision.message),
       // The .md the step worked off, so the Verlauf can name it (req-015).
       md: decision.md ?? null,
+      // req-037: Die Art des Fehlers als eigenes Merkmal, damit sich Haeufungen
+      // filtern lassen, statt im Text zu suchen. Nur bei Fehlern — ein
+      // erfolgreicher Lauf hat keine Art.
+      errorKind:
+        decision.kind === "success" ? null : errorKindOf(decision.message),
     });
     logged += 1;
     // Only success is progress. Counting errors here would keep the loop from
@@ -212,14 +245,15 @@ export async function runOnce(
   // A pass that wrote nothing is about to pause, and a pause nobody can explain
   // is what req-020 is about: say so once. This covers both ways a pass can end
   // up empty — nothing was due at all, and every step that was due had nothing
-  // to do. A rate-limited pass already wrote its own row, so it is not silent.
+  // to do. A rate-limited or auth-expired pass already wrote its own row, so it
+  // is not silent.
   //
   // req-021: consecutive idle passes collapse into ONE growing row instead of a
   // new "nichts zu tun" line every 5 minutes. The row keeps the phase's start
   // ("seit …") and moves its "zuletzt geprüft" forward; upsertIdle does the
   // merge, so a real entry in between breaks the summary and the next idle pass
   // starts a fresh one.
-  if (logged === 0 && rateLimitUntilMs === null) {
+  if (logged === 0 && pauseUntilMs === null) {
     const at = deps.now().toISOString();
     const [newest] = await log.list(0, 1);
     const since =
@@ -237,16 +271,20 @@ export async function runOnce(
 
   // req-022: refresh "Nächste Aktivitäten" after every pass — a real execution
   // changed what is waiting, and even an idle pass can mean a schedule's window
-  // just opened or closed. Skipped during a rate-limit pause: nothing changed
-  // that the preview cares about, and it would only add load right when the
-  // account is already throttled.
-  if (rateLimitUntilMs === null) {
+  // just opened or closed. Skipped during a rate-limit or auth-expired pause:
+  // nothing changed that the preview cares about, and it would only add load
+  // right when the account is already throttled or unauthenticated.
+  if (pauseUntilMs === null) {
     await deps.updatePreview().catch(() => {
       /* best-effort: a stale preview must never break the pass itself */
     });
   }
 
-  return { succeeded, rateLimitUntil: rateLimitUntilMs ?? undefined };
+  return {
+    succeeded,
+    pauseUntil: pauseUntilMs ?? undefined,
+    pauseReason: pauseReason ?? undefined,
+  };
 }
 
 /**
@@ -272,13 +310,16 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
       }
     }
 
-    if (result.rateLimitUntil !== undefined) {
-      // A rate limit was hit (req-029): wait until it resets (not the 5-minute
-      // empty pause) and show WHY, so the card reads "Pause wegen Rate-Limit bis
-      // HH:MM". The .md is untouched in ready/, so the queue retries after.
-      const untilMs = Math.max(result.rateLimitUntil, deps.now().getTime());
+    if (result.pauseUntil !== undefined) {
+      // A rate limit, an expired login, or a network abort was hit (req-029,
+      // bug-019, req-038): wait until it resolves (not the 5-minute empty
+      // pause) and show WHY, so the card reads "Pause wegen Rate-Limit bis
+      // HH:MM", "Pause wegen abgelaufener Anmeldung bis HH:MM", or "Pause wegen
+      // Netzabbruch bis HH:MM". The .md is untouched in ready/, so the queue
+      // retries after.
+      const untilMs = Math.max(result.pauseUntil, deps.now().getTime());
       const until = new Date(untilMs).toISOString();
-      await deps.setPauseUntil(until, RATE_LIMIT_PAUSE_PREFIX);
+      await deps.setPauseUntil(until, result.pauseReason ?? RATE_LIMIT_PAUSE_PREFIX);
       await deps.sleep(untilMs - deps.now().getTime());
       await deps.setPauseUntil(null);
       continue;

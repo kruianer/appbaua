@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Icon } from "./Icon";
 import { SystemMonitor } from "./SystemMonitor";
 import { BackupCodesDisplay } from "./BackupCodesDisplay";
+import { HealthSettings } from "./HealthSettings";
 
 // Einstellungsseite (req-007): der Zustand des Mini-PCs (req-009) und das
 // Löschen des ganzen Verlauf-Logs, dazu ein Platzhalter für das, was folgt.
@@ -146,8 +147,19 @@ export function Settings() {
   }, [clearing]);
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
+    <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              // bug-021: vertikal scrollen ja, seitlich verschieben nein.
+              overflowX: "clip",
+              padding: "0 20px 14px",
+            }}
+          >
       <SystemMonitor />
+
+      {/* req-032: Prüfabstände und Schalter der App-Überwachung. */}
+      <HealthSettings />
 
       <div
         style={{

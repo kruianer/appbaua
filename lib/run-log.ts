@@ -1,5 +1,7 @@
 // Domain type + retention constants for the worker run log (req-004).
 
+import type { ErrorKind } from "./error-kind";
+
 export type RunStatus = "success" | "error" | "idle";
 
 export type RunLogEntry = {
@@ -16,6 +18,24 @@ export type RunLogEntry = {
    * recorded it, so the Verlauf shows no second line for them at all.
    */
   md?: string | null;
+  /**
+   * Die Art des Fehlers (req-037), abgeleitet aus `message`. Nur bei
+   * status === "error" gesetzt; null/absent bei erfolgreichen Laeufen und bei
+   * Eintraegen von vor req-037.
+   *
+   * Warum als eigenes Merkmal und nicht nur im Text: Um zu sehen, ob sich
+   * Netzwerkfehler haeufen, musste man bisher im Text suchen — und wer sucht,
+   * findet auch das Falsche. Die Fehlanalysen im September gingen genau darauf
+   * zurueck.
+   */
+  errorKind?: ErrorKind | null;
+  /**
+   * Was unmittelbar nach dem Fehler gemessen wurde, als Freitext-Zeilen. Bei
+   * einem Netzwerkfehler etwa, ob das Ziel danach erreichbar war und wie lange
+   * der Verbindungsaufbau dauerte — damit im Nachhinein unterscheidbar ist, ob
+   * die Stoerung anhielt oder ein einzelner Aussetzer war.
+   */
+  diagnostics?: string[] | null;
 };
 
 /** A row about to be written (no id yet). */

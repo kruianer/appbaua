@@ -15,6 +15,13 @@
 #                   this environment's cloudflared tunnel token (req-024),
 #                   generated in the Cloudflare dashboard per tunnel — dev and
 #                   prod each get their OWN tunnel and token
+#   TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+#                   optional (req-033): bot key from @BotFather and the ONE chat
+#                   appbaua reports to and accepts commands from
+#   WATCHDOG_URL, WATCHDOG_TOKEN, WATCHDOG_INTERVAL_MINUTES
+#                   optional (req-034): where the Ausfallwächter at the
+#                   webhoster listens and the shared token — see
+#                   watchdog/README.md
 # DATABASE_URL is assembled from the POSTGRES_* vars below.
 
 services:
@@ -69,6 +76,26 @@ services:
       # Docker-Datenträgers des Hosts — es muss dafür kein Host-Pfad gemountet
       # werden (bug-005).
       HOST_DISK: "/"
+      # Zustandsübersicht (req-032): der Weg zur Docker-Engine führt über den
+      # health-agent, NICHT über einen Socket in diesem Container (siehe dort).
+      HEALTH_AGENT_URL: http://health-agent:3100
+      # Telegram (req-033): Bot-Schlüssel und die EINE zugelassene Chat-Kennung.
+      # Beide optional — fehlen sie, meldet appbaua nichts und nimmt keine
+      # Befehle entgegen; die Überwachung selbst läuft unverändert weiter.
+      # Ein Bot ist öffentlich ansprechbar, der ganze Schutz liegt darin, dass
+      # nur diese Chat-Kennung akzeptiert wird. dev und prod sollten je einen
+      # EIGENEN Bot bekommen, sonst kämen beide Umgebungen im selben Chat an.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Herzschlag zum Ausfallwächter beim Webhoster (req-034). Die Meldungen
+      # oben nützen nichts, wenn DIESER Rechner ausfällt — dann sind sie mit
+      # weg. Der Wächter läuft deshalb außerhalb und merkt, wenn der Herzschlag
+      # ausbleibt. Alle drei optional; ohne Adresse und Kennung schlägt appbaua
+      # keinen Herzschlag und läuft unverändert weiter. Einrichtung beim Hoster:
+      # watchdog/README.md.
+      WATCHDOG_URL: ${WATCHDOG_URL:-}
+      WATCHDOG_TOKEN: ${WATCHDOG_TOKEN:-}
+      WATCHDOG_INTERVAL_MINUTES: ${WATCHDOG_INTERVAL_MINUTES:-}
     volumes:
       # Read-only Blick auf das Host-/proc für die System-Kacheln (req-009) —
       # kein Docker-Socket. Dort stehen ALLE Prozesse des Rechners, also auch
@@ -114,6 +141,33 @@ services:
       NODE_ENV: production
     volumes:
       - claude-home:/claude-home
+
+  # Zustandsübersicht der überwachten Apps (req-032). Der einzige Dienst mit
+  # Zugriff auf die Docker-Engine — und bewusst NICHT die App.
+  #
+  # Warum getrennt: bug-005 hat den Lesebereich des internetzugewandten
+  # App-Containers klein gemacht, und der Docker-Socket wäre das genaue
+  # Gegenteil davon (wer mit der Engine reden darf, ist auf dem Host praktisch
+  # root). Der Agent nimmt dafür genau vier Aufrufe entgegen — auflisten, EINE
+  # Umgebungsvariable lesen, einen erlaubten Befehl ausführen, einen Container
+  # neu starten — und weist alles andere ab (agent/routes.ts, agent/index.ts).
+  #
+  # Er veröffentlicht keinen Port: erreichbar ist er nur über das
+  # Compose-Netz, also aus der App heraus. Dieselbe Vertrauensgrenze wie beim
+  # db-Dienst.
+  #
+  # Er läuft als root, weil der Socket auf dem Host root:docker gehört und die
+  # GID der docker-Gruppe von Rechner zu Rechner verschieden ist.
+  health-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HEALTH_AGENT_PORT: "3100"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # External access without an open router port (req-024): cloudflared holds
   # an outbound-only connection to Cloudflare's edge, which then routes the

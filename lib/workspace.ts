@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { redact } from "./redact";
+import { isTransientNetworkError } from "./network-errors";
 import { DEVOPS_FILE, devBranchFrom } from "./dev-branch";
 
 /** What commitAndPush reports when the working copy holds nothing to commit. */
@@ -20,6 +21,12 @@ export const NO_CHANGES_DETAIL = "keine Aenderungen";
 // it is read from the TARGET repo's devops.md. prepareRepo — fixed on `dev`,
 // creating it where there is none — is left for appbaua's OWN checkout, the
 // source of the rollout, where `dev` is a fact and not an assumption.
+//
+// bug-020: every call that leaves the machine (clone, fetch, the ls-remote
+// probes) goes through runRemote, which grants it ONE second attempt when the
+// first failed on the network — and only then. A repo the worker cannot prepare
+// is a repo whose whole run is lost, and a single connect that never came up was
+// costing several of those a week.
 //
 // bug-003: the token is never part of the remote URL — it travels as an HTTP
 // Authorization header supplied per call (see authEnv), so it lands neither in
@@ -49,7 +56,14 @@ export type RunOptions = {
 };
 
 /** Seam so the git calls below can be observed in tests without a real repo. */
-export type WorkspaceDeps = { runImpl?: typeof run };
+export type WorkspaceDeps = {
+  runImpl?: typeof run;
+  /**
+   * The pause between the two attempts of a remote call (bug-020). A seam of
+   * its own so a test does not have to sit the wait out.
+   */
+  sleepImpl?: (ms: number) => Promise<void>;
+};
 
 /** A working copy plus the branch it is sitting on (req-013, req-020). */
 export type PreparedRepo = { dir: string; branch: string };
@@ -120,6 +134,61 @@ export function run(
 }
 
 /**
+ * Was this git call defeated on the way to the remote, rather than by anything
+ * about the repo itself (bug-020)? A connect that never came up, a host that did
+ * not resolve, a connection that dropped mid-transfer — those are the ones a
+ * second attempt a few seconds later regularly gets through.
+ *
+ * A missing permission, an unknown repo or a rejected token read differently and
+ * would fail identically the second time, so none of their words are listed
+ * here: retrying those is nothing but lost minutes.
+ *
+ * `[timeout]` is what `run` appends when IT cut the call off (see
+ * REMOTE_PROBE_TIMEOUT_MS) — the same hanging connection, only noticed by us
+ * instead of by git.
+ */
+// Liegt seit req-037 in `network-errors.ts` — die Oberflaeche braucht dieselbe
+// Pruefung, kann diese Datei aber nicht importieren (node:path, node:fs,
+// Kindprozesse). Re-exportiert, damit die bisherigen Aufrufer unveraendert
+// bleiben.
+export { isTransientNetworkError } from "./network-errors";
+
+/**
+ * How long the second attempt waits (bug-020). Long enough for a blip to pass,
+ * short enough that a real outage is not dragged out — and there is exactly one
+ * retry, so this is paid at most once per call.
+ */
+export const NETWORK_RETRY_DELAY_MS = 5_000;
+
+/**
+ * Wall-clock cap for the ref probes (bug-020). git has no connect timeout of its
+ * own — the reported outage sat 134 s in a connect that was never going to come
+ * up — so the cap has to be ours. It applies to `ls-remote` only: listing refs
+ * is a few kilobytes, so a probe still silent after half a minute is dead, while
+ * clone and fetch move real data and keep their open end.
+ */
+export const REMOTE_PROBE_TIMEOUT_MS = 30_000;
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * A git call that talks to the remote, with exactly ONE second attempt when the
+ * first one lost the network (bug-020). One, not more: a repeated failure is an
+ * outage, and further tries only stretch the standstill.
+ */
+async function runRemote(
+  git: typeof run,
+  args: string[],
+  opts: RunOptions,
+  wait: (ms: number) => Promise<void>,
+): Promise<RunResult> {
+  const first = await git("git", args, opts);
+  if (first.ok || !isTransientNetworkError(first.stderr)) return first;
+  await wait(NETWORK_RETRY_DELAY_MS);
+  return git("git", args, opts);
+}
+
+/**
  * The URL git talks to and stores in `.git/config`: plain https, no credentials
  * (bug-003).
  */
@@ -174,6 +243,7 @@ async function syncRepo(
   normalizedUrl: string,
   token: string,
   git: typeof run,
+  wait: (ms: number) => Promise<void>,
 ): Promise<{ dir: string; auth: Record<string, string> }> {
   const dir = repoDir(normalizedUrl);
   const url = remoteUrl(normalizedUrl);
@@ -186,14 +256,19 @@ async function syncRepo(
     .catch(() => false);
 
   if (!exists) {
-    const clone = await git("git", ["clone", url, dir], { env: auth });
+    const clone = await runRemote(git, ["clone", url, dir], { env: auth }, wait);
     if (!clone.ok) throw new Error(`clone failed: ${redact(clone.stderr, [token])}`);
   } else {
     // Rewriting the remote also heals a working copy an earlier worker left
     // behind with the token in its URL: set-url replaces that line in
     // .git/config with the credential-free one (bug-003).
     await git("git", ["remote", "set-url", "origin", url], { cwd: dir });
-    const fetch = await git("git", ["fetch", "origin"], { cwd: dir, env: auth });
+    const fetch = await runRemote(
+      git,
+      ["fetch", "origin"],
+      { cwd: dir, env: auth },
+      wait,
+    );
     if (!fetch.ok) throw new Error(`fetch failed: ${redact(fetch.stderr, [token])}`);
   }
 
@@ -208,17 +283,23 @@ async function syncRepo(
  * Does the remote have this BRANCH? Asked as `refs/heads/<name>`, so a tag of
  * the same name cannot pass for one — the answer decides whether the rollout
  * may check the branch out, and a wrong yes would end in creating it (req-013).
+ *
+ * A lost connection here is not an answer at all: it would read as "no such
+ * branch" and send the caller off to the default branch, or worse, off to create
+ * one. So this probe gets the second attempt too (bug-020).
  */
 async function remoteHasBranch(
   git: typeof run,
   dir: string,
   auth: Record<string, string>,
   branch: string,
+  wait: (ms: number) => Promise<void>,
 ): Promise<boolean> {
-  const res = await git(
-    "git",
+  const res = await runRemote(
+    git,
     ["ls-remote", "--exit-code", "origin", `refs/heads/${branch}`],
-    { cwd: dir, env: auth },
+    { cwd: dir, env: auth, timeoutMs: REMOTE_PROBE_TIMEOUT_MS },
+    wait,
   );
   return res.ok;
 }
@@ -295,8 +376,9 @@ export async function prepareRepoOnConvention(
   deps: PrepareDeps = {},
 ): Promise<PreparedRepo> {
   const git = deps.runImpl ?? run;
+  const wait = deps.sleepImpl ?? sleep;
   const read = deps.readFileImpl ?? readRepoFile;
-  const { dir, auth } = await syncRepo(normalizedUrl, token, git);
+  const { dir, auth } = await syncRepo(normalizedUrl, token, git, wait);
 
   const stated = devBranchFrom(await read(dir, DEVOPS_FILE).catch(() => null));
   // Untracked leftovers of an earlier run must not be swept into this step's
@@ -305,7 +387,7 @@ export async function prepareRepoOnConvention(
 
   if (stated?.kind === "named") {
     const branch = stated.branch;
-    if (await remoteHasBranch(git, dir, auth, branch)) {
+    if (await remoteHasBranch(git, dir, auth, branch, wait)) {
       await checkoutTracking(git, dir, branch, token);
     } else {
       // The repo names a branch the remote does not have yet: create it where
@@ -328,12 +410,12 @@ export async function prepareRepoOnConvention(
     // not this repo's branch.
     const here = await currentBranch(git, dir);
     branch =
-      here && (await remoteHasBranch(git, dir, auth, here))
+      here && (await remoteHasBranch(git, dir, auth, here, wait))
         ? here
         : await defaultBranch(dir, token, deps);
   } else {
     // The repo says nothing: req-013's answer, and no branch is ever created.
-    branch = (await remoteHasBranch(git, dir, auth, DEV_BRANCH))
+    branch = (await remoteHasBranch(git, dir, auth, DEV_BRANCH, wait))
       ? DEV_BRANCH
       : await defaultBranch(dir, token, deps);
   }
@@ -356,10 +438,11 @@ export async function prepareRepo(
   deps: WorkspaceDeps = {},
 ): Promise<string> {
   const git = deps.runImpl ?? run;
-  const { dir, auth } = await syncRepo(normalizedUrl, token, git);
+  const wait = deps.sleepImpl ?? sleep;
+  const { dir, auth } = await syncRepo(normalizedUrl, token, git, wait);
 
   // Check out dev: track origin/dev if present, else create from current HEAD.
-  if (await remoteHasBranch(git, dir, auth, DEV_BRANCH)) {
+  if (await remoteHasBranch(git, dir, auth, DEV_BRANCH, wait)) {
     await git("git", ["checkout", "-B", DEV_BRANCH, `origin/${DEV_BRANCH}`], {
       cwd: dir,
     });
@@ -379,6 +462,9 @@ export async function prepareRepo(
  * `master`, or whatever the repo actually uses. Throws when it cannot be read:
  * falling back to a guessed name would create exactly the surprise branch
  * req-013 does away with.
+ *
+ * This is the call the reported outage died on, so it too gets one more attempt
+ * when the network was what failed (bug-020).
  */
 export async function defaultBranch(
   dir: string,
@@ -386,10 +472,13 @@ export async function defaultBranch(
   deps: WorkspaceDeps = {},
 ): Promise<string> {
   const git = deps.runImpl ?? run;
-  const res = await git("git", ["ls-remote", "--symref", "origin", "HEAD"], {
-    cwd: dir,
-    env: authEnv(token),
-  });
+  const wait = deps.sleepImpl ?? sleep;
+  const res = await runRemote(
+    git,
+    ["ls-remote", "--symref", "origin", "HEAD"],
+    { cwd: dir, env: authEnv(token), timeoutMs: REMOTE_PROBE_TIMEOUT_MS },
+    wait,
+  );
   // "ref: refs/heads/master\tHEAD" — the first symref line is the one for HEAD.
   const ref = res.stdout.match(/^ref:\s+refs\/heads\/(\S+)/m);
   if (!res.ok || !ref) {
@@ -413,9 +502,10 @@ export async function prepareRepoOnDevOrDefault(
   deps: WorkspaceDeps = {},
 ): Promise<{ dir: string; branch: string }> {
   const git = deps.runImpl ?? run;
-  const { dir, auth } = await syncRepo(normalizedUrl, token, git);
+  const wait = deps.sleepImpl ?? sleep;
+  const { dir, auth } = await syncRepo(normalizedUrl, token, git, wait);
 
-  const branch = (await remoteHasBranch(git, dir, auth, DEV_BRANCH))
+  const branch = (await remoteHasBranch(git, dir, auth, DEV_BRANCH, wait))
     ? DEV_BRANCH
     : await defaultBranch(dir, token, deps);
 
@@ -439,6 +529,69 @@ export async function prepareRepoOnDevOrDefault(
 export async function discardChanges(dir: string): Promise<void> {
   await run("git", ["reset", "--hard"], { cwd: dir });
   await run("git", ["clean", "-fd"], { cwd: dir });
+}
+
+/**
+ * Wie viele Commits liegen lokal, die das Remote noch nicht hat?
+ *
+ * Das sind seit req-036 die fertigen Etappen eines Laufs, der abgebrochen ist,
+ * bevor er pushen konnte. Sie zu erkennen ist die Voraussetzung dafür, sie zu
+ * retten — sonst wären sie zwar nicht verworfen (`reset --hard` setzt auf HEAD
+ * zurück und lässt Commits stehen), aber sie lägen nur im Arbeitsverzeichnis
+ * des Containers und wären beim nächsten Neuaufsetzen weg.
+ *
+ * 0 bei jedem Zweifel: Kennt git den Remote-Zweig nicht, ist die Frage nicht
+ * beantwortbar, und "es gibt nichts zu retten" ist die harmlosere Annahme als
+ * ein Push ins Ungewisse.
+ */
+export async function unpushedCommitCount(
+  dir: string,
+  branch: string,
+  deps: WorkspaceDeps = {},
+): Promise<number> {
+  const git = deps.runImpl ?? run;
+  const res = await git(
+    "git",
+    ["rev-list", "--count", `origin/${branch}..HEAD`],
+    { cwd: dir },
+  );
+  if (!res.ok) return 0;
+  const n = Number(res.stdout.trim());
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/**
+ * Die fertigen Etappen eines abgebrochenen Laufs pushen (req-036).
+ *
+ * Anders als `commitAndPush` committet das hier NICHTS: Was noch nicht
+ * committet ist, ist eine halbfertige Etappe, und die gehört verworfen, nicht
+ * gesichert. Gepusht wird nur, was Claude selbst als fertig committet hat.
+ *
+ * Schlägt der Push fehl, ist das kein Grund, den Lauf anders zu bewerten — die
+ * Arbeit liegt dann weiterhin lokal und wird beim nächsten erfolgreichen Lauf
+ * mitgepusht. Deshalb gibt diese Funktion nur Auskunft und wirft nie.
+ */
+export async function pushStages(
+  dir: string,
+  branch: string,
+  token: string,
+  deps: WorkspaceDeps = {},
+): Promise<{ pushed: number; detail: string }> {
+  const git = deps.runImpl ?? run;
+  const count = await unpushedCommitCount(dir, branch, deps);
+  if (count === 0) return { pushed: 0, detail: "" };
+
+  const res = await git("git", ["push", "origin", branch], {
+    cwd: dir,
+    env: authEnv(token),
+  });
+  if (!res.ok) {
+    return {
+      pushed: 0,
+      detail: `${count} Etappe(n) liegen lokal, Push fehlgeschlagen: ${redact(res.stderr, [token])}`,
+    };
+  }
+  return { pushed: count, detail: `${count} Etappe(n) gesichert` };
 }
 
 export type PushOptions = WorkspaceDeps & {

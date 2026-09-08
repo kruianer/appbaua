@@ -18,13 +18,17 @@ export interface RepoStore {
 }
 
 /**
- * Backfill for a persisted repo written before req-028: it has no `model`
- * field, so reading it as a Repo would silently produce `undefined` rather than
- * the documented default. Cheap and idempotent — a repo that already has one
- * passes through unchanged.
+ * Backfill for a persisted repo written before a field existed: `model`
+ * (req-028) and `monitored` (req-032). Reading such a row as a Repo would
+ * silently produce `undefined` rather than the documented default. Cheap and
+ * idempotent — a repo that already has both passes through unchanged.
  */
-function withDefaultModel(repos: Repo[]): Repo[] {
-  return repos.map((r) => (r.model ? r : { ...r, model: DEFAULT_REPO_MODEL }));
+function withDefaults(repos: Repo[]): Repo[] {
+  return repos.map((r) => ({
+    ...r,
+    model: r.model ?? DEFAULT_REPO_MODEL,
+    monitored: r.monitored ?? false,
+  }));
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -36,7 +40,7 @@ export function createFileStore(): RepoStore {
       try {
         const raw = await fs.readFile(DATA_FILE, "utf8");
         const parsed = JSON.parse(raw);
-        return Array.isArray(parsed) ? withDefaultModel(parsed as Repo[]) : [];
+        return Array.isArray(parsed) ? withDefaults(parsed as Repo[]) : [];
       } catch {
         return [];
       }
@@ -50,7 +54,7 @@ export function createFileStore(): RepoStore {
 }
 
 export function createMemoryStore(initial: Repo[] = []): RepoStore {
-  let repos = withDefaultModel([...initial]);
+  let repos = withDefaults([...initial]);
   return {
     async list() {
       return [...repos];

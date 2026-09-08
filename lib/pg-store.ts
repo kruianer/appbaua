@@ -21,6 +21,24 @@ import {
 } from "./worker-status";
 import type { PreviewStore } from "./preview-store";
 import type { PreviewRow } from "./preview";
+import type { AppHealth } from "./health";
+import type { HealthStore } from "./health-store";
+import type {
+  NetworkAbortCounts,
+  NetworkAbortStore,
+} from "./network-abort-store";
+import {
+  type HeartbeatStatus,
+  EMPTY_HEARTBEAT_STATUS,
+  normalizeHeartbeatStatus,
+} from "./heartbeat";
+import {
+  type HealthSettings,
+  DEFAULT_HEALTH_SETTINGS,
+  normalizeSettings,
+} from "./health-settings";
+import { type AlertState, normalizeAlertState } from "./telegram-alerts";
+import { type AnalysisState, normalizeAnalyses } from "./log-analysis";
 import type { AuthStore } from "./auth-store";
 import type {
   AuthUser,
@@ -104,7 +122,10 @@ export function createPgStore(): RepoStore {
         url: string;
         active: boolean;
         model: string | null;
-      }>("SELECT id, name, url, active, model FROM repos ORDER BY position ASC");
+        monitored: boolean | null;
+      }>(
+        "SELECT id, name, url, active, model, monitored FROM repos ORDER BY position ASC",
+      );
       return res.rows.map((r) => ({
         id: r.id,
         name: r.name,
@@ -112,6 +133,8 @@ export function createPgStore(): RepoStore {
         active: r.active,
         // Backfill for a row written before req-028 (no model column value yet).
         model: (r.model as Repo["model"]) || DEFAULT_REPO_MODEL,
+        // Same for req-032's switch: a row from before it is not watched.
+        monitored: r.monitored ?? false,
       }));
     },
 
@@ -124,8 +147,8 @@ export function createPgStore(): RepoStore {
         for (let i = 0; i < repos.length; i++) {
           const r = repos[i];
           await client.query(
-            "INSERT INTO repos (id, name, url, active, position, model) VALUES ($1, $2, $3, $4, $5, $6)",
-            [r.id, r.name, r.url, r.active, i, r.model],
+            "INSERT INTO repos (id, name, url, active, position, model, monitored) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            [r.id, r.name, r.url, r.active, i, r.model, r.monitored],
           );
         }
         await client.query("COMMIT");
@@ -224,6 +247,8 @@ export function createPgRunLogStore(): RunLogStore {
     status: string;
     message: string;
     md: string | null;
+    error_kind: string | null;
+    diagnostics: string | null;
   };
   const toEntry = (r: Row): RunLogEntry => ({
     id: Number(r.id),
@@ -235,15 +260,36 @@ export function createPgRunLogStore(): RunLogStore {
     message: r.message,
     // NULL on rows written before req-015 — those show no second line.
     md: r.md,
+    // NULL bei erfolgreichen Laeufen und bei Zeilen von vor req-037.
+    errorKind: (r.error_kind as RunLogEntry["errorKind"]) ?? null,
+    diagnostics: parseDiagnostics(r.diagnostics),
   });
-  const COLUMNS = "id, started_at, ended_at, repo, task_type, status, message, md";
+  /**
+   * Die Messwerte kommen als JSON-Text aus der Spalte. Kaputter Inhalt darf den
+   * Verlauf nicht unlesbar machen — eine Diagnose ist Beiwerk, kein Grund, den
+   * ganzen Eintrag zu verlieren (req-037).
+   */
+  const parseDiagnostics = (raw: string | null): string[] | null => {
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.map(String) : null;
+    } catch {
+      return null;
+    }
+  };
+  const COLUMNS =
+    "id, started_at, ended_at, repo, task_type, status, message, md, " +
+    "error_kind, diagnostics";
 
   return {
     async append(entry: NewRunLogEntry): Promise<RunLogEntry> {
       await ensureSchema();
       const res = await getPool().query<Row>(
-        `INSERT INTO run_log (started_at, ended_at, repo, task_type, status, message, md)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO run_log
+           (started_at, ended_at, repo, task_type, status, message, md,
+            error_kind, diagnostics)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING ${COLUMNS}`,
         [
           entry.startedAt,
@@ -253,6 +299,10 @@ export function createPgRunLogStore(): RunLogStore {
           entry.status,
           entry.message,
           entry.md ?? null,
+          entry.errorKind ?? null,
+          // Als JSON-Text: der Inhalt darf sich je Fehlerart unterscheiden und
+          // weiterentwickeln, ohne dass die Tabelle wandert (req-037).
+          entry.diagnostics?.length ? JSON.stringify(entry.diagnostics) : null,
         ],
       );
       // Retention: drop rows older than the age cutoff, then any beyond max rows.
@@ -410,6 +460,115 @@ export function createPgPreviewStore(): PreviewStore {
         `INSERT INTO preview (id, rows) VALUES ('worker', $1)
          ON CONFLICT (id) DO UPDATE SET rows = EXCLUDED.rows`,
         [JSON.stringify(rows)],
+      );
+    },
+  };
+}
+
+export function createPgNetworkAbortStore(): NetworkAbortStore {
+  return {
+    async get(): Promise<NetworkAbortCounts> {
+      await ensureSchema();
+      const res = await getPool().query<{ counts: NetworkAbortCounts }>(
+        "SELECT counts FROM network_abort_counts WHERE id = 'worker'",
+      );
+      return res.rows[0]?.counts ?? {};
+    },
+    async set(counts: NetworkAbortCounts): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO network_abort_counts (id, counts) VALUES ('worker', $1)
+         ON CONFLICT (id) DO UPDATE SET counts = EXCLUDED.counts`,
+        [JSON.stringify(counts)],
+      );
+    },
+  };
+}
+
+export function createPgHealthStore(): HealthStore {
+  return {
+    async getResults(): Promise<AppHealth[]> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: { rows?: AppHealth[] } }>(
+        "SELECT data FROM health WHERE id = 'results'",
+      );
+      return res.rows[0]?.data?.rows ?? [];
+    },
+    async setResults(rows: AppHealth[]): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('results', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        [JSON.stringify({ rows })],
+      );
+    },
+    async getSettings(): Promise<HealthSettings> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: unknown }>(
+        "SELECT data FROM health WHERE id = 'settings'",
+      );
+      return res.rows.length
+        ? normalizeSettings(res.rows[0].data)
+        : { ...DEFAULT_HEALTH_SETTINGS };
+    },
+    async setSettings(settings: HealthSettings): Promise<HealthSettings> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('settings', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        [JSON.stringify(settings)],
+      );
+      return settings;
+    },
+    async getAlertState(): Promise<AlertState> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: { entries?: unknown } }>(
+        "SELECT data FROM health WHERE id = 'alerts'",
+      );
+      return normalizeAlertState(res.rows[0]?.data?.entries);
+    },
+    async setAlertState(state: AlertState): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('alerts', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        // In ein Objekt gewickelt, wie bei 'results': die Spalte ist jsonb und
+        // ein leerer Zustand wäre sonst ein nacktes {} ohne Aussagekraft.
+        [JSON.stringify({ entries: state })],
+      );
+    },
+    async getHeartbeat(): Promise<HeartbeatStatus> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: unknown }>(
+        "SELECT data FROM health WHERE id = 'heartbeat'",
+      );
+      return res.rows.length
+        ? normalizeHeartbeatStatus(res.rows[0].data)
+        : { ...EMPTY_HEARTBEAT_STATUS };
+    },
+    async setHeartbeat(status: HeartbeatStatus): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('heartbeat', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        [JSON.stringify(status)],
+      );
+    },
+    async getAnalyses(): Promise<AnalysisState> {
+      await ensureSchema();
+      const res = await getPool().query<{ data: { entries?: unknown } }>(
+        "SELECT data FROM health WHERE id = 'analyses'",
+      );
+      return normalizeAnalyses(res.rows[0]?.data?.entries);
+    },
+    async setAnalyses(state: AnalysisState): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO health (id, data) VALUES ('analyses', $1)
+         ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data`,
+        // Wie bei 'alerts' in ein Objekt gewickelt: die Spalte ist jsonb, und
+        // ein leerer Stand wäre sonst ein nacktes {}.
+        [JSON.stringify({ entries: state })],
       );
     },
   };

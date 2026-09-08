@@ -60,6 +60,73 @@ Deploy-Workflows) startet den `cloudflared`-Dienst mit; er hält die
 ausgehende Verbindung zu Cloudflare, worüber die jeweilige Domain die App
 erreicht. Kein Eingriff in Router/Firewall nötig.
 
+## Telegram-Meldungen und -Befehle (req-033)
+
+appbaua meldet einen Ausfall einer überwachten App per Telegram und nimmt
+über denselben Chat `/status` und `/neustart` entgegen. Ohne die beiden
+Variablen unten passiert davon nichts — die Überwachung selbst
+(req-032) läuft unverändert weiter.
+
+**Einmalige manuelle Konto-Schritte (macht der Nutzer, nicht der
+Worker):**
+
+1. In Telegram `@BotFather` anschreiben, `/newbot`, Namen vergeben. Er
+   gibt den Bot-Schlüssel aus.
+2. Dem neuen Bot einmal selbst schreiben (z.B. `/start`), damit ein Chat
+   existiert.
+3. `https://api.telegram.org/bot<SCHLÜSSEL>/getUpdates` aufrufen und die
+   `chat.id` aus der Antwort notieren.
+4. Beides als `TELEGRAM_BOT_TOKEN` und `TELEGRAM_CHAT_ID` in
+   `deploy/dev.env` bzw. `deploy/prod.env` eintragen — NICHT ins Repo
+   committen.
+
+**Je Umgebung ein eigener Bot.** Sonst kämen dev und prod im selben Chat
+an, und eine Meldung ließe nicht erkennen, welche Umgebung sie betrifft —
+bei `/neustart` wäre das der Unterschied zwischen einem Testsystem und
+einem laufenden prod-Container.
+
+**Was den Bot schützt.** Nichts außer der Chat-Kennung: ein Bot ist
+öffentlich ansprechbar, jeder der seinen Namen kennt kann ihm schreiben.
+appbaua antwortet ausschließlich auf Nachrichten aus dem hinterlegten
+Chat und verwirft alle anderen wortlos. Der Schlüssel gehört deshalb
+genauso behandelt wie der GitHub-Token.
+
+## Ausfallwächter beim Webhoster (req-034)
+
+Die Meldungen aus req-033 laufen auf demselben Beelink wie die überwachten
+Apps. Fällt dieser Rechner selbst aus — Strom, Internet, appbaua tot —,
+fällt der Melder mit ihm weg und niemand erfährt davon. Genau dagegen
+steht ein winziger PHP-Wächter beim Webhoster (all-inkl): appbaua meldet
+sich alle paar Minuten bei ihm, und bleibt diese Meldung länger als 15
+Minuten aus, schickt **er** die Telegram-Nachricht.
+
+Er beantwortet nur eine Frage — lebt der Rechner noch? Über die
+überwachten Apps weiß er nichts, prüft nichts selbst und steuert nichts.
+Fällt der Hoster selbst aus, gibt es keine Meldung; dieser Fall bleibt
+bewusst offen.
+
+**Einmalige manuelle Schritte (macht der Nutzer, nicht der Worker):**
+Die Dateien liegen im Repo unter `watchdog/`, die vollständige Anleitung
+in [../watchdog/README.md](../watchdog/README.md). In Kurzform:
+
+1. `watchdog/private/*` in ein Verzeichnis **außerhalb** des
+   Web-Verzeichnisses hochladen, `watchdog/public/*` hinein.
+2. `config.php` aus `config.sample.php` anlegen — Bot-Schlüssel und
+   Chat-Kennung wie oben, dazu eine frisch erzeugte Kennung für den
+   Herzschlag. Diese Datei gehört NIE ins Repo.
+3. `WATCHDOG_URL` und `WATCHDOG_TOKEN` in `deploy/dev.env` bzw.
+   `deploy/prod.env` eintragen und die Umgebung neu deployen.
+4. Im Kundenmenü des Hosters (KAS → Cronjobs) einen Cronjob alle 5
+   Minuten auf `check.php` anlegen. Ohne ihn merkt niemand, dass der
+   Herzschlag ausblieb — der Hoster bietet keine Hintergrunddienste.
+
+**Je Umgebung ein eigener Wächter**, mit eigener Kennung und eigenem
+`label`. Sonst hielte ein laufendes dev den prod-Rechner für lebendig.
+
+**Kontrolle:** Die Zustandsseite von appbaua zeigt oben, wann der Wächter
+den letzten Herzschlag angenommen hat. Ein gescheiterter Versand steht
+zusätzlich im Verlauf.
+
 ## Notfall: ausgesperrt (Passkey UND Backup-Codes verloren)
 
 Der Passkey-Schutz (req-023) richtet sich gegen jemanden, der nur die URL

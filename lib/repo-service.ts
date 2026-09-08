@@ -57,6 +57,8 @@ export async function addRepo(
     url: normalized,
     active: true,
     model: DEFAULT_REPO_MODEL,
+    // req-032: watching an app reaches into a live system, so it starts off.
+    monitored: false,
   };
   const next = [...repos, repo]; // append = lowest priority
   await getStore().replace(next);
@@ -67,6 +69,19 @@ export async function toggleRepo(id: string): Promise<Repo[]> {
   const repos = await getStore().list();
   const next = repos.map((r) =>
     r.id === id ? { ...r, active: !r.active } : r,
+  );
+  return getStore().replace(next);
+}
+
+/**
+ * Flip the "überwachen" switch of one repo (req-032). Separate from
+ * toggleRepo: whether the worker WORKS on a repo and whether appbaua WATCHES
+ * its app are two independent decisions.
+ */
+export async function toggleRepoMonitored(id: string): Promise<Repo[]> {
+  const repos = await getStore().list();
+  const next = repos.map((r) =>
+    r.id === id ? { ...r, monitored: !r.monitored } : r,
   );
   return getStore().replace(next);
 }

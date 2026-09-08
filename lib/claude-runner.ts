@@ -90,16 +90,45 @@ export function createActivityStream(
   };
 }
 
-/** The prompt handed to Claude Code for a file-driven task. */
+/**
+ * The prompt handed to Claude Code for a file-driven task.
+ *
+ * req-036 changed the one line that mattered most here: committing used to be
+ * forbidden outright, so a run that was cut short — a dropped connection, the
+ * 60-minute cap — left nothing behind and the next attempt started from zero.
+ * On 07.09. that cost 16 minutes of finished work on a bug whose file was
+ * perfectly fine.
+ *
+ * Now each acceptance criterion is its own stage: green suite, tick the box,
+ * commit. A run that dies mid-way leaves the finished stages standing, and the
+ * next one reads the ticks and picks up where it stopped.
+ *
+ * Pushing stays the worker's job. It knows the branch, carries the credential,
+ * and is the only place that can retry a rejected push (bug-017).
+ */
 export function fileTaskPrompt(mdRelPath: string): string {
   return [
     `Arbeite die Aufgabe in der Datei ${mdRelPath} vollständig ab.`,
     `Halte dich an die CLAUDE.md und die Konventionen dieses Repos.`,
-    `Setze die Anforderung/den Bugfix um, schreibe/aktualisiere Tests,`,
-    `und stelle sicher, dass das Quality Gate grün ist.`,
-    `Committe NICHT selbst und pushe NICHT — das übernimmt der Worker.`,
+    ``,
+    `Arbeite in Etappen — eine Etappe ist EIN Akzeptanzkriterium der Datei:`,
+    `1. Setze das nächste noch offene Kriterium um, samt Tests.`,
+    `2. Lass die volle Test-Suite laufen. Ist sie rot, arbeite weiter,`,
+    `   bis sie grün ist — committe KEINEN roten Stand.`,
+    `3. Hake das Kriterium in ${mdRelPath} ab ([ ] wird zu [x]).`,
+    `4. Committe diesen Stand samt der geänderten .md.`,
+    `Dann die nächste Etappe, bis alle Kriterien abgehakt sind.`,
+    ``,
+    `Hängen mehrere Kriterien so zusammen, dass sie sich nur gemeinsam`,
+    `erfüllen lassen, hake sie zusammen in einer Etappe ab — der Schnitt`,
+    `ist eine Empfehlung, keine Pflicht.`,
+    ``,
+    `Nennt die Datei keine Akzeptanzkriterien, arbeite sie wie bisher in`,
+    `einem Zug ab und committe am Ende einmal.`,
+    ``,
+    `PUSHE NICHT — das übernimmt der Worker.`,
     `Arbeite vollständig autonom; frage nichts.`,
-  ].join(" ");
+  ].join("\n");
 }
 
 /**
@@ -121,7 +150,8 @@ export function testFixPrompt(mdRelPath: string, failure: string): string {
     `Fehlt eine Laufzeit-Abhängigkeit, deklariere sie in der package.json (samt Lockfile),`,
     `damit auch ein frischer Checkout mit Installation grün läuft — nur lokal installiert reicht nicht.`,
     `Halte dich an die CLAUDE.md und delivery/stack.md dieses Repos.`,
-    `Committe NICHT selbst und pushe NICHT — das übernimmt der Worker.`,
+    `Committe den reparierten Stand, sobald die Suite grün ist (req-036).`,
+    `PUSHE NICHT — das übernimmt der Worker.`,
   ].join("\n");
 }
 

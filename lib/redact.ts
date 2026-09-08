@@ -32,8 +32,13 @@ const RULES: [RegExp, string][] = [
  */
 const MIN_SECRET_LENGTH = 8;
 
-/** Env vars that may hold a credential this process passes to git. */
-const SECRET_ENV_VARS = ["GITHUB_TOKEN", "GH_TOKEN"];
+/**
+ * Env vars that may hold a credential this process passes on. The Telegram bot
+ * key (req-033) belongs here for the same reason the git token does: it sits in
+ * the URL of every call to the Bot API, so a network error that quotes that URL
+ * would carry it straight into the Verlauf.
+ */
+const SECRET_ENV_VARS = ["GITHUB_TOKEN", "GH_TOKEN", "TELEGRAM_BOT_TOKEN"];
 
 /**
  * Every form a secret takes on the wire: itself, and the Basic-auth blob git

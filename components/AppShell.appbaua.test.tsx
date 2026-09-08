@@ -16,6 +16,7 @@ const repos: Repo[] = [
     url: "github.com/kruianer/leer-repo",
     active: true,
     model: "sonnet",
+    monitored: false,
   },
   {
     id: "r2",
@@ -23,6 +24,7 @@ const repos: Repo[] = [
     url: "github.com/kruianer/zweites-repo",
     active: true,
     model: "sonnet",
+    monitored: false,
   },
 ];
 

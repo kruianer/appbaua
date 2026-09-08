@@ -32,3 +32,9 @@ next-env.d.ts
 
 # testing
 /coverage
+
+# Ausfallwächter (req-034): die ausgefüllte Konfiguration und der gemerkte
+# Zeitpunkt entstehen beim Webhoster, nicht hier. Bot-Schlüssel, Chat-Kennung
+# und die Kennung des Herzschlags stehen darin im Klartext.
+/watchdog/private/config.php
+/watchdog/private/state.json
