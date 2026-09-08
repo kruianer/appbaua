@@ -71,6 +71,18 @@ import {
   AUTH_EXPIRED_PAUSE_MS,
   isAuthExpired,
 } from "./auth-expired";
+import {
+  NETWORK_ABORT_MAX_ATTEMPTS,
+  NETWORK_ABORT_MESSAGE,
+  NETWORK_ABORT_PAUSE_MS,
+  isNetworkAbort,
+  networkAbortKey,
+  withoutKey,
+} from "./network-abort";
+import {
+  getNetworkAbortStore,
+  type NetworkAbortCounts,
+} from "./network-abort-store";
 
 // Orchestrates one real execution step (req-006). Returns a decision the loop
 // logs. "skip" means no log entry (nothing to do); "success"/"error" produce a
@@ -153,7 +165,17 @@ export type StepDecision =
    * (AUTH_EXPIRED_PAUSE_MS) since only a human running `claude login` resolves
    * it, and `message` is already the actionable Verlauf text.
    */
-  | { kind: "auth-expired"; message: string; pauseUntil: number; md?: string | null };
+  | { kind: "auth-expired"; message: string; pauseUntil: number; md?: string | null }
+  /**
+   * The Claude run died on a dropped or never-established connection (req-038).
+   * NOT a failure either: same mechanics as "rate-limited", but the pause is
+   * short (NETWORK_ABORT_PAUSE_MS) — a network outage ends on its own, unlike a
+   * rate limit or an expired login. Only the first NETWORK_ABORT_MAX_ATTEMPTS
+   * in a row for the SAME package get this treatment; the next one after that
+   * is a normal "error" (parked to failed/), so a package that dies for some
+   * other reason cannot hide behind "just the network" forever.
+   */
+  | { kind: "network-abort"; message: string; pauseUntil: number; md?: string | null };
 
 /** What the Verlauf leads with when a repo could not be made ready (req-020). */
 export const PREPARE_FAILED_MESSAGE = "Repo vorbereiten fehlgeschlagen";
@@ -196,6 +218,10 @@ export type ExecuteDeps = {
   setCurrentOutput: typeof setCurrentOutput;
   /** Publish the model this step's Claude call actually reports using (req-027). */
   setCurrentModel: typeof setCurrentModel;
+  /** Read the persisted consecutive network-abort counter (req-038). */
+  getNetworkAbortCounts: () => Promise<NetworkAbortCounts>;
+  /** Persist the network-abort counter (req-038) — must survive a restart. */
+  setNetworkAbortCounts: (counts: NetworkAbortCounts) => Promise<void>;
   now: () => Date;
   token: string | undefined;
 };
@@ -216,6 +242,8 @@ const defaultDeps = (): ExecuteDeps => ({
   setCurrentMd,
   setCurrentOutput,
   setCurrentModel,
+  getNetworkAbortCounts: () => getNetworkAbortStore().get(),
+  setNetworkAbortCounts: (counts) => getNetworkAbortStore().set(counts),
   now: () => new Date(),
   token: process.env.GITHUB_TOKEN,
 });
@@ -430,11 +458,57 @@ export async function executeStep(
         md: runMd(),
       };
     }
+    // A dropped or never-established connection is NOT a failure of the
+    // package either (req-038): same mechanics as above, but the pause is
+    // short (network outages end on their own, unlike a rate limit or an
+    // expired login). Counted per package so a package that keeps dying for
+    // some OTHER reason cannot hide behind "just the network" forever: the
+    // NETWORK_ABORT_MAX_ATTEMPTS+1th abort in a row gives up on it like any
+    // other failure. The counter is persisted (must survive a restart) and
+    // keyed by repo+md, since only a file-driven step has a package at all.
+    if (isNetworkAbort(outcome.summary)) {
+      if (src.base && mdName) {
+        const counts = await d.getNetworkAbortCounts();
+        const key = networkAbortKey(repo.name, mdName);
+        const attempts = (counts[key] ?? 0) + 1;
+        if (attempts > NETWORK_ABORT_MAX_ATTEMPTS) {
+          const parked = await parkFailed(
+            d,
+            dir,
+            repo.name,
+            src.base,
+            mdName,
+            token,
+            branch,
+          );
+          return {
+            kind: "error",
+            message: `${NETWORK_ABORT_MESSAGE}: ${attempts}. Versuch in Folge gescheitert${parked}`,
+            md: runMd(),
+          };
+        }
+        await d.setNetworkAbortCounts({ ...counts, [key]: attempts }).catch(() => {});
+        await d.discardChanges(dir).catch(() => {});
+        return {
+          kind: "network-abort",
+          message: `${NETWORK_ABORT_MESSAGE} (Versuch ${attempts}/${NETWORK_ABORT_MAX_ATTEMPTS}): ${outcome.summary}`,
+          pauseUntil: d.now().getTime() + NETWORK_ABORT_PAUSE_MS,
+          md: runMd(),
+        };
+      }
+      await d.discardChanges(dir).catch(() => {});
+      return {
+        kind: "network-abort",
+        message: `${NETWORK_ABORT_MESSAGE}: ${outcome.summary}`,
+        pauseUntil: d.now().getTime() + NETWORK_ABORT_PAUSE_MS,
+        md: runMd(),
+      };
+    }
     // Park the .md under failed/ and push that move (file-driven only), so the
     // same task is not picked up again on the next pass (bug-002).
     const parked =
       src.base && mdName
-        ? await parkFailed(d, dir, src.base, mdName, token, branch)
+        ? await parkFailed(d, dir, repo.name, src.base, mdName, token, branch)
         : "";
     return {
       kind: "error",
@@ -540,7 +614,15 @@ export async function executeStep(
           };
     }
     if (gate.status === "red") {
-      const parked = await parkFailed(d, dir, src.base, mdName, token, branch);
+      const parked = await parkFailed(
+        d,
+        dir,
+        repo.name,
+        src.base,
+        mdName,
+        token,
+        branch,
+      );
       return {
         kind: "error",
         message: `${GATE_RED_MESSAGE}: ${gate.reason}${parked}`,
@@ -550,13 +632,23 @@ export async function executeStep(
     gateNote = testGateNote(gate);
   }
 
-  // Success: for file-driven, move in-progress -> done before committing.
+  // Success: for file-driven, move in-progress -> done before committing. Also
+  // clears any network-abort count this package had run up (req-038) — it made
+  // it through this time, so the Verlauf must not keep suggesting past trouble.
   if (src.base && mdRel && mdName) {
     try {
       await d.moveMd(dir, mdRel, `${doneDir(src.base)}/${mdName}`);
     } catch {
       /* best effort */
     }
+    await d
+      .setNetworkAbortCounts(
+        withoutKey(
+          await d.getNetworkAbortCounts(),
+          networkAbortKey(repo.name, mdName),
+        ),
+      )
+      .catch(() => {});
   }
 
   // A recurring analysis task changes no work item of its own — its result IS
@@ -631,15 +723,25 @@ async function testGate(
  *
  * Best effort: a move or push that fails must not hide the original error, it
  * only changes the note.
+ *
+ * Also clears the package's network-abort counter (req-038): whatever the
+ * cause of this park, the package is done for now, and a later resubmission
+ * must not inherit a stale count from an unrelated earlier run.
  */
 async function parkFailed(
   d: ExecuteDeps,
   dir: string,
+  repoName: string,
   base: string,
   mdName: string,
   token: string,
   branch: string,
 ): Promise<string> {
+  await d
+    .setNetworkAbortCounts(
+      withoutKey(await d.getNetworkAbortCounts(), networkAbortKey(repoName, mdName)),
+    )
+    .catch(() => {});
   try {
     await d.discardChanges(dir);
     await d.moveMd(

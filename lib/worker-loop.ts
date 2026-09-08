@@ -38,11 +38,15 @@ export const RATE_LIMIT_PAUSE_PREFIX = "Pause wegen Rate-Limit bis";
 /** Prefix the pause status carries when the wait is an expired login (bug-019). */
 export const AUTH_EXPIRED_PAUSE_PREFIX = "Pause wegen abgelaufener Anmeldung bis";
 
+/** Prefix the pause status carries when the wait is a network abort (req-038). */
+export const NETWORK_ABORT_PAUSE_PREFIX = "Pause wegen Netzabbruch bis";
+
 /**
  * Outcome of one pass. `succeeded` counts steps that got work done (bug-002).
- * `pauseUntil` (epoch ms) is set only when a step hit a rate limit or an
- * expired login and the loop should wait until then instead of the usual empty
- * pause (req-029, bug-019); `pauseReason` is the prefix that pause carries.
+ * `pauseUntil` (epoch ms) is set only when a step hit a rate limit, an expired
+ * login, or a network abort, and the loop should wait until then instead of
+ * the usual empty pause (req-029, bug-019, req-038); `pauseReason` is the
+ * prefix that pause carries.
  */
 export type PassResult = {
   succeeded: number;
@@ -184,12 +188,16 @@ export async function runOnce(
       continue;
     }
 
-    if (decision.kind === "rate-limited" || decision.kind === "auth-expired") {
-      // A rate limit or an expired login hit (req-029, bug-019): the .md is
-      // untouched in ready/, and every other step this pass would hit the same
-      // wall. Record it as its own (non-error) row, then stop the pass and hand
-      // the resume time up so the loop pauses until it resolves — not the usual
-      // 5-minute empty pause.
+    if (
+      decision.kind === "rate-limited" ||
+      decision.kind === "auth-expired" ||
+      decision.kind === "network-abort"
+    ) {
+      // A rate limit, an expired login, or a network abort hit (req-029,
+      // bug-019, req-038): the .md is untouched in ready/, and every other step
+      // this pass would likely hit the same wall. Record it as its own
+      // (non-error) row, then stop the pass and hand the resume time up so the
+      // loop pauses until it resolves — not the usual 5-minute empty pause.
       await log.append({
         startedAt,
         endedAt,
@@ -203,7 +211,9 @@ export async function runOnce(
       pauseReason =
         decision.kind === "rate-limited"
           ? RATE_LIMIT_PAUSE_PREFIX
-          : AUTH_EXPIRED_PAUSE_PREFIX;
+          : decision.kind === "auth-expired"
+            ? AUTH_EXPIRED_PAUSE_PREFIX
+            : NETWORK_ABORT_PAUSE_PREFIX;
       break;
     }
 
@@ -295,10 +305,11 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
     }
 
     if (result.pauseUntil !== undefined) {
-      // A rate limit or an expired login was hit (req-029, bug-019): wait until
-      // it resolves (not the 5-minute empty pause) and show WHY, so the card
-      // reads "Pause wegen Rate-Limit bis HH:MM" or "Pause wegen abgelaufener
-      // Anmeldung bis HH:MM". The .md is untouched in ready/, so the queue
+      // A rate limit, an expired login, or a network abort was hit (req-029,
+      // bug-019, req-038): wait until it resolves (not the 5-minute empty
+      // pause) and show WHY, so the card reads "Pause wegen Rate-Limit bis
+      // HH:MM", "Pause wegen abgelaufener Anmeldung bis HH:MM", or "Pause wegen
+      // Netzabbruch bis HH:MM". The .md is untouched in ready/, so the queue
       // retries after.
       const untilMs = Math.max(result.pauseUntil, deps.now().getTime());
       const until = new Date(untilMs).toISOString();

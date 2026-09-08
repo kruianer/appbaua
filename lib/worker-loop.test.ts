@@ -323,6 +323,54 @@ describe("worker loop — Dauerfehler pausiert (bug-002)", () => {
     expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
   });
 
+  it("req-038: a network-abort step pauses briefly, with its own reason, not the empty pause", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const stop = new Error("stop");
+    const pauseMs = 3 * 60_000;
+    const resumeMs = WED_18.getTime() + pauseMs;
+    const pauseArgs: Array<{ iso: string | null; reason?: string | null }> = [];
+    const slept: number[] = [];
+    const d = deps({
+      runStep: async (): Promise<StepDecision> => ({
+        kind: "network-abort",
+        message: "Netzabbruch (Versuch 1/3): API Error: Connection closed mid-response",
+        pauseUntil: resumeMs,
+        md: "bug-001.md",
+      }),
+      setPauseUntil: async (iso, reason) => {
+        pauseArgs.push({ iso, reason });
+      },
+      sleep: async (ms: number) => {
+        slept.push(ms);
+        throw stop; // leave the endless loop after the first pause
+      },
+    });
+    await expect(runForever(d)).rejects.toBe(stop);
+    expect(pauseArgs[0].iso).toBe(new Date(resumeMs).toISOString());
+    expect(pauseArgs[0].reason).toContain("Netzabbruch");
+    expect(slept[0]).toBe(resumeMs - WED_18.getTime());
+    expect(slept[0]).not.toBe(EMPTY_PAUSE_MS);
+  });
+
+  it("req-038: a network-abort step logs as 'idle' with the reason, not a generic error", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    const resumeMs = WED_18.getTime() + 3 * 60_000;
+    await runOnce(
+      { n: 0 },
+      deps({
+        runStep: async (): Promise<StepDecision> => ({
+          kind: "network-abort",
+          message: "Netzabbruch (Versuch 1/3): API Error: Connection closed mid-response",
+          pauseUntil: resumeMs,
+          md: "bug-001.md",
+        }),
+      }),
+    );
+    const [row] = await logStore.list(0, 1);
+    expect(row.status).toBe("idle"); // recognisable as waiting, not a failure
+    expect(row.message).toContain("Netzabbruch");
+  });
+
   it("a pass that blows up entirely pauses too", async () => {
     setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1)));
     // runForever logs the failed pass; keep the test output readable.

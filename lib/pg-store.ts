@@ -23,6 +23,10 @@ import type { PreviewStore } from "./preview-store";
 import type { PreviewRow } from "./preview";
 import type { AppHealth } from "./health";
 import type { HealthStore } from "./health-store";
+import type {
+  NetworkAbortCounts,
+  NetworkAbortStore,
+} from "./network-abort-store";
 import {
   type HeartbeatStatus,
   EMPTY_HEARTBEAT_STATUS,
@@ -429,6 +433,26 @@ export function createPgPreviewStore(): PreviewStore {
         `INSERT INTO preview (id, rows) VALUES ('worker', $1)
          ON CONFLICT (id) DO UPDATE SET rows = EXCLUDED.rows`,
         [JSON.stringify(rows)],
+      );
+    },
+  };
+}
+
+export function createPgNetworkAbortStore(): NetworkAbortStore {
+  return {
+    async get(): Promise<NetworkAbortCounts> {
+      await ensureSchema();
+      const res = await getPool().query<{ counts: NetworkAbortCounts }>(
+        "SELECT counts FROM network_abort_counts WHERE id = 'worker'",
+      );
+      return res.rows[0]?.counts ?? {};
+    },
+    async set(counts: NetworkAbortCounts): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO network_abort_counts (id, counts) VALUES ('worker', $1)
+         ON CONFLICT (id) DO UPDATE SET counts = EXCLUDED.counts`,
+        [JSON.stringify(counts)],
       );
     },
   };

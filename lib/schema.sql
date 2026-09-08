@@ -121,6 +121,16 @@ CREATE TABLE IF NOT EXISTS health (
   data JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
+-- Consecutive network-abort counter per package (req-038). Single row keyed
+-- "worker", one JSON blob mapping "<repo>::<md>" -> how many times in a row
+-- that package just failed on a dropped connection. Must survive a worker
+-- restart, unlike the rate-limit/auth-expired pause which only holds the loop
+-- in memory for its own short wait.
+CREATE TABLE IF NOT EXISTS network_abort_counts (
+  id     TEXT PRIMARY KEY,
+  counts JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
 -- Passkey authentication (req-023). Person ≠ operator context: a user signs
 -- in with a passkey; the app itself is worked in a single operator's context
 -- (n:m-capable in shape, not built out — one operator, one-or-more users).
