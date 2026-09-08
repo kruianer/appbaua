@@ -45,8 +45,21 @@ export function RunLog() {
     void load(0);
   }, [load]);
 
+  // bug-021: Der Verlauf soll sich nach oben und unten scrollen lassen, aber
+  // nicht seitlich verschieben. `clip` statt `hidden`, weil hidden einen
+  // scrollbaren Bereich anlegt (nur ohne Balken) und das Verschieben per
+  // Wischgeste erlaubt bliebe. Damit dabei nichts abgeschnitten wird, brechen
+  // die langen Texte weiter unten um, statt über den Rand zu wachsen.
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
+    <div
+      data-runlog-scroll
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        overflowX: "clip",
+        padding: "0 20px 14px",
+      }}
+    >
       <div
         style={{
           fontSize: 10,
@@ -122,7 +135,10 @@ export function RunLog() {
                       fontSize: 13,
                       lineHeight: 1.3,
                       color: muted(60),
-                      wordBreak: "break-word",
+                      // overflowWrap statt wordBreak: bricht auch dort, wo es
+                      // keine Leerzeichen gibt — bei .md-Namen mit vielen
+                      // Bindestrichen genau der Fall (bug-021).
+                      overflowWrap: "anywhere",
                     }}
                   >
                     {md}
@@ -132,7 +148,16 @@ export function RunLog() {
                   {fmt(e.startedAt)} – {fmt(e.endedAt)}
                 </div>
                 {e.message && (
-                  <div style={{ fontSize: 12, color: muted(70) }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: muted(70),
+                      // Der Hauptverursacher von bug-021: Fehlermeldungen
+                      // tragen Pfade, JSON und Sitzungs-IDs am Stück, ohne ein
+                      // Leerzeichen zum Umbrechen.
+                      overflowWrap: "anywhere",
+                    }}
+                  >
                     {e.message}
                   </div>
                 )}

@@ -147,7 +147,15 @@ export function Settings() {
   }, [clearing]);
 
   return (
-    <div style={{ flex: 1, overflowY: "auto", padding: "0 20px 14px" }}>
+    <div
+            style={{
+              flex: 1,
+              overflowY: "auto",
+              // bug-021: vertikal scrollen ja, seitlich verschieben nein.
+              overflowX: "clip",
+              padding: "0 20px 14px",
+            }}
+          >
       <SystemMonitor />
 
       {/* req-032: Prüfabstände und Schalter der App-Überwachung. */}

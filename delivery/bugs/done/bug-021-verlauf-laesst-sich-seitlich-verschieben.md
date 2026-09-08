@@ -54,3 +54,31 @@ Zeichenketten umbrechen, wo sie es dürfen.
 
 Betrifft alle Bildschirmbreiten, fällt aber auf schmalen Geräten am
 stärksten auf.
+
+# Behoben am 2026-09-08
+
+Zwei Dinge, an der Ursache statt am Symptom:
+
+**Die langen Texte brechen um.** `overflowWrap: "anywhere"` an der
+Fehlermeldung und am .md-Namen in `components/RunLog.tsx`. Die Meldungen
+tragen Pfade, JSON und Sitzungs-IDs am Stück, ohne ein Leerzeichen zum
+Umbrechen — sie waren der Hauptverursacher. `overflowWrap` statt des
+zuvor verwendeten `wordBreak`, weil es auch dort trennt, wo es keine
+Wortgrenze gibt.
+
+**Der Bereich verschiebt sich nicht mehr.** `overflowX: "clip"` an den
+sechs Scroll-Bereichen (RunLog, AppShell, HealthOverview, Settings,
+TaskControl, WorkerDashboard). Bewusst `clip` und nicht `hidden`: hidden
+legt einen scrollbaren Bereich an — nur ohne sichtbaren Balken —, und das
+Verschieben per Wischgeste bliebe erlaubt.
+
+Abgeschnitten wird dadurch nichts, weil die Umbruchregeln oben dafür
+sorgen, dass der Inhalt hineinpasst.
+
+Nicht angefasst: die Live-Ausgabe des Workers in `WorkerDashboard.tsx`.
+Ihr `<pre>` hat bereits `pre-wrap` und `break-word`, und ihr
+`overflow: auto` gilt nur dem kleinen eigenen Kasten, nicht der Seite.
+
+Drei Tests in `components/RunLog.test.tsx`, mit einer echten
+Fehlermeldung aus dem Verlauf als Beispiel. Gegenprobe gemacht: vor dem
+Fix fallen alle drei um.
