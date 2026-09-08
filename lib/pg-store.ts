@@ -247,6 +247,8 @@ export function createPgRunLogStore(): RunLogStore {
     status: string;
     message: string;
     md: string | null;
+    error_kind: string | null;
+    diagnostics: string | null;
   };
   const toEntry = (r: Row): RunLogEntry => ({
     id: Number(r.id),
@@ -258,15 +260,36 @@ export function createPgRunLogStore(): RunLogStore {
     message: r.message,
     // NULL on rows written before req-015 — those show no second line.
     md: r.md,
+    // NULL bei erfolgreichen Laeufen und bei Zeilen von vor req-037.
+    errorKind: (r.error_kind as RunLogEntry["errorKind"]) ?? null,
+    diagnostics: parseDiagnostics(r.diagnostics),
   });
-  const COLUMNS = "id, started_at, ended_at, repo, task_type, status, message, md";
+  /**
+   * Die Messwerte kommen als JSON-Text aus der Spalte. Kaputter Inhalt darf den
+   * Verlauf nicht unlesbar machen — eine Diagnose ist Beiwerk, kein Grund, den
+   * ganzen Eintrag zu verlieren (req-037).
+   */
+  const parseDiagnostics = (raw: string | null): string[] | null => {
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.map(String) : null;
+    } catch {
+      return null;
+    }
+  };
+  const COLUMNS =
+    "id, started_at, ended_at, repo, task_type, status, message, md, " +
+    "error_kind, diagnostics";
 
   return {
     async append(entry: NewRunLogEntry): Promise<RunLogEntry> {
       await ensureSchema();
       const res = await getPool().query<Row>(
-        `INSERT INTO run_log (started_at, ended_at, repo, task_type, status, message, md)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO run_log
+           (started_at, ended_at, repo, task_type, status, message, md,
+            error_kind, diagnostics)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING ${COLUMNS}`,
         [
           entry.startedAt,
@@ -276,6 +299,10 @@ export function createPgRunLogStore(): RunLogStore {
           entry.status,
           entry.message,
           entry.md ?? null,
+          entry.errorKind ?? null,
+          // Als JSON-Text: der Inhalt darf sich je Fehlerart unterscheiden und
+          // weiterentwickeln, ohne dass die Tabelle wandert (req-037).
+          entry.diagnostics?.length ? JSON.stringify(entry.diagnostics) : null,
         ],
       );
       // Retention: drop rows older than the age cutoff, then any beyond max rows.

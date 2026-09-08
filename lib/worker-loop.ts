@@ -7,6 +7,7 @@ import { getWorkerState } from "./worker-state";
 import { getRunLogStore, isIdleSummary } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
 import { executeStep, type StepDecision } from "./execute-step";
+import { errorKindOf } from "./error-kind";
 import { redact } from "./redact";
 import {
   clearRunningStep,
@@ -228,6 +229,11 @@ export async function runOnce(
       message: redact(decision.message),
       // The .md the step worked off, so the Verlauf can name it (req-015).
       md: decision.md ?? null,
+      // req-037: Die Art des Fehlers als eigenes Merkmal, damit sich Haeufungen
+      // filtern lassen, statt im Text zu suchen. Nur bei Fehlern — ein
+      // erfolgreicher Lauf hat keine Art.
+      errorKind:
+        decision.kind === "success" ? null : errorKindOf(decision.message),
     });
     logged += 1;
     // Only success is progress. Counting errors here would keep the loop from

@@ -98,3 +98,58 @@ hat — welche Dateien er anfasste, welchen Schritt er bearbeitete.
 - Ein Ausleiten der Logs an ein fremdes System.
 - Auswertung über Wochen hinweg (Trends, Diagramme).
 - Änderungen am Verhalten des Workers bei Fehlern — das ist req-038.
+
+# Umsetzung am 2026-09-08
+
+Selbst umgesetzt statt vom Worker, weil der zweimal daran scheiterte —
+beide Male an derselben Netzstörung, die dieses Requirement sichtbar
+machen soll.
+
+**Was fertig ist**
+
+`lib/error-kind.ts` ordnet jeden Fehler einer von sieben Arten zu und
+baut dabei auf den vorhandenen Erkennungen auf (`isRateLimit`,
+`isAuthExpired`, `isTransientNetworkError`) statt sie zu verdoppeln. Die
+Reihenfolge der Prüfungen ist die eigentliche Arbeit und im Code
+begründet — zwei Fälle, in denen naives Vorgehen falsch liegt:
+
+- Eine rote Suite zitiert die Testausgabe, und darin kann "connection
+  refused" aus einem Testfall stehen. Ohne Vorrang der Test-Erkennung
+  zählte jeder solche Fehler als Netzstörung.
+- Ein Timeout, der von Wiederholversuchen der API herrührt, nennt beides.
+  Dann ist das Netz die Ursache und die Zeitgrenze nur die Folge — genau
+  der Fall vom 08.09., bei dem drei Pakete scheiterten.
+
+Dazu eine Art, die im Requirement nicht stand: **"Rechner am Limit"**.
+Meldungen wie `fetch failed: cannot fork()` (bug-018, 14.061 Zombies)
+tragen den Wortlaut eines Netzwerkfehlers, meinen aber den eigenen
+Rechner. Als "Netzwerk" gezählt hätte man beim Anschluss gesucht, während
+die Ursache im Container lag — genau die Art Fehlschluss, die dieses
+Requirement verhindern soll.
+
+Die Art wird beim Schreiben des Verlaufs gesetzt (`lib/worker-loop.ts`),
+liegt als eigene Spalte `error_kind` in der Datenbank und erscheint als
+Chip neben dem Status. Erfolgreiche Läufe tragen keine.
+
+Die Spalte `diagnostics` ist angelegt, wird gespeichert und angezeigt.
+
+Getestet mit 14 Fällen in `lib/error-kind.test.ts` — durchgehend echter
+Wortlaut aus dem prod-Verlauf von Juli bis September, kein erfundener.
+Dazu vier Anzeige-Tests. 1118 Tests grün, Typecheck und Lint sauber.
+
+**Was NICHT umgesetzt ist**
+
+- **Die Erreichbarkeitsmessung nach einem Netzwerkfehler.** Die Spalte
+  ist da, die Anzeige auch — aber es misst noch niemand. Das gehört in
+  `execute-step.ts` und braucht eine Entscheidung darüber, wogegen
+  gemessen wird (GitHub? der KI-Anbieter? beides?), ohne den Lauf zu
+  verzögern.
+- **Der Filter nach Fehlerart auf der Aktivitätsseite.** Die Daten und
+  der Index dafür liegen bereit, die Bedienung fehlt.
+- **Die vollständige Meldung statt der letzten 400 Zeichen.**
+  `failureTail` wird inzwischen nirgends mehr aufgerufen; ob die Kürzung
+  noch irgendwo greift, ist ungeprüft.
+- **Der Verlauf des Claude-Laufs bei einem Fehlschlag.**
+
+Diese vier gehören in ein Folge-Requirement. Der Kern — zu erkennen,
+WORAN es lag und ob es sich häuft — steht.

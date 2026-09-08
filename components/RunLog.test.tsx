@@ -145,3 +145,60 @@ describe("Verlauf — passt in die Bildschirmbreite (bug-021)", () => {
     expect(scroller!.style.overflowX).toBe("clip");
   });
 });
+
+// req-037: Woran es lag, soll am Eintrag stehen — nicht in der Meldung
+// versteckt, wo man es nur durch Lesen findet.
+describe("Verlauf — Fehlerart und Messwerte am Eintrag (req-037)", () => {
+  it("AC: ein Netzwerkfehler ist als solcher gekennzeichnet", async () => {
+    stubLog([
+      entry({
+        status: "error",
+        message: "Failed to connect to github.com:443 after 134549 ms",
+        errorKind: "network",
+      }),
+    ]);
+    render(<RunLog />);
+
+    expect(await screen.findByText("Netzwerk")).toBeInTheDocument();
+  });
+
+  it("AC: ein erfolgreicher Lauf traegt KEINE Fehlerart", async () => {
+    stubLog([entry({ status: "success", errorKind: null })]);
+    render(<RunLog />);
+
+    await screen.findByText("Erfolg");
+    for (const label of ["Netzwerk", "Rate-Limit", "Sonstiges"]) {
+      expect(screen.queryByText(label)).not.toBeInTheDocument();
+    }
+  });
+
+  it("AC: die Messwerte nach einem Fehler stehen am Eintrag", async () => {
+    stubLog([
+      entry({
+        status: "error",
+        message: "Failed to connect to github.com:443",
+        errorKind: "network",
+        diagnostics: [
+          "github.com:443 danach erreichbar in 34 ms",
+          "DNS: 140.82.121.4 in 39 ms",
+        ],
+      }),
+    ]);
+    render(<RunLog />);
+
+    expect(
+      await screen.findByText("github.com:443 danach erreichbar in 34 ms"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("DNS: 140.82.121.4 in 39 ms")).toBeInTheDocument();
+  });
+
+  it("Eintraege von vor req-037 zeigen weder Fehlerart noch Messwerte", async () => {
+    // Alte Zeilen haben die Felder gar nicht. Sie duerfen deswegen weder
+    // anders aussehen noch einen Fehler ausloesen.
+    stubLog([entry({ status: "error", message: "irgendwas ging schief" })]);
+    render(<RunLog />);
+
+    expect(await screen.findByText("irgendwas ging schief")).toBeInTheDocument();
+    expect(screen.queryByText("Sonstiges")).not.toBeInTheDocument();
+  });
+});

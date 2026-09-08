@@ -71,6 +71,22 @@ CREATE INDEX IF NOT EXISTS run_log_started_idx ON run_log (started_at DESC);
 -- line rather than a made-up placeholder, so this column has no DEFAULT.
 ALTER TABLE run_log ADD COLUMN IF NOT EXISTS md TEXT;
 
+-- Added with req-037. error_kind: die Art eines Fehlers ('network',
+-- 'rate-limit', 'auth', 'test-red', 'timeout', 'resources', 'other') als
+-- eigenes Merkmal statt nur als Prosa in message — damit sich Haeufungen
+-- filtern lassen, ohne im Text zu suchen. NULL bei erfolgreichen Laeufen und
+-- bei Zeilen von vor req-037, deshalb kein DEFAULT.
+ALTER TABLE run_log ADD COLUMN IF NOT EXISTS error_kind TEXT;
+
+-- Was unmittelbar nach einem Netzwerkfehler gemessen wurde: war das Ziel
+-- erreichbar, und wie lange dauerte der Verbindungsaufbau? Als JSON-Text, weil
+-- der Inhalt je Fehlerart verschieden ist und sich weiterentwickeln darf, ohne
+-- dass die Tabelle wandert.
+ALTER TABLE run_log ADD COLUMN IF NOT EXISTS diagnostics TEXT;
+
+CREATE INDEX IF NOT EXISTS run_log_error_kind_idx
+  ON run_log (error_kind) WHERE error_kind IS NOT NULL;
+
 -- Live worker status (req-005). Single row keyed "worker". Holds the currently
 -- running step (repo/task_type/started_at) while it runs, and pause_until while
 -- the worker is in its 5-minute empty pause. All null = idle.
