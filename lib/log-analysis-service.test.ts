@@ -233,6 +233,10 @@ describe("analyzeRepoLogs — was an die KI geht", () => {
   });
 
   it("ohne Abschnitt '## KI-Anbieter' wird gar nicht erst gefragt", async () => {
+    // Und es entsteht auch KEIN Eintrag: Ein Repo ohne KI-Schluessel ist ein
+    // normaler Fall — appbaua selbst nutzt das Abo statt der API. Als Fehler
+    // gezaehlt schrieb das am 08.09. sechs Eintraege in einer halben Stunde,
+    // obwohl alles in Ordnung war, und liess echte Fehler untergehen.
     const docker = dockerStub({ "lgt-prod-app": "hallo" });
     const ai = aiStub('{"befund": false, "zusammenfassung": "-"}');
 
@@ -243,8 +247,25 @@ describe("analyzeRepoLogs — was an die KI geht", () => {
       now: () => NOW,
     });
 
-    expect(analysis?.status).toBe("error");
+    expect(analysis).toBeNull();
     expect(ai.calls).toEqual([]);
+  });
+
+  it("AC: ohne KI-Abschnitt landet auch nichts im Verlauf", async () => {
+    // Der eigentliche Schaden lag nicht im Rueckgabewert, sondern darin, dass
+    // jeder Durchlauf eine Fehlerzeile schrieb.
+    const docker = dockerStub({ "lgt-prod-app": "hallo" });
+    const ai = aiStub('{"befund": false, "zusammenfassung": "-"}');
+    const vorher = (await runLog.list(0, 100)).length;
+
+    await analyzeRepoLogs("r1", "scheduled", {
+      docker: docker.client,
+      fetchImpl: ai.fetchImpl,
+      readHealthMd: async () => null,
+      now: () => NOW,
+    });
+
+    expect((await runLog.list(0, 100)).length).toBe(vorher);
   });
 
   it("ein nicht überwachtes Repo wird nicht analysiert", async () => {

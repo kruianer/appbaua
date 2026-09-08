@@ -145,7 +145,15 @@ export async function analyzeRepoLogs(
 
   const spec = parseHealthMd(await full.readHealthMd(repo).catch(() => null));
   if (!spec.ai) {
-    return fail('kein Abschnitt "## KI-Anbieter" in der health.md — keine Analyse möglich');
+    // Kein KI-Abschnitt heisst NICHT "fehlgeschlagen", sondern "hier ist nichts
+    // zu tun" — dieselbe Kategorie wie ein nicht ueberwachtes Repo oben.
+    //
+    // Vorher stand das als Fehler im Verlauf, bei jedem Durchlauf neu: appbaua
+    // allein schrieb so am 08.09. sechs Fehlereintraege in einer halben Stunde,
+    // obwohl alles in Ordnung war. Ein Repo ohne KI-Schluessel — appbaua nutzt
+    // das Abo, nicht die API — ist ein voellig normaler Fall, und ein Verlauf
+    // voller solcher Zeilen laesst echte Fehler untergehen.
+    return null;
   }
 
   let containers: DockerContainer[];

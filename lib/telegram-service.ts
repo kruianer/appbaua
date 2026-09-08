@@ -13,6 +13,7 @@
 import type { AppHealth } from "./health";
 import { getHealthStore } from "./health-store";
 import { getRunLogStore } from "./run-log-store";
+import { errorKindOf } from "./error-kind";
 import { redact } from "./redact";
 import {
   type Alert,
@@ -79,6 +80,10 @@ async function logFailedSend(
         `Telegram-Nachricht nicht zugestellt (${alert.check}): ${messageOf(err)}`,
       ),
       md: null,
+      // req-037: Ein misslungener Versand ist fast immer die Leitung, nicht die
+      // App. Ohne die Einordnung steht er als "Sonstiges" im Verlauf und sieht
+      // aus wie ein Programmfehler.
+      errorKind: errorKindOf(messageOf(err)),
     });
   } catch {
     /* der Verlauf ist nicht der Zweck dieser Runde */
