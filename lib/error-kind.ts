@@ -1,6 +1,8 @@
 import { isRateLimit } from "./rate-limit";
 import { isAuthExpired } from "./auth-expired";
-import { isTransientNetworkError } from "./workspace";
+// Aus network-errors, NICHT aus workspace: Diese Datei wird von der
+// Oberflaeche importiert, und workspace zieht node-Module mit sich.
+import { isTransientNetworkError } from "./network-errors";
 
 // req-037: Was für ein Fehler war das? Bislang stand die Antwort nur als Prosa
 // in `message`, und wer wissen wollte, ob sich Netzwerkfehler häufen, musste

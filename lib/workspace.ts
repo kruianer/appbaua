@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { redact } from "./redact";
+import { isTransientNetworkError } from "./network-errors";
 import { DEVOPS_FILE, devBranchFrom } from "./dev-branch";
 
 /** What commitAndPush reports when the working copy holds nothing to commit. */
@@ -146,11 +147,11 @@ export function run(
  * REMOTE_PROBE_TIMEOUT_MS) — the same hanging connection, only noticed by us
  * instead of by git.
  */
-export function isTransientNetworkError(stderr: string): boolean {
-  return /Failed to connect|Could not connect to server|Connection timed out|Connection refused|Connection reset by peer|Could not resolve host|Could not resolve proxy|Operation timed out|Recv failure|Send failure|Empty reply from server|The remote end hung up unexpectedly|early EOF|\[timeout\]/i.test(
-    stderr,
-  );
-}
+// Liegt seit req-037 in `network-errors.ts` — die Oberflaeche braucht dieselbe
+// Pruefung, kann diese Datei aber nicht importieren (node:path, node:fs,
+// Kindprozesse). Re-exportiert, damit die bisherigen Aufrufer unveraendert
+// bleiben.
+export { isTransientNetworkError } from "./network-errors";
 
 /**
  * How long the second attempt waits (bug-020). Long enough for a blip to pass,
