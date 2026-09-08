@@ -174,6 +174,23 @@ Abschnitte, die auf diese App nicht zutreffen, laesst du weg — eine
 leere Ueberschrift ist schlechter als keine, weil sie aussieht wie eine
 vergessene Angabe.
 
+**In den Abschnitten steht NUR `- Schluessel: Wert`.** Keine
+Erklaerungen, keine Absaetze, keine Trennlinien. Der Leser nimmt jede
+Zeile mit einem Doppelpunkt als Eintrag — am 08.09. wurde so ein
+erklaerender Absatz unter "## Web" als dritte URL gelesen
+(`env: "*Warum 307 und nicht 200"`), und die Saetze unter
+"## Nicht pruefen" wurden zu Container-Namen wie `**Der` und
+`claude login`.
+
+Begruendungen gehoeren an das ENDE der Datei, unter eine eigene
+Ueberschrift wie "## Warum diese Angaben so sind". Dort stoeren sie
+nicht, und die Datei bleibt trotzdem lesbar fuer Menschen.
+
+**Je Angabe genau ein Wert.** `Container: \`app-prod-db\` (prod),
+\`app-dev-db\` (dev)` ergibt einen Container dieses ganzen Namens — den
+es nicht gibt. Steht eine Prueflung fuer mehrere Umgebungen an, nimm die
+prod-Umgebung und vermerke die Einschraenkung in der Begruendung.
+
 ## Was du NIE tust
 
 - Eine Pruefung erfinden, deren Ergebnis du nicht erklaeren kannst. Wer
