@@ -2743,3 +2743,90 @@ describe("executeStep — fertige Etappen ueberleben einen Abbruch (req-036)", (
     expect(d.message).toContain("Timeout");
   });
 });
+
+// bug-023 in CellarVoice wurde dreimal "erfolgreich" abgearbeitet und lag
+// danach immer noch in ready/. Ursache war das Zusammenspiel zweier Dinge, die
+// jedes fuer sich richtig sind: Seit req-036 committet Claude seine Etappen
+// selbst — samt der .md, die er dabei schon verschoben haben kann. Der Worker
+// wollte danach in-progress/ -> done/ verschieben (fs.rename warf, weil die
+// Datei nicht mehr dort lag, und der catch schluckte es) und committen
+// (nichts zu tun, weil Claude schon alles committet hatte). Ohne Commit kein
+// Push — die Etappen blieben im Container, die .md in in-progress/, und
+// requeueStale holte sie beim naechsten Durchlauf nach ready/ zurueck.
+describe("executeStep — Claude hat schon committet (bug-023)", () => {
+  const timeout = () =>
+    vi.fn(async () => ({ ok: true, summary: "fertig", report: "" }));
+
+  /** Ein Lauf, bei dem Claude bereits committet hat: nichts mehr offen. */
+  function claudeCommittedDeps(over: Partial<ExecuteDeps> = {}): Partial<ExecuteDeps> {
+    return deps({
+      listReady: folders({ ready: ["bug-023.md"] }),
+      runClaude: timeout(),
+      // Das Arbeitsverzeichnis ist sauber — es gibt nichts zu committen.
+      commitAndPush: vi.fn(async () => ({
+        pushed: false,
+        detail: NO_CHANGES_DETAIL,
+      })),
+      pushStages: vi.fn(async () => ({
+        pushed: 2,
+        detail: "2 Etappe(n) gesichert",
+      })),
+      ...over,
+    });
+  }
+
+  it("AC: die Etappen werden gepusht, auch wenn nichts mehr zu committen ist", async () => {
+    const pushStages = vi.fn(async () => ({
+      pushed: 2,
+      detail: "2 Etappe(n) gesichert",
+    }));
+    const d = await executeStep(repo, bug, [], claudeCommittedDeps({ pushStages }));
+
+    expect(d.kind).toBe("success");
+    expect(pushStages).toHaveBeenCalled();
+  });
+
+  it("AC: der Verlauf sagt, dass die Etappen gesichert wurden", async () => {
+    const d = await executeStep(repo, bug, [], claudeCommittedDeps());
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") throw new Error("unerwartet");
+    expect(d.message).toContain("2 Etappe(n) gesichert");
+  });
+
+  it("gab es keine Etappen, bleibt die Meldung unveraendert", async () => {
+    // Eine Doku-Runde ohne Aenderungen etwa: nichts committet, nichts zu
+    // pushen. Das darf keinen irrefuehrenden Zusatz bekommen.
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      claudeCommittedDeps({
+        pushStages: vi.fn(async () => ({ pushed: 0, detail: "" })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") throw new Error("unerwartet");
+    expect(d.message).not.toContain("Etappe");
+  });
+
+  it("AC: eine .md, die Claude schon verschoben hat, laesst den Lauf nicht scheitern", async () => {
+    // fs.rename wirft, wenn die Quelle nicht mehr da ist. Das darf den Lauf
+    // nicht umwerfen — das Ziel ist ja bereits erreicht.
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      claudeCommittedDeps({
+        // Nur der Zug nach done/ scheitert. Der erste (ready -> in-progress)
+        // muss klappen, sonst gaebe es gar keinen Lauf — und sein Fehlschlag
+        // ist zu Recht fatal.
+        moveMd: vi.fn(async (_dir: string, _from: string, to: string) => {
+          if (to.includes("/done/")) {
+            throw new Error("ENOENT: no such file or directory");
+          }
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
+  });
+});
