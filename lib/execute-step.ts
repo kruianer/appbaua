@@ -684,10 +684,17 @@ export async function executeStep(
   // clears any network-abort count this package had run up (req-038) — it made
   // it through this time, so the Verlauf must not keep suggesting past trouble.
   if (src.base && mdRel && mdName) {
+    // Seit req-036 committet Claude selbst und kann die .md dabei schon nach
+    // done/ verschoben haben. Dann wirft fs.rename, weil sie nicht mehr dort
+    // liegt, wo mdRel sie erwartet — und das ist in Ordnung: Das Ziel ist ja
+    // erreicht. Der catch bleibt deshalb, aber der Fall ist jetzt benannt
+    // statt stillschweigend (bug-023 in CellarVoice: dreimal "erfolgreich" am
+    // selben Bug, weil das eigentliche Problem eine Ebene tiefer lag — siehe
+    // den Push weiter unten).
     try {
       await d.moveMd(dir, mdRel, `${doneDir(src.base)}/${mdName}`);
     } catch {
-      /* best effort */
+      /* schon verschoben oder nicht mehr da — beides kein Grund anzuhalten */
     }
     await d
       .setNetworkAbortCounts(
@@ -719,9 +726,24 @@ export async function executeStep(
   // so the next prepareRepo puts it back into ready/ and the next pass retries
   // it — parking it would punish the repo for a network that was down.
   if (pushFailed(pushed)) return pushError(pushed, `${gateNote}${note}`);
+
+  // "Nichts zu committen" heisst seit req-036 nicht mehr "nichts zu pushen":
+  // Claude committet seine Etappen selbst, also kann die ganze Arbeit bereits
+  // als Commit vorliegen, waehrend das Arbeitsverzeichnis sauber ist. commitAndPush
+  // pusht in diesem Fall NICHT — und die fertige Arbeit bliebe im Container
+  // liegen, die .md in in-progress/, und der naechste Durchlauf faengt von vorn
+  // an. Genau so wurde bug-023 in CellarVoice dreimal "erfolgreich" bearbeitet.
+  let stagesNote = "";
+  if (pushed.detail === NO_CHANGES_DETAIL) {
+    const stages = await d
+      .pushStages(dir, branch, token)
+      .catch(() => ({ pushed: 0, detail: "" }));
+    if (stages.pushed > 0) stagesNote = ` — ${stages.detail}`;
+  }
+
   return {
     kind: "success",
-    message: `${outcome.summary} — ${pushed.detail}${gateNote}${note}`,
+    message: `${outcome.summary} — ${pushed.detail}${stagesNote}${gateNote}${note}`,
     md: runMd(),
   };
 }
