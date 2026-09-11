@@ -989,3 +989,88 @@ describe("Etappen eines abgebrochenen Laufs retten (req-036)", () => {
     ]);
   });
 });
+
+// Am 11.09. kostete eine Luecke sieben fertige Etappen: Die Zeitgrenze riss
+// bei req-062 (Wegfara), req-036 sicherte die Commits — aber der Push
+// scheiterte, weil dev inzwischen weitergezogen war. commitAndPush haette das
+// per Rebase aufgeloest (bug-017); pushStages kannte diesen Retry nicht. Die
+// Arbeit lag danach nur noch lokal, und der naechste Deploy ersetzte den
+// Container samt Arbeitsverzeichnis.
+//
+// Die Retry-Logik liegt jetzt an EINER Stelle, die beide nutzen. Diese Tests
+// halten fest, dass pushStages sie wirklich hat.
+describe("pushStages mit Rebase-Retry (req-062-Verlust)", () => {
+  const STALE = [
+    " ! [rejected]        dev -> dev (fetch first)",
+    "hint: Updates were rejected because the remote contains work that you do",
+    "hint: not have locally.",
+  ].join("\n");
+
+  /** rev-list meldet n Etappen; der erste Push scheitert mit `stderr`. */
+  function stagesPushFailsOnce(n: number, stderr: string) {
+    let pushes = 0;
+    return fakeGit((args) => {
+      if (args[0] === "rev-list") return { stdout: `${n}\n` };
+      if (args[0] !== "push") return undefined;
+      pushes += 1;
+      return pushes === 1 ? { ok: false, code: 1, stderr } : undefined;
+    });
+  }
+
+  it("AC: ein veralteter Stand wird per Rebase aufgeloest, die Etappen gehen raus", async () => {
+    const { runImpl, calls } = stagesPushFailsOnce(7, STALE);
+    const res = await pushStages(repoDir(FRESH), "dev", PAT, { runImpl });
+
+    expect(res.pushed).toBe(7);
+    expect(res.detail).toContain("7 Etappe(n) gesichert");
+    expect(res.detail).toContain(REBASED_DETAIL);
+    expect(sub(calls, "rebase")?.args).toEqual(["rebase", "origin/dev"]);
+    expect(calls.filter((c) => c.args[0] === "push")).toHaveLength(2);
+  });
+
+  it("AC: eine Ablehnung, die nicht am Stand liegt, wird NICHT wiederholt", async () => {
+    // Ein fehlender Scope scheitert beim zweiten Mal genauso — ein Rebase
+    // aendert daran nichts und kostet nur Zeit.
+    const { runImpl, calls } = fakeGit((args) =>
+      args[0] === "rev-list"
+        ? { stdout: "3\n" }
+        : args[0] === "push"
+          ? { ok: false, code: 1, stderr: "protected branch hook declined" }
+          : undefined,
+    );
+    const res = await pushStages(repoDir(FRESH), "dev", PAT, { runImpl });
+
+    expect(res.pushed).toBe(0);
+    expect(calls.filter((c) => c.args[0] === "push")).toHaveLength(1);
+    expect(calls.some((c) => c.args[0] === "rebase")).toBe(false);
+  });
+
+  it("ein Konflikt beim Rebase bricht ab und meldet die Etappen als liegengeblieben", async () => {
+    const { runImpl, calls } = fakeGit((args) =>
+      args[0] === "rev-list"
+        ? { stdout: "2\n" }
+        : args[0] === "push"
+          ? { ok: false, code: 1, stderr: STALE }
+          : args[0] === "rebase"
+            ? { ok: false, code: 1, stderr: "CONFLICT (content): src/x.ts" }
+            : undefined,
+    );
+    const res = await pushStages(repoDir(FRESH), "dev", PAT, { runImpl });
+
+    expect(res.pushed).toBe(0);
+    expect(res.detail).toContain("2 Etappe(n) liegen lokal");
+    expect(calls.some((c) => c.args[0] === "rebase" && c.args[1] === "--abort")).toBe(
+      true,
+    );
+  });
+
+  it("der Token steht in keiner Meldung und in keinem Argument", async () => {
+    const { runImpl, calls } = stagesPushFailsOnce(4, STALE);
+    const res = await pushStages(repoDir(FRESH), "dev", PAT, { runImpl });
+
+    expect(res.detail).not.toContain(PAT);
+    for (const call of calls) {
+      for (const arg of call.args) expect(arg).not.toContain(PAT);
+    }
+  });
+});
