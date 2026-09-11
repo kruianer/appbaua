@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  CLAUDE_TIMEOUT_MINUTES,
+  CLAUDE_TIMEOUT_MS,
   createActivityStream,
   createLiveTail,
   docPrompt,
@@ -520,5 +522,41 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     });
     const out = await runClaude("/repo", "prompt", { runImpl });
     expect(out.summary).toBe("Claude-Lauf fehlgeschlagen: abgebrochen");
+  });
+});
+
+// Die Zeitgrenze stand doppelt im Code: einmal als Konstante, einmal als
+// "(60 min)" im Meldungstext. Beim Anheben auf 120 Minuten haette die Meldung
+// weiter 60 behauptet — und im Verlauf saehe es aus, als sei ein Lauf nach
+// einer Stunde abgebrochen worden, obwohl er zwei lief. Deshalb leitet sich
+// die Meldung jetzt aus der Konstante ab.
+describe("Zeitgrenze eines Claude-Laufs", () => {
+  it("AC: die Grenze liegt bei 120 Minuten", () => {
+    expect(CLAUDE_TIMEOUT_MS).toBe(120 * 60_000);
+    expect(CLAUDE_TIMEOUT_MINUTES).toBe(120);
+  });
+
+  it("AC: die Timeout-Meldung nennt dieselbe Zahl wie die Konstante", async () => {
+    const runImpl = (async () => ({
+      ok: false,
+      code: 124, // was `run` bei eigenem Timeout liefert
+      stdout: "",
+      stderr: "\n[timeout]",
+    })) as never;
+    const out = await runClaude("/repo", "prompt", { runImpl });
+
+    expect(out.ok).toBe(false);
+    expect(out.summary).toContain(`Timeout (${CLAUDE_TIMEOUT_MINUTES} min)`);
+    // Und nicht mehr die alte, fest eingetragene Zahl.
+    expect(out.summary).not.toContain("(60 min)");
+  });
+
+  it("die Erkennung als Netzabbruch haengt nicht an der Zahl", () => {
+    // network-abort prueft auf /^Claude-Lauf: Timeout/ ohne Minutenangabe —
+    // sonst haette das Anheben die Unterscheidung zwischen Zeitgrenze und
+    // Verbindungsabbruch stillschweigend ausgehebelt (req-038).
+    expect(`Claude-Lauf: Timeout (${CLAUDE_TIMEOUT_MINUTES} min)`).toMatch(
+      /^Claude-Lauf: Timeout/,
+    );
   });
 });

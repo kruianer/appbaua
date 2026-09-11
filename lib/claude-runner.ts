@@ -7,7 +7,7 @@ import { SECURITY_OK_MESSAGE } from "./security-report";
 // the user's Anthropic subscription (via `claude login`, mounted into the
 // container) — NOT an API key, so no usage costs. Coding uses Sonnet (5) to be
 // easier on the operator's rate limits. A
-// run is capped at CLAUDE_TIMEOUT_MS; on timeout or a missing CLI it returns a
+// run is capped at CLAUDE_TIMEOUT_MS (120 min); on timeout or a missing CLI it returns a
 // clean failure (never throws), so the worker logs "Fehler" and moves on.
 //
 // The CLI runs with structured streaming output and closed stdin (bug-001):
@@ -16,7 +16,19 @@ import { SECURITY_OK_MESSAGE } from "./security-report";
 // into activity lines (claude-events), and the logged summary is taken from the
 // stream's final "result" event, so the Fazit stays what it was (req-004).
 
-export const CLAUDE_TIMEOUT_MS = 60 * 60_000; // 60 minutes
+/**
+ * Wie lange ein einzelner Claude-Lauf laufen darf.
+ *
+ * Von 60 auf 120 Minuten erhoeht (11.09.2026): Mehrere Wegfara-Requirements
+ * rissen die Stunde, und seit req-036 ist ein abgebrochener Lauf auch nicht
+ * mehr verloren — seine fertigen Etappen sind committet und werden gesichert.
+ * Eine grosszuegigere Grenze kostet also im schlimmsten Fall Zeit, aber keine
+ * Arbeit mehr.
+ */
+export const CLAUDE_TIMEOUT_MS = 120 * 60_000;
+
+/** Die Grenze in Minuten — fuer Meldungen, damit sie nie auseinanderlaufen. */
+export const CLAUDE_TIMEOUT_MINUTES = CLAUDE_TIMEOUT_MS / 60_000;
 export const CLAUDE_MODEL = "sonnet";
 
 /** How much of the running output is published live, and how often (req-008). */
@@ -428,7 +440,7 @@ export async function runClaude(
     const note = lastActivity ? ` — zuletzt: ${lastActivity}` : "";
     return {
       ok: false,
-      summary: `Claude-Lauf: Timeout (60 min)${note}`,
+      summary: `Claude-Lauf: Timeout (${CLAUDE_TIMEOUT_MINUTES} min)${note}`,
       report: "",
     };
   }
