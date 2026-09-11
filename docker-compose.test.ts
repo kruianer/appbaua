@@ -149,3 +149,27 @@ describe("docker-compose.yml — Telegram (req-033)", () => {
     expect(COMPOSE).toContain("${TELEGRAM_CHAT_ID:-}");
   });
 });
+
+describe("docker-compose.yml — Arbeitskopien ueberleben einen Deploy (req-062-Verlust)", () => {
+  function serviceBlockLocal(name: string): string {
+    const lines = COMPOSE.split("\n");
+    const start = lines.findIndex((l) => l.trim() === `${name}:`);
+    expect(start).toBeGreaterThan(-1);
+    const next = lines.findIndex((l, i) => i > start && /^  \S/.test(l));
+    return lines.slice(start, next === -1 ? undefined : next).join("\n");
+  }
+
+  it("AC: /work liegt in einem Volume, nicht im Container", () => {
+    // Seit req-036 kann dort Arbeit liegen, die noch nicht gepusht ist —
+    // fertige Etappen eines Laufs, dessen Push am weitergezogenen Branch
+    // scheiterte. Ohne Volume ersetzt jeder Deploy den Container und damit die
+    // Arbeitskopien: Am 11.09. kostete das sieben Etappen an req-062.
+    expect(serviceBlock("worker")).toMatch(/^\s*-\s*worker-work:\/work\s*$/m);
+  });
+
+  it("das Volume ist auch deklariert", () => {
+    // Ein Mount auf einen nicht deklarierten Namen legt bei Compose ein
+    // anonymes Volume an — das ueberlebt ein `down` nicht.
+    expect(COMPOSE).toMatch(/^\s{2}worker-work:\s*$/m);
+  });
+});

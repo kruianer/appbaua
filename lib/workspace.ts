@@ -581,17 +581,23 @@ export async function pushStages(
   const count = await unpushedCommitCount(dir, branch, deps);
   if (count === 0) return { pushed: 0, detail: "" };
 
-  const res = await git("git", ["push", "origin", branch], {
-    cwd: dir,
-    env: authEnv(token),
-  });
+  // Mit Rebase-Retry, genau wie commitAndPush (bug-017). Ohne ihn kostete ein
+  // inzwischen weitergezogener Branch am 11.09. sieben fertige Etappen an
+  // req-062: gerettet, aber nicht gepusht — und beim naechsten Deploy war das
+  // Arbeitsverzeichnis samt reflog weg.
+  const res = await pushWithRebaseRetry(git, dir, branch, token);
   if (!res.ok) {
     return {
       pushed: 0,
       detail: `${count} Etappe(n) liegen lokal, Push fehlgeschlagen: ${redact(res.stderr, [token])}`,
     };
   }
-  return { pushed: count, detail: `${count} Etappe(n) gesichert` };
+  return {
+    pushed: count,
+    detail: res.rebased
+      ? `${count} Etappe(n) gesichert (${REBASED_DETAIL})`
+      : `${count} Etappe(n) gesichert`,
+  };
 }
 
 export type PushOptions = WorkspaceDeps & {
@@ -601,6 +607,52 @@ export type PushOptions = WorkspaceDeps & {
    */
   branch?: string;
 };
+
+/**
+ * Pushen, und bei einem Stand, der inzwischen veraltet ist, GENAU EINMAL
+ * erneut — nach fetch und rebase.
+ *
+ * Gemeinsam genutzt von commitAndPush und pushStages. Anfangs hatte nur
+ * commitAndPush diesen Retry (bug-017); pushStages kam mit req-036 dazu und
+ * bekam ihn nicht. Am 11.09. kostete das sieben fertige Etappen an
+ * req-062 (Wegfara): Die Zeitgrenze riss, die Etappen waren committet, aber
+ * der Push scheiterte an einem inzwischen weitergezogenen dev — und beim
+ * naechsten Deploy war das Arbeitsverzeichnis weg.
+ *
+ * Deshalb liegt die Logik jetzt an EINER Stelle. Zwei Aufrufer, ein Verhalten.
+ */
+async function pushWithRebaseRetry(
+  git: typeof run,
+  dir: string,
+  branch: string,
+  token: string,
+): Promise<{ ok: boolean; rebased: boolean; stderr: string }> {
+  const auth = authEnv(token);
+  const first = await git("git", ["push", "origin", branch], { cwd: dir, env: auth });
+  if (first.ok) return { ok: true, rebased: false, stderr: "" };
+
+  // Alles ausser "das Remote ist weitergezogen" ist nicht unsere Sache: ein
+  // fehlender Scope oder ein geschuetzter Branch scheitert beim zweiten Mal
+  // genauso.
+  if (!isStaleBranchPush(first.stderr)) {
+    return { ok: false, rebased: false, stderr: first.stderr };
+  }
+
+  const fetched = await git("git", ["fetch", "origin", branch], { cwd: dir, env: auth });
+  if (!fetched.ok) return { ok: false, rebased: false, stderr: first.stderr };
+
+  const rebase = await git("git", ["rebase", `origin/${branch}`], { cwd: dir });
+  if (!rebase.ok) {
+    // Beide Seiten haben dieselben Zeilen geaendert. Die Arbeitskopie nicht
+    // mitten im Rebase stehen lassen, und die URSPRUENGLICHE Ablehnung melden
+    // — das ist, was passiert ist.
+    await git("git", ["rebase", "--abort"], { cwd: dir });
+    return { ok: false, rebased: false, stderr: first.stderr };
+  }
+
+  const retry = await git("git", ["push", "origin", branch], { cwd: dir, env: auth });
+  return { ok: retry.ok, rebased: retry.ok, stderr: retry.stderr };
+}
 
 /**
  * Was this push refused because the remote moved on, rather than for a real
@@ -653,35 +705,16 @@ export async function commitAndPush(
     return { pushed: false, detail: `commit failed: ${redact(commit.stderr, [token])}` };
   }
 
-  const push = await git("git", ["push", "origin", branch], { cwd: dir, env: auth });
-  if (push.ok) return { pushed: true, detail: `auf ${branch} gepusht` };
-
-  // Anything other than "the remote moved on" is not ours to retry.
-  if (!isStaleBranchPush(push.stderr)) {
-    return { pushed: false, detail: `push failed: ${redact(push.stderr, [token])}` };
+  const res = await pushWithRebaseRetry(git, dir, branch, token);
+  if (!res.ok) {
+    return { pushed: false, detail: `push failed: ${redact(res.stderr, [token])}` };
   }
-
-  const fetched = await git("git", ["fetch", "origin", branch], { cwd: dir, env: auth });
-  if (!fetched.ok) {
-    return { pushed: false, detail: `push failed: ${redact(push.stderr, [token])}` };
-  }
-
-  const rebase = await git("git", ["rebase", `origin/${branch}`], { cwd: dir });
-  if (!rebase.ok) {
-    // Conflicting edits to the same lines. Leave the working copy usable rather
-    // than mid-rebase, and report the ORIGINAL rejection — that is what happened.
-    await git("git", ["rebase", "--abort"], { cwd: dir });
-    return {
-      pushed: false,
-      detail: `push failed: ${redact(push.stderr, [token])}`,
-    };
-  }
-
-  const retry = await git("git", ["push", "origin", branch], { cwd: dir, env: auth });
-  if (!retry.ok) {
-    return { pushed: false, detail: `push failed: ${redact(retry.stderr, [token])}` };
-  }
-  return { pushed: true, detail: `auf ${branch} gepusht (${REBASED_DETAIL})` };
+  return {
+    pushed: true,
+    detail: res.rebased
+      ? `auf ${branch} gepusht (${REBASED_DETAIL})`
+      : `auf ${branch} gepusht`,
+  };
 }
 
 /**

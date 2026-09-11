@@ -141,6 +141,18 @@ services:
       NODE_ENV: production
     volumes:
       - claude-home:/claude-home
+      # Die Arbeitskopien der Ziel-Repos (WORKER_WORKDIR=/work). Als Volume,
+      # weil sie seit req-036 Arbeit enthalten koennen, die noch nicht gepusht
+      # ist: fertige Etappen eines Laufs, dessen Push am inzwischen
+      # weitergezogenen Branch scheiterte.
+      #
+      # Ohne Volume ersetzt jeder Deploy den Container und damit /work. Am
+      # 11.09. kostete das sieben Etappen an req-062 (Wegfara) — sie lagen nur
+      # im reflog des Containers, und der war nach dem naechsten Deploy weg.
+      #
+      # Ein Volume kostet Platz (ein Klon je Repo), aber kein Klonen bei jedem
+      # Deploy und keine verlorene Arbeit.
+      - worker-work:/work
 
   # Zustandsübersicht der überwachten Apps (req-032). Der einzige Dienst mit
   # Zugriff auf die Docker-Engine — und bewusst NICHT die App.
@@ -186,3 +198,4 @@ services:
 volumes:
   db-data:
   claude-home:
+  worker-work:
