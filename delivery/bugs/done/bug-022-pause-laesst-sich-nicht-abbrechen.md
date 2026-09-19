@@ -81,3 +81,46 @@ Wert lesen, den ein Mensch gesetzt (oder geleert) hat, nicht den eigenen.
   Knopf geben soll, ist eine eigene Frage.
 - Die Länge der Pausen selbst (6 Stunden bei Anmeldung, bis zum Reset
   bei Rate-Limit). Die sind richtig gewählt.
+
+# Behoben am 2026-09-19
+
+`pause_until` ist jetzt die QUELLE der Pause, nicht mehr nur ihre
+Anzeige. Der Worker schläft eine Pause nicht mehr in einem Stück,
+sondern in Abschnitten von 20 Sekunden (`PAUSE_POLL_MS` in
+`lib/worker-loop.ts`) und sieht zwischen den Abschnitten nach, ob sie
+noch gilt (`sleepThroughPause`).
+
+**Die eigene Schreiberei zählt nicht als Eingriff.** Der Wert, den der
+Worker beim Beginn der Pause selbst geschrieben hat, ist der Maßstab:
+Nur eine Abweichung davon — geleert, verkürzt, verschoben — ist ein
+Mensch, und dann endet die Pause sofort. Verglichen wird der ZEITPUNKT
+(mit einer Sekunde Toleranz), nicht der Text: der Wert läuft durch
+Postgres (`timestamptz`) und kann anders formatiert zurückkommen.
+
+**Der Hauptschalter wird mitgelesen.** Aus und wieder an während einer
+Pause beendet sie ebenfalls. Nur aus beendet sie nicht — dann wartet der
+Worker weiter, und der nächste Durchgang prüft den Schalter ohnehin.
+
+**Eine Pause, die ein Mensch gesetzt hat, wird nicht überschrieben.**
+Der abschließende `setPauseUntil(null)` passiert nur, wenn das
+gespeicherte Fenster noch das eigene ist. Ein Lesefehler am Store
+(DB-Aussetzer) kürzt die Pause nicht ab — unlesbar gilt als unverändert,
+der nächste Abschnitt sieht erneut nach.
+
+Damit stimmt auch die Anzeige wieder: Der Worker schläft genau so lange,
+wie das gespeicherte Fenster sagt, also kann die Startseite nicht mehr
+auf „Leerlauf — nichts zu tun" zurückfallen, während er in Wahrheit noch
+wartet. Das war die zweite Hälfte des Bugs.
+
+Gilt für alle Pausen gleichermaßen — Rate-Limit, abgelaufene Anmeldung,
+Netzabbruch und die 5-Minuten-Pause des leeren Durchgangs. An den
+Längen selbst ist nichts geändert (Out of Scope), nur an ihrer
+Unterbrechbarkeit.
+
+Sechs Tests in `lib/worker-loop.test.ts` (eigener Block „laufende Pause
+lässt sich abbrechen"), dazu ein Prüfstand, der die Pause wirklich
+durchlebt: die Uhr läuft mit jedem Abschnitt weiter, und das Fenster
+geht durch den echten Worker-Status-Store — denselben Wert, den ein
+Mensch in der Datenbank ändert. Gegenprobe gemacht: mit dem alten langen
+Schlaf fallen fünf der sechs um, darunter die Anzeige, die dann wieder
+„idle" statt „pause" meldet.
