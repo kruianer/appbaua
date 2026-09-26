@@ -53,6 +53,12 @@ export type RunOptions = {
    * comes (bug-001). Defaults to a pipe nobody writes to.
    */
   stdin?: "ignore" | "pipe";
+  /**
+   * Wie lange der Prozessbaum nach dem freundlichen Beenden noch bekommt, bevor
+   * er hart abgeschossen wird (bug-023). Naht fuer Tests; im Betrieb gilt
+   * {@link TREE_KILL_GRACE_MS}.
+   */
+  killGraceMs?: number;
 };
 
 /** Seam so the git calls below can be observed in tests without a real repo. */
@@ -76,6 +82,138 @@ export type PrepareDeps = WorkspaceDeps & {
   readFileImpl?: (dir: string, rel: string) => Promise<string | null>;
 };
 
+// bug-023: Ein Aufruf nimmt seinen GANZEN Prozessbaum mit, nicht nur sein
+// direktes Kind. Vorher hing an jedem vorzeitig beendeten Lauf ein Rudel
+// Enkelprozesse: `npm test` startet vitest, vitest startet seinen Worker-Pool,
+// und ein SIGKILL an `npm` liess die Pool-Prozesse — je rund ein Gigabyte —
+// einfach weiterlaufen. Am 26.09. hielt der Container so 4,7 GB mit vier
+// vitest-Prozessen aus einem Lauf von sechs Tagen zuvor, bis der OOM-Killer auf
+// demselben Rechner einen fremden Prod-Deploy samt Runner-Dienst erwischte.
+//
+// Das ist NICHT bug-018: dessen `init: true` raeumt ab, was BEENDET ist. Ein
+// lebender Enkel ist kein Zombie, den bringt kein init um. Also muss der Lauf es
+// selbst tun — ueber eine eigene Prozessgruppe pro Aufruf (`detached: true`,
+// womit die PID des Kindes die Gruppen-ID IST), die als GANZES beendet wird:
+// freundlich per SIGTERM, und was darauf nicht reagiert, nach
+// TREE_KILL_GRACE_MS hart per SIGKILL.
+
+/**
+ * Wie lange ein Prozessbaum nach dem freundlichen Beenden noch bekommt, bevor er
+ * hart abgeschossen wird (bug-023).
+ *
+ * Dieselbe Frist deckt den zweiten Fall ab, in dem ein Lauf sonst haengen
+ * bliebe: Das direkte Kind ist durch, aber ein Enkel haelt noch die
+ * Ausgabe-Pipe offen, weshalb `close` nie kommt.
+ */
+export const TREE_KILL_GRACE_MS = 5_000;
+
+/**
+ * Die Prozessgruppen der Kinder, deren Aufruf gerade laeuft (bug-023). Damit
+ * kann ein Worker, der selbst beendet wird, seine Laeufe mitnehmen statt sie an
+ * PID 1 zu vererben — siehe {@link installProcessTreeCleanup}.
+ */
+const liveGroups = new Set<number>();
+
+/**
+ * Ein Signal an die ganze Prozessgruppe `pid` — also an das Kind UND jeden
+ * Enkel, der die Gruppe geerbt hat. Das negative Argument ist der ganze Trick;
+ * dass es eine Gruppe gibt, ist das `detached: true` in {@link run}.
+ *
+ * false heisst: da ist keine Gruppe (mehr). Ein bereits leerer Baum ist der
+ * Normalfall nach einem sauberen Lauf, kein Fehler.
+ */
+export function killProcessGroup(
+  pid: number,
+  signal: NodeJS.Signals = "SIGKILL",
+): boolean {
+  try {
+    process.kill(-pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Wie {@link killProcessGroup}, faellt aber auf das Kind allein zurueck, wenn es
+ * keine Gruppe gibt (eine Plattform ohne setsid). Nur fuer ein Kind, das
+ * NACHWEISLICH noch laeuft: nach dem Abraeumen des Kindes darf seine PID nicht
+ * mehr einzeln beschossen werden, weil sie da schon neu vergeben sein kann.
+ */
+export function killProcessTree(
+  pid: number,
+  signal: NodeJS.Signals = "SIGKILL",
+): boolean {
+  if (killProcessGroup(pid, signal)) return true;
+  try {
+    process.kill(pid, signal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Alle laufenden Prozessbaeume dieses Prozesses beenden (bug-023) und
+ * zurueckgeben, wie viele es waren. Gedacht fuer das Ende des Workers: ein
+ * abgebrochener Lauf nimmt seine Kindprozesse mit.
+ */
+export function killAllProcessTrees(
+  signal: NodeJS.Signals = "SIGKILL",
+): number {
+  let killed = 0;
+  for (const pid of [...liveGroups]) {
+    if (killProcessTree(pid, signal)) killed++;
+  }
+  return killed;
+}
+
+/** Wie viele Prozessbaeume gerade laufen — fuer Diagnose und Tests. */
+export function liveProcessTreeCount(): number {
+  return liveGroups.size;
+}
+
+/** Signale, nach denen der Worker seine Kindprozesse mitnimmt (bug-023). */
+export const CLEANUP_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGINT", "SIGHUP"];
+
+type CleanupTarget = {
+  on(event: string, listener: () => void): unknown;
+  exit?: (code?: number) => void;
+};
+
+let cleanupInstalled = false;
+
+/**
+ * Den Prozess so verdrahten, dass er beim Beenden keine Kindprozesse
+ * zuruecklaesst (bug-023). Aufgerufen vom Worker-Einstiegspunkt.
+ *
+ * Notwendig geworden durch die eigene Prozessgruppe: Ein Kind in der Gruppe
+ * seines Elternteils stirbt mit, wenn diese Gruppe beendet wird — ein detached
+ * Kind nicht. Was der Lauf an Robustheit gewinnt, muss er hier zurueckgeben.
+ *
+ * Gibt false zurueck, wenn schon verdrahtet — zweimal registrieren wuerde nur
+ * Listener stapeln.
+ */
+export function installProcessTreeCleanup(
+  target: CleanupTarget = process,
+): boolean {
+  if (cleanupInstalled) return false;
+  cleanupInstalled = true;
+  // Beim regulaeren Ende ist nichts mehr abzuwarten, nur noch abzuraeumen.
+  target.on("exit", () => {
+    killAllProcessTrees();
+  });
+  for (const signal of CLEANUP_SIGNALS) {
+    target.on(signal, () => {
+      killAllProcessTrees();
+      // Ein eigener Signal-Listener ersetzt das Standardverhalten, also muss das
+      // Beenden hier von Hand nachgeholt werden.
+      target.exit?.(0);
+    });
+  }
+  return true;
+}
+
 export function run(
   cmd: string,
   args: string[],
@@ -86,14 +224,64 @@ export function run(
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: [opts.stdin ?? "pipe", "pipe", "pipe"],
+      // Eigene Prozessgruppe fuer diesen Aufruf (bug-023): erst damit gibt es
+      // ueberhaupt etwas, das man als Ganzes beenden kann.
+      detached: true,
     });
+    // Ohne PID ist der Start gescheitert; dann kommt gleich "error".
+    const pid = child.pid;
+    if (pid !== undefined) liveGroups.add(pid);
+
+    const graceMs = opts.killGraceMs ?? TREE_KILL_GRACE_MS;
     let stdout = "";
     let stderr = "";
     let timedOut = false;
-    const timer = opts.timeoutMs
+    let settled = false;
+    let timer: NodeJS.Timeout | null = null;
+    let hardTimer: NodeJS.Timeout | null = null;
+    let drainTimer: NodeJS.Timeout | null = null;
+
+    const timeoutResult = (): RunResult => ({
+      ok: false,
+      code: 124,
+      stdout,
+      stderr: stderr + "\n[timeout]",
+    });
+    const exitResult = (code: number | null): RunResult =>
+      timedOut
+        ? timeoutResult()
+        : { ok: code === 0, code: code ?? 1, stdout, stderr };
+
+    /**
+     * Den Aufruf genau einmal beantworten — und dabei den Prozessbaum
+     * abraeumen. Was jetzt noch laeuft, hat niemanden mehr, der auf es wartet;
+     * genau diese Prozesse waren es, die tagelang den Speicher hielten.
+     */
+    const settle = (result: RunResult) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      if (hardTimer) clearTimeout(hardTimer);
+      if (drainTimer) clearTimeout(drainTimer);
+      if (pid !== undefined) {
+        killProcessGroup(pid, "SIGKILL");
+        liveGroups.delete(pid);
+      }
+      resolve(result);
+    };
+
+    timer = opts.timeoutMs
       ? setTimeout(() => {
           timedOut = true;
-          child.kill("SIGKILL");
+          if (pid === undefined) return;
+          // Erst freundlich an den ganzen Baum, damit ein Testlauf noch seine
+          // Kinder einsammeln kann ...
+          killProcessTree(pid, "SIGTERM");
+          hardTimer = setTimeout(() => {
+            // ... und was darauf nicht reagiert, wird hart beendet. Danach ist
+            // der Aufruf erledigt, auch wenn noch jemand die Pipe haelt.
+            settle(timeoutResult());
+          }, graceMs);
         }, opts.timeoutMs)
       : null;
     const emit = (chunk: string) => {
@@ -118,17 +306,18 @@ export function run(
       emit(s);
     });
     child.on("close", (code) => {
-      if (timer) clearTimeout(timer);
-      resolve({
-        ok: !timedOut && code === 0,
-        code: timedOut ? 124 : (code ?? 1),
-        stdout,
-        stderr: timedOut ? stderr + "\n[timeout]" : stderr,
-      });
+      settle(exitResult(code));
+    });
+    // Das direkte Kind ist durch, aber "close" wartet zusaetzlich darauf, dass
+    // die Ausgabe-Stroeme zugehen — und die haelt ein Enkel offen, der die Pipe
+    // geerbt hat. Bleibt "close" aus, ist der Aufruf nach derselben Frist
+    // trotzdem vorbei; settle raeumt den Rest der Gruppe ab (bug-023).
+    child.on("exit", (code) => {
+      if (settled || drainTimer) return;
+      drainTimer = setTimeout(() => settle(exitResult(code)), graceMs);
     });
     child.on("error", (err) => {
-      if (timer) clearTimeout(timer);
-      resolve({ ok: false, code: 127, stdout, stderr: String(err) });
+      settle({ ok: false, code: 127, stdout, stderr: String(err) });
     });
   });
 }

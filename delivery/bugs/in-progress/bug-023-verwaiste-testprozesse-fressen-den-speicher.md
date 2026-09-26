@@ -97,3 +97,42 @@ Zu prüfen wäre nebenbei, ob der wegfara-Runner-Dienst so eingerichtet
 werden kann, dass er nach einem `oom-kill` von selbst wieder startet
 (`Restart=always`). Das gehört nicht zu appbaua, hätte den Ausfall aber
 auf Minuten begrenzt statt auf Stunden.
+
+# Behoben am 2026-09-26
+
+Jeder Aufruf von `run()` in `lib/workspace.ts` läuft jetzt in einer
+**eigenen Prozessgruppe** (`detached: true`, womit die PID des Kindes
+zugleich die Gruppen-ID ist) und wird als Ganzes beendet — das Signal
+geht an `-PID`, also an das Kind UND jeden Enkel, der die Gruppe geerbt
+hat. Drei Wege enden damit im selben Abräumen:
+
+- **Zeitüberschreitung:** erst SIGTERM an den ganzen Baum, damit ein
+  Testlauf noch selbst aufräumen kann; was nach `TREE_KILL_GRACE_MS`
+  (5 s) nicht reagiert hat, wird hart per SIGKILL beendet. Danach gilt
+  der Aufruf als erledigt, auch wenn noch jemand die Ausgabe-Pipe hält.
+- **Jedes Ende eines Aufrufs** — erfolgreich, gescheitert, abgebrochen —
+  schießt die Restgruppe ab. Das ist der Fall dieses Bugs: der Lauf war
+  nicht einmal gescheitert, das direkte Kind war weg, und die
+  Pool-Prozesse liefen mit je ~1 GB weiter.
+- **Ende des Workers:** `installProcessTreeCleanup()` (aufgerufen in
+  `worker/index.ts`) nimmt bei `exit`, SIGTERM, SIGINT und SIGHUP alle
+  laufenden Bäume mit. Notwendig geworden durch die eigene
+  Prozessgruppe: ein Kind in der Gruppe des Elternteils stirbt mit ihr,
+  ein detached Kind nicht.
+
+Dazu behoben: Ein Enkel, der die geerbte Ausgabe-Pipe offen hält, hielt
+`close` zurück und damit den ganzen Aufruf — ein Lauf ohne
+Zeitüberschreitung (jeder git-Aufruf) hätte dort ewig gehangen. Ist das
+direkte Kind beendet, wartet der Aufruf dieselbe Frist auf die Ströme
+und antwortet dann mit dem Exit-Code des Kindes.
+
+`init: true` aus bug-018 bleibt, wirkt aber wie beschrieben nur auf
+beendete Prozesse; die Ursache hier liegt eine Ebene davor und ist jetzt
+dort behoben. Nicht getan — bewusst: kein regelmäßiger Neustart des
+Containers, kein Speicherlimit, das ihn abschießt.
+
+Tests: `lib/workspace-process-tree.test.ts` — an echten Prozessen, weil
+genau das Verhalten von `spawn` und den Signalen der Bug war. Das
+Repro-Bild (Kind startet Enkel, Kind wird beendet, Enkel läuft weiter)
+steckt in jedem der Fälle: Timeout, sauberes Ende des Kindes, ein Enkel
+der SIGTERM ignoriert, und der Abbruch des Workers.

@@ -3,6 +3,13 @@
 // its own container in docker-compose (service "worker"), sharing Postgres.
 
 import { runForever } from "../lib/worker-loop";
+import { installProcessTreeCleanup } from "../lib/workspace";
+
+// Ein Ende des Workers nimmt seine laufenden Kindprozesse mit (bug-023). Seit
+// jeder Aufruf in einer eigenen Prozessgruppe laeuft, stirbt sie nicht mehr
+// automatisch mit der unseren — vier vitest-Prozesse aus einem abgebrochenen
+// Lauf hielten so sechs Tage lang 4,7 GB.
+installProcessTreeCleanup();
 
 // Never let a stray rejection/exception kill the worker silently — log and keep
 // going. runForever already guards each pass; these are the last-resort nets.
