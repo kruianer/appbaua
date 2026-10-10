@@ -112,3 +112,45 @@ Fassung und müssen übersetzt werden — dafür braucht es `make`, `gcc`,
 - Ein Wechsel der Container-Grundlage von Alpine auf Debian. Wäre eine
   Möglichkeit, wenn sich musl als dauerhaftes Hindernis erweist, ist aber
   ein größerer Eingriff und gehört entschieden, nicht nebenbei gemacht.
+
+# Behoben am 2026-10-10
+
+Die belegten Werkzeuge stehen in der `apk add`-Zeile von
+`Dockerfile.worker` — neun Pakete, in drei Gruppen, jede im Dockerfile
+mit ihrem Grund kommentiert:
+
+- `perl`, `exiftool` — Knipsa, Bildmetadaten. Das Ende von
+  `/tmp/perlroot`.
+- `python3`, `py3-pip` — Wellarita, das Backend ist Python.
+- `make`, `gcc`, `g++`, `musl-dev`, `python3-dev` — die Kette, die
+  node-gyp und pip zum Übersetzen brauchen, weil Alpine musl nutzt.
+
+Nicht aufgenommen, wie im Bug gefordert: `ffmpeg`, `imagemagick`,
+`sqlite3`, `jq`. Gemessen fehlend, aber von keinem Repo verlangt.
+
+Zu `python3`/`py3-pip` eine Einschränkung, die das Paket allein nicht
+ausräumt: Alpine markiert sein Python nach PEP 668 als
+"externally managed", und der Worker läuft nicht als root. Ein direktes
+`pip install -e ".[dev]"` in die Systeminstallation scheitert also
+weiterhin — der Weg ist eine venv je Repo
+(`python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"`), und
+`py3-pip` ist genau das, womit `venv` sich selbst bootstrappt. Das steht
+als Kommentar im Dockerfile, damit es beim nächsten Lauf nicht neu
+herausgefunden werden muss.
+
+Tests: `dockerfile-worker.test.ts`. Reproduce-first — drei der acht Tests
+waren gegen den alten Stand rot (perl/exiftool, python3/py3-pip, die
+Übersetzungskette). Der Test liest die `apk add`-Zeile, weil das Problem
+nur dort entsteht; am Code ist nichts falsch, es fehlt im Container. Er
+hält zugleich fest, was frühere Bugs erkämpft haben (`bash` aus bug-016,
+Chromium samt Schriften aus req-017) und dass die vier unbelegten Pakete
+draußen bleiben — jedes kostet Platz im Image und Zeit beim Bauen.
+
+Die Paketnamen sind gegen den Alpine-Index von v3.22/x86_64 geprüft:
+alle neun existieren; `exiftool` und `py3-pip` kommen aus `community`,
+das in `node:22-alpine` aktiv ist (das bereits funktionierende `chromium`
+stammt von dort).
+
+Die dauerhafte Lösung bleibt req-039 — ein Weg, auf dem ein Repo seine
+Systemabhängigkeiten selbst ansagt. Dieser Fix behebt nur, was heute
+nachweislich fehlt.

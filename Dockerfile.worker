@@ -21,7 +21,28 @@ ENV WORKER_WORKDIR=/work
 # the browser comes from the distribution and playwright-core is pointed at it
 # via CHROMIUM_PATH; the font packages are what keeps the screenshots from
 # rendering as empty boxes.
+#
+# The rest is what the supervised repos need to be worked on at all (bug-024).
+# Without them Claude spent the first half of a run building a runtime under
+# /tmp — which the next run no longer finds:
+#
+# perl, exiftool: Knipsa reads capture time, GPS and keywords out of photos.
+# python3, py3-pip: Wellarita is not a Node project, its backend is Python and
+#   its stack.md calls `pip install -e` and `pytest`. PEP 668 marks Alpine's
+#   python3 as externally managed and the worker is not root, so the way in is
+#   a per-repo venv (`python3 -m venv .venv`) — py3-pip is what lets `venv`
+#   bootstrap itself.
+# make, gcc, g++, musl-dev, python3-dev: Alpine is musl, not glibc. Native node
+#   modules and pip packages that ship prebuilt binaries rarely have a musl
+#   build and get compiled instead — node-gyp and pip need exactly this chain,
+#   which is why these five belong together.
+#
+# Deliberately NOT here: ffmpeg, imagemagick, sqlite3, jq. Measured as missing,
+# but no repo asks for them, and every package costs image size and build time.
+# They go in when one actually does — req-039 is the lasting answer, where a
+# repo declares its own system dependencies.
 RUN apk add --no-cache bash git openssh chromium nss freetype harfbuzz ttf-freefont \
+  perl exiftool python3 py3-pip make gcc g++ musl-dev python3-dev \
   && npm install -g @anthropic-ai/claude-code
 ENV CHROMIUM_PATH=/usr/bin/chromium-browser
 # Some tools read SHELL to decide what to spawn; Alpine leaves it unset.
