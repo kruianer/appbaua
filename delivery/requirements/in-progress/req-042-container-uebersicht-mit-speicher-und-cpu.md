@@ -38,9 +38,9 @@ Prüfungen.
 
 - [x] Given ich öffne den Menüpunkt "Zustand", when die Ansicht
       erscheint, then kann ich zur Container-Übersicht wechseln.
-- [ ] Given ich öffne die Container-Übersicht, when sie geladen ist,
+- [x] Given ich öffne die Container-Übersicht, when sie geladen ist,
       then sehe ich eine Gruppe "appbaua · prod".
-- [ ] Given ich öffne die Container-Übersicht, when ich die Gruppe
+- [x] Given ich öffne die Container-Übersicht, when ich die Gruppe
       "appbaua · prod" ansehe, then stehen dort unter anderem die
       Container "appbaua-prod-app-1" und "appbaua-prod-worker-1".
 - [ ] Given ich öffne die Container-Übersicht, when ich einen laufenden
@@ -54,7 +54,7 @@ Prüfungen.
 - [ ] Given eine Gruppe enthält mehrere Container, when ich ihre
       Überschrift ansehe, then steht dort die Summe des Speichers aller
       Container dieser Gruppe.
-- [ ] Given auf dem Rechner läuft ein Container, der zu keiner
+- [x] Given auf dem Rechner läuft ein Container, der zu keiner
       eingetragenen App gehört, when ich die Übersicht ansehe, then
       steht er in der Gruppe "Sonstige".
 - [ ] Given ein Container ist beendet, when ich ihn in der Übersicht

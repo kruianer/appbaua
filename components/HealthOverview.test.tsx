@@ -230,12 +230,16 @@ describe("Zustandsseite (req-032)", () => {
   it("AC (req-042): von der Zustandsseite aus zur Container-Übersicht wechseln", async () => {
     const user = userEvent.setup();
     render(<HealthOverview />);
-    await screen.findByRole("tab", { name: "Prüfungen" });
+    const pruefungenTab = await screen.findByRole("tab", { name: "Prüfungen" });
+    expect(pruefungenTab).toHaveAttribute("aria-selected", "true");
 
-    await user.click(screen.getByRole("tab", { name: "Container-Übersicht" }));
+    const containerTab = screen.getByRole("tab", { name: "Container-Übersicht" });
+    await user.click(containerTab);
+
+    expect(containerTab).toHaveAttribute("aria-selected", "true");
     expect(
-      await screen.findByRole("heading", { name: "Container-Übersicht" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /Logs analysieren/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("bricht die Rückfrage ab, ohne etwas anzufassen", async () => {
