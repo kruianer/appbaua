@@ -8,6 +8,7 @@ import { getChatUiStateStore } from "./chat-store";
 import { prepareChatRepo } from "./chat-workspace";
 import { type ClaudeOutcome, runClaude } from "./claude-runner";
 import { touchActiveSession, pruneIdleSessions } from "./chat-session-lru";
+import { isRateLimit } from "./rate-limit";
 
 // Orchestrates one chat turn (req-040): append the user's message, make sure
 // the repo has a working copy of its OWN (chat-workspace.ts, AC15), run
@@ -35,6 +36,15 @@ export type SendMessageDeps = {
 
 /** What a chat turn says when no push credential is configured at all. */
 export const NO_TOKEN_MESSAGE = "Kein GitHub-Token für den Chat konfiguriert.";
+
+/**
+ * What a chat turn says when the Abo-Limit (req-040 constraint) is hit. Chat
+ * and der nächtliche Worker teilen dasselbe Abo, also ist das hier nie nur
+ * das Problem dieses Gesprächs — die Meldung sagt das ausdrücklich (AC13).
+ */
+export const RATE_LIMIT_CHAT_MESSAGE =
+  "Das Abo-Limit ist erreicht. Das betrifft auch den nächtlichen Worker — " +
+  "er pausiert ebenfalls, bis das Limit zurückgesetzt ist.";
 
 export async function sendChatMessage(
   repo: Repo,
@@ -113,7 +123,9 @@ export async function sendChatMessage(
     repoId: repo.id,
     ...(outcome.ok
       ? { role: "assistant" as const, content: outcome.report || outcome.summary }
-      : { role: "system" as const, content: `Fehler: ${outcome.summary}` }),
+      : isRateLimit(outcome.summary)
+        ? { role: "system" as const, content: RATE_LIMIT_CHAT_MESSAGE }
+        : { role: "system" as const, content: `Fehler: ${outcome.summary}` }),
     createdAt: now().toISOString(),
   });
 

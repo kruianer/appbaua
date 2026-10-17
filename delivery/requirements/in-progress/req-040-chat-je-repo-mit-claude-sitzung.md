@@ -63,7 +63,7 @@ den Chat, und der Chat wartet nie auf ihn.
 - [x] Given ich habe acht Stunden nichts geschrieben, when ich den Chat
       eines Repos öffne, then ist das Gespräch noch da und ich kann
       weiterschreiben.
-- [ ] Given das Abo-Limit ist erreicht, when ich eine Nachricht
+- [x] Given das Abo-Limit ist erreicht, when ich eine Nachricht
       abschicke, then steht im Gespräch, dass das Limit erreicht ist und
       dass der nächtliche Worker davon ebenfalls betroffen ist.
 - [ ] Given im Chat läuft eine Sitzung, when der nächtliche Worker einen

@@ -6,6 +6,7 @@ import {
   activeSessionRepoIds,
   resetActiveSessionsForTests,
   NO_TOKEN_MESSAGE,
+  RATE_LIMIT_CHAT_MESSAGE,
 } from "./chat-session-manager";
 import { createMemoryChatSessionStore } from "./chat-session-store";
 import type { Repo } from "./repos";
@@ -182,6 +183,43 @@ describe("Hinweispunkt (req-040 AC8/AC9)", () => {
       getActiveRepoId: async () => null,
     });
     expect((await store.getSession(repo.id))?.unread).toBe(true);
+  });
+});
+
+describe("Abo-Limit (req-040 AC13)", () => {
+  it("erreicht das Abo-Limit, steht im Gespräch, dass das Limit erreicht ist und der Worker ebenfalls betroffen ist", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({
+        ok: false,
+        summary: "Rate-Limit: usage limit reached, try again at 1753560000",
+        report: "",
+      }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    const [, limitMessage] = await store.listMessages(repo.id);
+    expect(limitMessage).toMatchObject({ role: "system", content: RATE_LIMIT_CHAT_MESSAGE });
+    expect(limitMessage.content).toContain("Worker");
+  });
+
+  it("ein gewöhnlicher Fehler bekommt weiterhin seine eigene Fehlermeldung, keine Rate-Limit-Meldung", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({ ok: false, summary: "irgendein anderer Fehler", report: "" }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    const [, errorMessage] = await store.listMessages(repo.id);
+    expect(errorMessage).toMatchObject({ role: "system", content: "Fehler: irgendein anderer Fehler" });
   });
 });
 
