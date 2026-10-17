@@ -9,6 +9,7 @@ import {
   formatCpuPercent,
   formatMemory,
 } from "@/lib/container-overview";
+import { Icon } from "./Icon";
 
 // Container-Übersicht (req-042): zweite Ansicht des Zustands-Moduls, Speicher
 // und CPU-Last je Container, gruppiert nach App. Wird in HealthOverview per
@@ -19,6 +20,9 @@ export const POLL_MS = 15_000;
 
 export function ContainerOverview() {
   const [groups, setGroups] = useState<ContainerGroup[] | null>(null);
+  const [pending, setPending] = useState<{ id: string; name: string } | null>(null);
+  const [restarting, setRestarting] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -37,8 +41,54 @@ export function ContainerOverview() {
     return () => clearInterval(id);
   }, [load]);
 
+  const doRestart = useCallback(async () => {
+    if (!pending || restarting) return;
+    setRestarting(true);
+    try {
+      const res = await fetch("/api/health/containers/restart", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: pending.id }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setNote(
+        res.ok
+          ? `${pending.name} wird neu gestartet.`
+          : (data.error ?? "Neustart fehlgeschlagen."),
+      );
+      setPending(null);
+      await load();
+    } catch {
+      setNote("Neustart fehlgeschlagen.");
+      setPending(null);
+    } finally {
+      setRestarting(false);
+    }
+  }, [pending, restarting, load]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+      {note && (
+        <div
+          role="status"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            fontSize: 13,
+            fontWeight: 600,
+            padding: "9px 12px",
+            borderRadius: "var(--radius-md)",
+            color: "var(--color-accent-300)",
+            border: "1px solid var(--color-accent)",
+            background: "color-mix(in srgb, var(--color-accent) 14%, transparent)",
+          }}
+        >
+          <Icon name="sync" size={17} />
+          <span>{note}</span>
+        </div>
+      )}
+
       {(groups ?? []).map((g) => (
         <div key={g.key} className="card elev-sm" style={{ gap: "var(--space-2)" }}>
           <div
@@ -57,16 +107,67 @@ export function ContainerOverview() {
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {g.containers.map((c) => (
-              <ContainerRowView key={c.id} c={c} />
+              <ContainerRowView key={c.id} c={c} onRestart={() => setPending({ id: c.id, name: c.name })} />
             ))}
           </div>
         </div>
       ))}
+
+      {pending && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 50,
+            display: "grid",
+            placeItems: "center",
+            padding: "var(--space-4)",
+            background: "color-mix(in srgb, #000 55%, transparent)",
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Container neu starten?"
+            style={{
+              width: "100%",
+              maxWidth: 320,
+              background: "var(--color-surface)",
+              borderRadius: "var(--radius-lg)",
+              padding: "var(--space-4)",
+              boxShadow: "var(--shadow-lg)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-3)",
+            }}
+          >
+            <h4 style={{ margin: 0 }}>Container neu starten?</h4>
+            <p style={{ margin: 0, fontSize: 14 }}>
+              <strong>{pending.name}</strong> wird neu gestartet.
+            </p>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: "var(--space-2)",
+                marginTop: "var(--space-2)",
+              }}
+            >
+              <button className="btn btn-secondary" onClick={() => setPending(null)}>
+                Abbrechen
+              </button>
+              <button className="btn btn-primary" onClick={doRestart} disabled={restarting}>
+                <Icon name="sync" size={16} /> Neu starten
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function ContainerRowView({ c }: { c: ContainerRow }) {
+function ContainerRowView({ c, onRestart }: { c: ContainerRow; onRestart: () => void }) {
   const since = containerSince(c.status);
   return (
     <div
@@ -85,6 +186,13 @@ function ContainerRowView({ c }: { c: ContainerRow }) {
       </span>
       {c.memoryBytes !== null && <span>{formatMemory(c.memoryBytes)}</span>}
       {c.cpuPercent !== null && <span>{formatCpuPercent(c.cpuPercent)}</span>}
+      <button
+        className="btn btn-secondary"
+        onClick={onRestart}
+        style={{ fontSize: 12, padding: "4px 8px", marginLeft: "auto" }}
+      >
+        <Icon name="sync" size={14} /> {c.name} neu starten
+      </button>
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type { Repo } from "./repos";
 import {
   measureRunningContainers,
   readContainerOverview,
+  restartContainer,
   runContainerMeasurement,
 } from "./container-overview-service";
 
@@ -147,5 +148,64 @@ describe("runContainerMeasurement + readContainerOverview", () => {
 
     const { groups } = await readContainerOverview();
     expect(groups[0].memoryBytesTotal).toBe(400 * 1024 * 1024);
+  });
+});
+
+describe("restartContainer", () => {
+  it("AC: startet genau den angefragten Container neu", async () => {
+    const containers = [container("appbaua-prod-app-1"), container("appbaua-prod-worker-1")];
+    const restarts: string[] = [];
+    const docker: DockerClient = {
+      async list() {
+        return containers;
+      },
+      async env() {
+        return null;
+      },
+      async exec() {
+        return { exitCode: 0, output: "" };
+      },
+      async logs() {
+        return "";
+      },
+      async restart(id) {
+        restarts.push(id);
+      },
+      async stats() {
+        return { memoryBytes: 0, cpuTotalUsage: 0, cpuSystemUsage: 0, onlineCpus: 1 };
+      },
+    };
+
+    const result = await restartContainer("appbaua-prod-worker-1", { docker });
+    expect(result).toEqual({ ok: true, container: "appbaua-prod-worker-1" });
+    expect(restarts).toEqual(["appbaua-prod-worker-1"]);
+  });
+
+  it("weist einen unbekannten Container ab, statt irgendetwas neu zu starten", async () => {
+    const restarts: string[] = [];
+    const docker: DockerClient = {
+      async list() {
+        return [container("appbaua-prod-app-1")];
+      },
+      async env() {
+        return null;
+      },
+      async exec() {
+        return { exitCode: 0, output: "" };
+      },
+      async logs() {
+        return "";
+      },
+      async restart(id) {
+        restarts.push(id);
+      },
+      async stats() {
+        return { memoryBytes: 0, cpuTotalUsage: 0, cpuSystemUsage: 0, onlineCpus: 1 };
+      },
+    };
+
+    const result = await restartContainer("erfundene-id", { docker });
+    expect(result.ok).toBe(false);
+    expect(restarts).toEqual([]);
   });
 });

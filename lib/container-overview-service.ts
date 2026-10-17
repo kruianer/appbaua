@@ -120,3 +120,41 @@ export async function readContainerOverview(): Promise<ContainerOverviewView> {
     measuring: false,
   };
 }
+
+export type ContainerRestartResult =
+  | { ok: true; container: string }
+  | { ok: false; error: string };
+
+/**
+ * Genau einen Container neu starten, auf ausdrücklichen Klick (req-042, wie
+ * req-032). Die Übersicht kennt die Container direkt von Docker — anders als
+ * beim Neustart aus den Prüfungen (restartAppContainer) braucht es darum
+ * keinen Umweg über health.md: der angefragte Name wird direkt gegen die
+ * aktuelle Container-Liste geprüft, bevor irgendetwas passiert.
+ */
+export async function restartContainer(
+  id: string,
+  deps?: { docker?: DockerClient },
+): Promise<ContainerRestartResult> {
+  const docker = deps?.docker ?? createDockerClient();
+
+  let containers: DockerContainer[];
+  try {
+    containers = await docker.list();
+  } catch {
+    return { ok: false, error: "Docker nicht erreichbar." };
+  }
+
+  const target = containers.find((c) => c.id === id);
+  if (!target) return { ok: false, error: "Container nicht gefunden." };
+
+  try {
+    await docker.restart(target.id);
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : "Neustart fehlgeschlagen.",
+    };
+  }
+  return { ok: true, container: target.name };
+}

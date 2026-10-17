@@ -60,7 +60,7 @@ Prüfungen.
 - [x] Given ein Container ist beendet, when ich ihn in der Übersicht
       ansehe, then ist sein Zustand als beendet erkennbar und es steht
       KEINE CPU-Last bei ihm.
-- [ ] Given ich sehe einen Container in der Übersicht, when ich seinen
+- [x] Given ich sehe einen Container in der Übersicht, when ich seinen
       Neustart-Knopf drücke, then wird dieser Container neu gestartet.
 - [ ] Given ich öffne die Container-Übersicht auf einem iPhone, when ich
       sie ansehe, then sind Name, Zustand, Speicher und CPU jedes

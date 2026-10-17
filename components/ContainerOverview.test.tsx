@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { ContainerOverview } from "./ContainerOverview";
 import type { ContainerGroup } from "@/lib/container-overview";
 
@@ -47,13 +48,18 @@ const SONSTIGE_GROUP: ContainerGroup = {
 };
 
 let groups: ContainerGroup[];
+let restartCalls: { id: string }[];
 
 beforeEach(() => {
   groups = [PROD_GROUP, SONSTIGE_GROUP];
-  vi.stubGlobal("fetch", async () => ({
-    ok: true,
-    json: async () => ({ groups }),
-  }));
+  restartCalls = [];
+  vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    if (url === "/api/health/containers/restart" && init?.method === "POST") {
+      restartCalls.push(JSON.parse(String(init.body)));
+      return { ok: true, json: async () => ({ container: "appbaua-prod-app-1" }) };
+    }
+    return { ok: true, json: async () => ({ groups }) };
+  });
 });
 
 describe("Container-Übersicht (req-042)", () => {
@@ -101,5 +107,19 @@ describe("Container-Übersicht (req-042)", () => {
     expect(await screen.findByText(/beendet/)).toBeInTheDocument();
     // Nur der laufende Container (appbaua-prod-app-1) zeigt eine CPU-Last.
     expect(screen.getAllByText(/%$/)).toHaveLength(1);
+  });
+
+  it("AC: der Neustart-Knopf startet genau diesen Container neu", async () => {
+    const user = userEvent.setup();
+    render(<ContainerOverview />);
+
+    await user.click(
+      await screen.findByRole("button", { name: /appbaua-prod-app-1 neu starten/ }),
+    );
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(restartCalls).toEqual([]);
+
+    await user.click(screen.getByRole("button", { name: /^Neu starten$/ }));
+    await waitFor(() => expect(restartCalls).toEqual([{ id: "a" }]));
   });
 });
