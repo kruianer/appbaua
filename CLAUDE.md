@@ -90,3 +90,7 @@ ergänzt.
   Apps: Prüfungen, Neustart auf Knopfdruck, Benachrichtigung bei Ausfall,
   Analyse der Logs. Betrifft fremde Apps, nicht den Worker selbst.
   (req-032, req-033, req-034, req-035)
+- **Arbeitsplatz** — Die App als Ort, an dem der Betreiber selbst
+  arbeitet: Aufbau der Navigation und der Chat, über den er mit Claude
+  an einem Repo arbeitet. Betrifft nicht den autonomen Worker.
+  (req-039, req-040)
