@@ -100,7 +100,9 @@ export function ContainerOverview() {
               flexWrap: "wrap",
             }}
           >
-            <span style={{ fontWeight: 600, fontSize: 16, minWidth: 0 }}>{g.label}</span>
+            <span style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflowWrap: "anywhere" }}>
+              {g.label}
+            </span>
             <span style={{ fontSize: 12, color: "var(--color-text-muted, inherit)" }}>
               {formatMemory(g.memoryBytesTotal)}
             </span>
@@ -179,8 +181,11 @@ function ContainerRowView({ c, onRestart }: { c: ContainerRow; onRestart: () => 
         fontSize: 13,
       }}
     >
-      <span style={{ fontWeight: 600, wordBreak: "break-word" }}>{c.name}</span>
-      <span style={{ wordBreak: "break-word" }}>
+      {/* bug-021: Container-Namen haben Bindestriche, aber keine Leerzeichen —
+          overflowWrap: "anywhere" bricht auch dort, wordBreak allein reicht in
+          Safari nicht (req-042, AC11). */}
+      <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{c.name}</span>
+      <span style={{ overflowWrap: "anywhere" }}>
         {containerStateLabel(c.state)}
         {since ? ` · ${since}` : ""}
       </span>
@@ -189,7 +194,7 @@ function ContainerRowView({ c, onRestart }: { c: ContainerRow; onRestart: () => 
       <button
         className="btn btn-secondary"
         onClick={onRestart}
-        style={{ fontSize: 12, padding: "4px 8px", marginLeft: "auto" }}
+        style={{ fontSize: 12, padding: "4px 8px", marginLeft: "auto", overflowWrap: "anywhere" }}
       >
         <Icon name="sync" size={14} /> {c.name} neu starten
       </button>

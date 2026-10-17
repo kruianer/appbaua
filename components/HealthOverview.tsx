@@ -271,10 +271,13 @@ export function HealthOverview() {
   if (view === "container") {
     return (
       <div
+        data-containers-scroll
         style={{
           flex: 1,
           overflowY: "auto",
-          // bug-021: vertikal scrollen ja, seitlich verschieben nein.
+          // bug-021: vertikal scrollen ja, seitlich verschieben nein. Container-
+          // Namen sind lang und haben keine Leerzeichen — ohne diese Regel würde
+          // die Ansicht genau wie damals seitlich aufschieben (req-042, AC11).
           overflowX: "clip",
           padding: "0 20px 14px",
         }}

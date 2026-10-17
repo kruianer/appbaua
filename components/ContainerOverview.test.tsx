@@ -122,4 +122,29 @@ describe("Container-Übersicht (req-042)", () => {
     await user.click(screen.getByRole("button", { name: /^Neu starten$/ }));
     await waitFor(() => expect(restartCalls).toEqual([{ id: "a" }]));
   });
+
+  it("AC (bug-021): ein langer Containername bricht um, statt die Karte aufzuschieben", async () => {
+    groups = [
+      {
+        key: "sonstige",
+        label: "Sonstige",
+        memoryBytesTotal: 0,
+        containers: [
+          {
+            id: "lang",
+            name: "appbaua-prod-irgendein-sehr-langer-container-name-ohne-leerzeichen-1",
+            state: "running",
+            status: "Up 1 hour",
+            memoryBytes: null,
+            cpuPercent: null,
+          },
+        ],
+      },
+    ];
+    render(<ContainerOverview />);
+    const text = await screen.findByText(
+      "appbaua-prod-irgendein-sehr-langer-container-name-ohne-leerzeichen-1",
+    );
+    expect(text.style.overflowWrap).toBe("anywhere");
+  });
 });

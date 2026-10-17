@@ -62,7 +62,7 @@ Prüfungen.
       KEINE CPU-Last bei ihm.
 - [x] Given ich sehe einen Container in der Übersicht, when ich seinen
       Neustart-Knopf drücke, then wird dieser Container neu gestartet.
-- [ ] Given ich öffne die Container-Übersicht auf einem iPhone, when ich
+- [x] Given ich öffne die Container-Übersicht auf einem iPhone, when ich
       sie ansehe, then sind Name, Zustand, Speicher und CPU jedes
       Containers lesbar, ohne seitlich schieben zu müssen.
 - [ ] Given die Messung läuft noch, when ich die Übersicht öffne, then

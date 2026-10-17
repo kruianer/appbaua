@@ -242,6 +242,19 @@ describe("Zustandsseite (req-032)", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("AC (req-042, bug-021): die Container-Übersicht scrollt vertikal, nicht seitlich", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<HealthOverview />);
+    await user.click(
+      await screen.findByRole("tab", { name: "Container-Übersicht" }),
+    );
+
+    const scroller = container.querySelector<HTMLElement>("[data-containers-scroll]");
+    expect(scroller).not.toBeNull();
+    expect(scroller!.style.overflowY).toBe("auto");
+    expect(scroller!.style.overflowX).toBe("clip");
+  });
+
   it("bricht die Rückfrage ab, ohne etwas anzufassen", async () => {
     const user = userEvent.setup();
     render(<HealthOverview />);
