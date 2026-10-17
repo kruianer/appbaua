@@ -66,7 +66,7 @@ den Chat, und der Chat wartet nie auf ihn.
 - [x] Given das Abo-Limit ist erreicht, when ich eine Nachricht
       abschicke, then steht im Gespräch, dass das Limit erreicht ist und
       dass der nächtliche Worker davon ebenfalls betroffen ist.
-- [ ] Given im Chat läuft eine Sitzung, when der nächtliche Worker einen
+- [x] Given im Chat läuft eine Sitzung, when der nächtliche Worker einen
       Lauf beginnt, then wird meine Sitzung NICHT beendet oder
       angehalten.
 - [x] Given Claude hat im Chat eine Datei geändert, when ich im Repo
