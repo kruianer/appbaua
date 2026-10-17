@@ -47,6 +47,8 @@ let serverWorkerEnabled: boolean;
  * (PATCH /api/repos/:id, PATCH /api/repos/:id/model, POST /api/repos/:id/appbaua)
  * zurückgeben. */
 let serverRepos: Repo[];
+/** req-040 AC8: welche Repos gerade eine ungesehene, fertige Chat-Antwort haben. */
+let chatUnreadRepoIds: string[];
 
 function jsonResponse(data: unknown) {
   return { ok: true, json: async () => data };
@@ -82,7 +84,12 @@ beforeEach(() => {
   serverTaskTypes = defaultTaskTypes();
   serverWorkerEnabled = true;
   serverRepos = repos.map((r) => ({ ...r }));
+  chatUnreadRepoIds = [];
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    // Mirrors GET /api/chat/unread (req-040 AC8).
+    if (url === "/api/chat/unread") {
+      return jsonResponse({ repoIds: chatUnreadRepoIds });
+    }
     // Mirrors PATCH /api/repos/:id (lib/repo-service#toggleRepo).
     const repoToggleMatch = /^\/api\/repos\/([^/]+)$/.exec(url);
     if (repoToggleMatch && init?.method === "PATCH") {
@@ -279,6 +286,32 @@ describe("Untere Navigation — fünf Plätze (req-039)", () => {
     expect(
       within(nav).queryByRole("button", { name: "Zustand" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("Hinweispunkt auf dem Chat-Knopf (req-040 AC8/AC9)", () => {
+  it("AC8: trägt einen Hinweispunkt, wenn ein Repo eine ungesehene Antwort hat", async () => {
+    chatUnreadRepoIds = ["r2"];
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Chat" }).querySelector("[data-chat-unread-dot]"),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("AC9: ohne ungesehene Antworten ist kein Hinweispunkt zu sehen", async () => {
+    chatUnreadRepoIds = [];
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Chat" }).querySelector("[data-chat-unread-dot]"),
+      ).not.toBeInTheDocument(),
+    );
   });
 });
 

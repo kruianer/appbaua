@@ -38,6 +38,7 @@ describe("sendChatMessage (req-040)", () => {
       prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
       runClaude: async () => ({ ok: true, summary: "kurz", report: "In ready liegt bug-099." }),
       now: () => new Date("2026-10-17T10:00:00.000Z"),
+      getActiveRepoId: async () => null,
     });
 
     const messages = await store.listMessages(repo.id);
@@ -55,6 +56,7 @@ describe("sendChatMessage (req-040)", () => {
       prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
       runClaude: async () => ({ ok: true, summary: "kurz", report: "Hi!" }),
       now: () => new Date("2026-10-17T10:00:00.000Z"),
+      getActiveRepoId: async () => null,
     });
 
     // Ein "Neustart" simuliert: derselbe Store (steht für die Postgres-Zeile,
@@ -76,6 +78,7 @@ describe("sendChatMessage (req-040)", () => {
       },
       runClaude: async (dir) => ({ ok: true, summary: "ok", report: `lief in ${dir}` }),
       now: () => new Date(),
+      getActiveRepoId: async () => null,
     });
     expect(prepared).toEqual(["r1"]);
     const [, assistant] = await store.listMessages(repo.id);
@@ -93,6 +96,7 @@ describe("sendChatMessage (req-040)", () => {
         return { dir: "/x", branch: "dev" };
       },
       now: () => new Date(),
+      getActiveRepoId: async () => null,
     });
     expect(prepareCalled).toBe(false);
     const messages = await store.listMessages(repo.id);
@@ -118,6 +122,7 @@ describe("sendChatMessage (req-040)", () => {
         return { ok: true, summary: "ok", report: "ok" };
       },
       now: () => new Date(),
+      getActiveRepoId: async () => null,
     };
     await sendChatMessage(repo, "erste Nachricht", deps);
     await sendChatMessage(repo, "zweite Nachricht", deps);
@@ -126,6 +131,49 @@ describe("sendChatMessage (req-040)", () => {
     expect(resumeSeen[0]).toBeUndefined();
     expect(resumeSeen[1]).toBe("sess-1");
     expect(sessionIdSeen[1]).toBeUndefined();
+  });
+});
+
+describe("Hinweispunkt (req-040 AC8/AC9)", () => {
+  it("eine fertige Antwort markiert ihr Repo als ungelesen, wenn ein ANDERES Repo gerade offen ist", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({ ok: true, summary: "ok", report: "Antwort" }),
+      now: () => new Date(),
+      getActiveRepoId: async () => "ein-anderes-repo",
+    });
+    expect((await store.getSession(repo.id))?.unread).toBe(true);
+    expect(await store.listUnreadRepoIds()).toEqual([repo.id]);
+  });
+
+  it("bleibt gelesen, wenn genau dieses Repo gerade offen ist", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({ ok: true, summary: "ok", report: "Antwort" }),
+      now: () => new Date(),
+      getActiveRepoId: async () => repo.id,
+    });
+    expect((await store.getSession(repo.id))?.unread).toBe(false);
+    expect(await store.listUnreadRepoIds()).toEqual([]);
+  });
+
+  it("auch eine fehlgeschlagene Antwort markiert als ungelesen, wenn das Repo nicht offen ist", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({ ok: false, summary: "kaputt", report: "" }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+    expect((await store.getSession(repo.id))?.unread).toBe(true);
   });
 });
 
@@ -151,6 +199,7 @@ describe("startChatTurn (req-040 AC5/AC6)", () => {
         return { ok: true, summary: "ok", report: "fertig" };
       },
       now: () => new Date(),
+      getActiveRepoId: async () => null,
     });
 
     expect(isChatTurnRunning(repo.id)).toBe(true);
@@ -173,6 +222,7 @@ describe("startChatTurn (req-040 AC5/AC6)", () => {
         return { ok: true, summary: "ok", report: "Antwort A" };
       },
       now: () => new Date(),
+      getActiveRepoId: async () => null,
     });
 
     const turnB = startChatTurn(wellarita, "Frage an Wellarita", {
@@ -181,6 +231,7 @@ describe("startChatTurn (req-040 AC5/AC6)", () => {
       prepareRepo: async () => ({ dir: "/chat/r2", branch: "dev" }),
       runClaude: async () => ({ ok: true, summary: "ok", report: "Antwort B" }),
       now: () => new Date(),
+      getActiveRepoId: async () => null,
     });
 
     // B ist fertig, OHNE dass A jemals freigegeben wurde — die beiden Läufe

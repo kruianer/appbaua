@@ -80,6 +80,9 @@ const navLabelStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+/** Wie oft nach ungesehenen Chat-Antworten gefragt wird (req-040 AC8). */
+export const CHAT_UNREAD_POLL_MS = 5000;
+
 export function AppShell({
   initialRepos,
   initialTaskTypes,
@@ -98,6 +101,9 @@ export function AppShell({
     initialWorkerEnabled,
   );
   const [tab, setTab] = useState<Tab>("aktiv");
+  // req-040 AC8/AC9: ob mindestens ein Repo eine ungesehene, fertige
+  // Chat-Antwort hat — der Hinweispunkt auf dem Chat-Knopf unten.
+  const [chatUnread, setChatUnread] = useState(false);
   // req-039: ob die "Mehr"-Liste (Zustand, Tasks, Einstellungen) offen ist.
   const [moreOpen, setMoreOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
@@ -126,6 +132,27 @@ export function AppShell({
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // req-040 AC8: unabhängig vom offenen Tab nachfragen, ob irgendein Repo
+  // eine fertige, ungesehene Chat-Antwort hat — der Chat-Knopf trägt dann
+  // einen Hinweispunkt, egal welches Modul gerade zu sehen ist.
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      fetch("/api/chat/unread")
+        .then((r) => r.json())
+        .then((d: { repoIds?: string[] }) => {
+          if (!cancelled) setChatUnread((d.repoIds ?? []).length > 0);
+        })
+        .catch(() => {});
+    };
+    check();
+    const timer = setInterval(check, CHAT_UNREAD_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const confirmRepo = repos.find((r) => r.id === confirmId) ?? null;
 
@@ -865,7 +892,9 @@ export function AppShell({
           <span style={navLabelStyle}>Verlauf</span>
         </button>
         {/* Chat sitzt in der Mitte, abgesetzt: Symbol im Kreis und größer
-            als die übrigen (req-039). Der Inhalt folgt mit req-040. */}
+            als die übrigen (req-039). Der Hinweispunkt (req-040 AC8/AC9)
+            zeigt eine fertige, noch ungesehene Antwort in einem anderen
+            Repo an. */}
         <button
           aria-label="Chat"
           onClick={() => setTab("chat")}
@@ -873,6 +902,7 @@ export function AppShell({
         >
           <div
             style={{
+              position: "relative",
               width: 42,
               height: 42,
               marginTop: -10,
@@ -886,6 +916,21 @@ export function AppShell({
             }}
           >
             <Icon name="chat" size={24} />
+            {chatUnread && (
+              <span
+                data-chat-unread-dot
+                style={{
+                  position: "absolute",
+                  top: 1,
+                  right: 1,
+                  width: 9,
+                  height: 9,
+                  borderRadius: 999,
+                  background: "var(--color-accent)",
+                  boxShadow: "0 0 0 2px var(--color-bg)",
+                }}
+              />
+            )}
           </div>
           <span style={navLabelStyle}>Chat</span>
         </button>

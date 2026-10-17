@@ -50,10 +50,10 @@ den Chat, und der Chat wartet nie auf ihn.
       Gespräch unverändert da.
 - [x] Given ich habe die App geschlossen und öffne sie neu, when ich den
       Chat eines Repos öffne, then ist das bisherige Gespräch noch da.
-- [ ] Given ich sehe "CellarVoice" an und in "Wellarita" wird eine
+- [x] Given ich sehe "CellarVoice" an und in "Wellarita" wird eine
       Antwort fertig, when ich die untere Leiste ansehe, then trägt der
       Chat-Knopf einen Hinweispunkt.
-- [ ] Given der Hinweispunkt ist zu sehen, when ich das Repo mit der
+- [x] Given der Hinweispunkt ist zu sehen, when ich das Repo mit der
       fertigen Antwort öffne, then ist der Punkt verschwunden.
 - [ ] Given in fünf Repos laufen Sitzungen, when ich in einem sechsten
       Repo schreibe, then bekomme ich dort eine Antwort.

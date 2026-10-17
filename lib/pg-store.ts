@@ -549,8 +549,9 @@ export function createPgChatSessionStore(): ChatSessionStore {
         repo_id: string;
         claude_session_id: string;
         last_active_at: Date;
+        unread: boolean;
       }>(
-        `SELECT repo_id, claude_session_id, last_active_at FROM chat_sessions
+        `SELECT repo_id, claude_session_id, last_active_at, unread FROM chat_sessions
          WHERE repo_id = $1`,
         [repoId],
       );
@@ -560,18 +561,34 @@ export function createPgChatSessionStore(): ChatSessionStore {
         repoId: r.repo_id,
         claudeSessionId: r.claude_session_id,
         lastActiveAt: new Date(r.last_active_at).toISOString(),
+        unread: r.unread,
       };
     },
     async putSession(session: ChatSession): Promise<void> {
       await ensureSchema();
       await getPool().query(
-        `INSERT INTO chat_sessions (repo_id, claude_session_id, last_active_at)
-         VALUES ($1, $2, $3)
+        `INSERT INTO chat_sessions (repo_id, claude_session_id, last_active_at, unread)
+         VALUES ($1, $2, $3, $4)
          ON CONFLICT (repo_id) DO UPDATE SET
            claude_session_id = EXCLUDED.claude_session_id,
-           last_active_at = EXCLUDED.last_active_at`,
-        [session.repoId, session.claudeSessionId, session.lastActiveAt],
+           last_active_at = EXCLUDED.last_active_at,
+           unread = EXCLUDED.unread`,
+        [session.repoId, session.claudeSessionId, session.lastActiveAt, session.unread],
       );
+    },
+    async setUnread(repoId: string, unread: boolean): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        "UPDATE chat_sessions SET unread = $2 WHERE repo_id = $1",
+        [repoId, unread],
+      );
+    },
+    async listUnreadRepoIds(): Promise<string[]> {
+      await ensureSchema();
+      const res = await getPool().query<{ repo_id: string }>(
+        "SELECT repo_id FROM chat_sessions WHERE unread = TRUE",
+      );
+      return res.rows.map((r) => r.repo_id);
     },
   };
 }

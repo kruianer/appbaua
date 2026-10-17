@@ -22,12 +22,15 @@ export type ChatMessage = {
 /**
  * One repo's live conversation handle: which Claude session the next turn
  * resumes, and when it was last used — the latter drives both the 5-session
- * cap (req-040 AC10) and the 8h idle timeout (AC12).
+ * cap (req-040 AC10) and the 8h idle timeout (AC12). `unread` is the Chat
+ * nav button's Hinweispunkt (AC8/AC9): true once a turn finished while this
+ * repo was not the one on screen, cleared when the operator opens it.
  */
 export type ChatSession = {
   repoId: string;
   claudeSessionId: string;
   lastActiveAt: string; // ISO
+  unread: boolean;
 };
 
 export interface ChatSessionStore {
@@ -36,6 +39,10 @@ export interface ChatSessionStore {
   appendMessage(msg: Omit<ChatMessage, "id">): Promise<ChatMessage>;
   getSession(repoId: string): Promise<ChatSession | null>;
   putSession(session: ChatSession): Promise<void>;
+  /** Flip just the unread flag — lastActiveAt/claudeSessionId stay as they are. */
+  setUnread(repoId: string, unread: boolean): Promise<void>;
+  /** Every repo with its unread flag set, for the Chat nav button's badge. */
+  listUnreadRepoIds(): Promise<string[]>;
 }
 
 type FileShape = {
@@ -89,6 +96,19 @@ export function createFileChatSessionStore(): ChatSessionStore {
       all.sessions[session.repoId] = session;
       await writeAll(all);
     },
+    async setUnread(repoId, unread) {
+      const all = await readAll();
+      const existing = all.sessions[repoId];
+      if (!existing) return;
+      all.sessions[repoId] = { ...existing, unread };
+      await writeAll(all);
+    },
+    async listUnreadRepoIds() {
+      const all = await readAll();
+      return Object.values(all.sessions)
+        .filter((s) => s.unread)
+        .map((s) => s.repoId);
+    },
   };
 }
 
@@ -111,6 +131,14 @@ export function createMemoryChatSessionStore(): ChatSessionStore {
     },
     async putSession(session) {
       sessions.set(session.repoId, session);
+    },
+    async setUnread(repoId, unread) {
+      const existing = sessions.get(repoId);
+      if (!existing) return;
+      sessions.set(repoId, { ...existing, unread });
+    },
+    async listUnreadRepoIds() {
+      return [...sessions.values()].filter((s) => s.unread).map((s) => s.repoId);
     },
   };
 }

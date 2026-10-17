@@ -244,3 +244,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
   claude_session_id TEXT NOT NULL,
   last_active_at    TIMESTAMPTZ NOT NULL
 );
+
+-- Hinweispunkt auf dem Chat-Knopf (AC8/AC9): wahr, sobald ein Turn fertig
+-- wurde, während sein Repo nicht das offene war; verschwindet, wenn es
+-- geöffnet wird.
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS unread BOOLEAN NOT NULL DEFAULT FALSE;

@@ -24,12 +24,40 @@ describe("ChatSessionStore", () => {
 
   it("putSession überschreibt die bestehende Sitzung desselben Repos", async () => {
     const store = createMemoryChatSessionStore();
-    await store.putSession({ repoId: "r1", claudeSessionId: "s1", lastActiveAt: "t1" });
-    await store.putSession({ repoId: "r1", claudeSessionId: "s1", lastActiveAt: "t2" });
+    await store.putSession({ repoId: "r1", claudeSessionId: "s1", lastActiveAt: "t1", unread: false });
+    await store.putSession({ repoId: "r1", claudeSessionId: "s1", lastActiveAt: "t2", unread: false });
     expect(await store.getSession("r1")).toEqual({
       repoId: "r1",
       claudeSessionId: "s1",
       lastActiveAt: "t2",
+      unread: false,
     });
+  });
+
+  it("setUnread ändert nur das Unread-Flag, lässt die Sitzung sonst unberührt (req-040 AC8/AC9)", async () => {
+    const store = createMemoryChatSessionStore();
+    await store.putSession({ repoId: "r1", claudeSessionId: "s1", lastActiveAt: "t1", unread: false });
+    await store.setUnread("r1", true);
+    expect(await store.getSession("r1")).toEqual({
+      repoId: "r1",
+      claudeSessionId: "s1",
+      lastActiveAt: "t1",
+      unread: true,
+    });
+    await store.setUnread("r1", false);
+    expect((await store.getSession("r1"))?.unread).toBe(false);
+  });
+
+  it("setUnread ohne vorhandene Sitzung tut nichts", async () => {
+    const store = createMemoryChatSessionStore();
+    await expect(store.setUnread("unbekannt", true)).resolves.toBeUndefined();
+    expect(await store.getSession("unbekannt")).toBeNull();
+  });
+
+  it("listUnreadRepoIds liefert nur Repos mit gesetztem Unread-Flag", async () => {
+    const store = createMemoryChatSessionStore();
+    await store.putSession({ repoId: "r1", claudeSessionId: "s1", lastActiveAt: "t1", unread: true });
+    await store.putSession({ repoId: "r2", claudeSessionId: "s2", lastActiveAt: "t1", unread: false });
+    expect(await store.listUnreadRepoIds()).toEqual(["r1"]);
   });
 });

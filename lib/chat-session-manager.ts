@@ -4,6 +4,7 @@ import {
   type ChatSessionStore,
   getChatSessionStore,
 } from "./chat-session-store";
+import { getChatUiStateStore } from "./chat-store";
 import { prepareChatRepo } from "./chat-workspace";
 import { type ClaudeOutcome, runClaude } from "./claude-runner";
 
@@ -27,6 +28,8 @@ export type SendMessageDeps = {
   now?: () => Date;
   newSessionId?: () => string;
   token?: string;
+  /** Which repo is currently open in the Chat tab (req-040 AC8/AC9). */
+  getActiveRepoId?: () => Promise<string | null>;
 };
 
 /** What a chat turn says when no push credential is configured at all. */
@@ -43,6 +46,8 @@ export async function sendChatMessage(
   const now = deps.now ?? (() => new Date());
   const newSessionId = deps.newSessionId ?? (() => randomUUID());
   const token = deps.token ?? process.env.GITHUB_TOKEN;
+  const getActiveRepoId =
+    deps.getActiveRepoId ?? (() => getChatUiStateStore().getActiveRepoId());
 
   await store.appendMessage({
     repoId: repo.id,
@@ -87,24 +92,22 @@ export async function sendChatMessage(
     repoId: repo.id,
     claudeSessionId: sessionId,
     lastActiveAt: now().toISOString(),
+    unread: session?.unread ?? false,
   });
-
-  if (!outcome.ok) {
-    await store.appendMessage({
-      repoId: repo.id,
-      role: "system",
-      content: `Fehler: ${outcome.summary}`,
-      createdAt: now().toISOString(),
-    });
-    return;
-  }
 
   await store.appendMessage({
     repoId: repo.id,
-    role: "assistant",
-    content: outcome.report || outcome.summary,
+    ...(outcome.ok
+      ? { role: "assistant" as const, content: outcome.report || outcome.summary }
+      : { role: "system" as const, content: `Fehler: ${outcome.summary}` }),
     createdAt: now().toISOString(),
   });
+
+  // Der Hinweispunkt auf dem Chat-Knopf (AC8): eine fertige Antwort markiert
+  // ihr Repo als ungelesen, es sei denn, genau dieses Repo ist gerade offen.
+  if ((await getActiveRepoId()) !== repo.id) {
+    await store.setUnread(repo.id, true);
+  }
 }
 
 // req-040 AC5/AC6: a repo's turn must keep running when the operator switches
