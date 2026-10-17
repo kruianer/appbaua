@@ -34,6 +34,7 @@ import {
   networkAbortKey,
 } from "./network-abort";
 import type { NetworkAbortCounts } from "./network-abort-store";
+import { OOM_KILL_MESSAGE } from "./claude-runner";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
@@ -331,6 +332,35 @@ describe("executeStep (req-006)", () => {
     expect(await counts.get()).toEqual({
       [networkAbortKey("appbaua", "bug-001.md")]: 1,
     });
+  });
+
+  it("bug-026: an OOM-killed run is a normal (parked) failure, NOT a network-abort", async () => {
+    const moveMd = vi.fn(async () => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: OOM_KILL_MESSAGE,
+          report: "",
+        })),
+        moveMd,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") throw new Error("expected error");
+    // Parked to failed/, like any other real failure — unlike a network abort,
+    // a memory-exhausted run is not something a short retry would fix.
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(d.message).toContain(OOM_KILL_MESSAGE);
+    expect(d.message).not.toContain(NETWORK_ABORT_MESSAGE);
   });
 
   it("req-038: a red test suite still fails normally — the new handling is network-abort-only", async () => {

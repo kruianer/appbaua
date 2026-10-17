@@ -35,7 +35,19 @@ export const NO_CHANGES_DETAIL = "keine Aenderungen";
 
 const WORK_ROOT = process.env.WORKER_WORKDIR || "/tmp/appbaua-work";
 
-export type RunResult = { ok: boolean; code: number; stdout: string; stderr: string };
+export type RunResult = {
+  ok: boolean;
+  code: number;
+  stdout: string;
+  stderr: string;
+  /**
+   * The signal that ended the process, if it died from one instead of exiting
+   * on its own (bug-026) — e.g. "SIGKILL" when the kernel's OOM killer picked
+   * it. Optional: run()'s own timeout kill never sets this (it settles via
+   * timeoutResult before the real exit arrives), and most callers never care.
+   */
+  signal?: NodeJS.Signals | null;
+};
 
 export type RunOptions = {
   cwd?: string;
@@ -257,10 +269,13 @@ export function run(
       stdout,
       stderr: stderr + "\n[timeout]",
     });
-    const exitResult = (code: number | null): RunResult =>
+    const exitResult = (
+      code: number | null,
+      signal: NodeJS.Signals | null,
+    ): RunResult =>
       timedOut
         ? timeoutResult()
-        : { ok: code === 0, code: code ?? 1, stdout, stderr };
+        : { ok: code === 0, code: code ?? 1, stdout, stderr, signal };
 
     /**
      * Den Aufruf genau einmal beantworten — und dabei den Prozessbaum
@@ -315,16 +330,16 @@ export function run(
       stderr += s;
       emit(s);
     });
-    child.on("close", (code) => {
-      settle(exitResult(code));
+    child.on("close", (code, signal) => {
+      settle(exitResult(code, signal));
     });
     // Das direkte Kind ist durch, aber "close" wartet zusaetzlich darauf, dass
     // die Ausgabe-Stroeme zugehen — und die haelt ein Enkel offen, der die Pipe
     // geerbt hat. Bleibt "close" aus, ist der Aufruf nach derselben Frist
     // trotzdem vorbei; settle raeumt den Rest der Gruppe ab (bug-023).
-    child.on("exit", (code) => {
+    child.on("exit", (code, signal) => {
       if (settled || drainTimer) return;
-      drainTimer = setTimeout(() => settle(exitResult(code)), graceMs);
+      drainTimer = setTimeout(() => settle(exitResult(code, signal)), graceMs);
     });
     child.on("error", (err) => {
       settle({ ok: false, code: 127, stdout, stderr: String(err) });

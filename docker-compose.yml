@@ -115,6 +115,21 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     restart: unless-stopped
+    # bug-026: Ohne Limit darf dieser Dienst den GESAMTEN Host-Speicher nehmen.
+    # Ein gemessener Lauf brauchte 9,2 GB auf einem Rechner mit 11 GB für 52
+    # fremde Container — der Kernel griff sich 2026-10-14 03:14 irgendeinen
+    # Prozess auf dem ganzen Host (global_oom), nicht diesen Container. 6g ist
+    # ein Mittelweg, kein Messwert: deutlich unter dem beobachteten Ausreißer
+    # (ein entgleister Lauf stirbt dann selbst, statt den Host zu gefährden),
+    # aber groß genug, dass ein normaler Lauf nicht routinemäßig dabei stirbt.
+    # memswap_limit = mem_limit verbietet zusätzliches Swapping über das Limit
+    # hinaus, damit ein zu großer Lauf hier endet statt den Host beim Swappen
+    # zu bremsen. Jeder künftige OOM-Kill dieses Dienstes zeigt sich jetzt im
+    # Worker-Verlauf (siehe lib/claude-runner.ts, lib/network-abort.ts) statt
+    # nur im journalctl des Hosts — das liefert die Datenbasis, um diesen Wert
+    # später nachzuschärfen.
+    mem_limit: 6g
+    memswap_limit: 6g
     # A real init as PID 1 (bug-018). Without it PID 1 is `npm run worker`, a
     # Node process that never reaps the children git/Claude Code leave behind:
     # every finished git call stays in the process table as a zombie. After a

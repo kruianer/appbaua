@@ -12,6 +12,7 @@ import {
   securityPrompt,
   LIVE_TAIL_LINES,
   NO_IDEA_MESSAGE,
+  OOM_KILL_MESSAGE,
 } from "./claude-runner";
 import { SECURITY_OK_MESSAGE } from "./security-report";
 import type { run } from "./workspace";
@@ -514,6 +515,37 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     });
     const out = await runClaude("/repo", "prompt", { runImpl });
     expect(out.summary).toBe("Claude-Lauf fehlgeschlagen: claude: boom");
+  });
+
+  it("bug-026: a run killed by SIGKILL (OOM killer) gets its own message, not the generic one", async () => {
+    // What the kernel's OOM killer leaves behind: the process dies with no
+    // chance to write a final error, so stderr/stdout are typically empty —
+    // exactly the case the generic "Claude-Lauf fehlgeschlagen: <tail>" branch
+    // would otherwise log with nothing useful in <tail>.
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: 1,
+      stdout: "",
+      stderr: "",
+      signal: "SIGKILL",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.ok).toBe(false);
+    expect(out.summary).toBe(OOM_KILL_MESSAGE);
+  });
+
+  it("bug-026: a timeout kill (code 124) stays a Timeout even if signal were ever set", async () => {
+    // Belt and suspenders: the 124 branch is checked before the SIGKILL branch
+    // in the implementation, so a timeout can never be mistaken for an OOM-kill.
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: 124,
+      stdout: "",
+      stderr: "",
+      signal: "SIGKILL",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.summary).toContain("Timeout");
   });
 
   // req-010: the report that gets filed in the repo is Claude's final answer,

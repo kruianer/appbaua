@@ -31,6 +31,17 @@ export const CLAUDE_TIMEOUT_MS = 120 * 60_000;
 export const CLAUDE_TIMEOUT_MINUTES = CLAUDE_TIMEOUT_MS / 60_000;
 export const CLAUDE_MODEL = "sonnet";
 
+/**
+ * What the Verlauf leads with when the Claude process died from a signal
+ * instead of exiting on its own (bug-026). SIGKILL without warning is what
+ * the kernel's OOM killer does — the 14.10. incident confirmed that directly
+ * via journalctl — but a signal alone cannot prove the cause the way a log
+ * line can, hence "mutmaßlich". This must stay distinguishable from both a
+ * genuine failure and a network abort (req-038); see isOomKill in
+ * network-abort.ts, which guards isNetworkAbort against this exact text.
+ */
+export const OOM_KILL_MESSAGE = "Claude-Lauf: mutmaßlich wegen Speichermangel beendet (SIGKILL)";
+
 /** How much of the running output is published live, and how often (req-008). */
 export const LIVE_TAIL_LINES = 50;
 export const LIVE_THROTTLE_MS = 1000;
@@ -442,6 +453,9 @@ export async function runClaude(
   if (res.code === 127) {
     return { ok: false, summary: "Claude-Code-CLI nicht verfügbar", report: "" };
   }
+  // Checked before the SIGKILL branch below: a timeout is already known with
+  // certainty (code 124 only ever comes from run()'s OWN timeout path), so it
+  // must win over a signal field a test stub might also set for that code.
   if (res.code === 124) {
     // On timeout, keep the last activity so a run that hung on a rate limit can
     // be told from one that was genuinely busy (req-026). finalResultText finds
@@ -459,6 +473,15 @@ export async function runClaude(
       summary: `Claude-Lauf: Timeout (${CLAUDE_TIMEOUT_MINUTES} min)${note}`,
       report: "",
     };
+  }
+  // A process that died from an external SIGKILL (bug-026) — most likely the
+  // kernel's OOM killer, since run()'s own timeout kill is already handled
+  // above via code 124 and never reaches here with the signal set. Checked
+  // before the generic !res.ok branch below, which would otherwise log an
+  // empty or misleading tail: a process killed this abruptly gets no chance
+  // to write a final error message.
+  if (res.signal === "SIGKILL") {
+    return { ok: false, summary: OOM_KILL_MESSAGE, report: "" };
   }
   if (!res.ok) {
     const tail = (res.stderr.trim() || finalResultText(res.stdout)).slice(-300);

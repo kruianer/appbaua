@@ -189,6 +189,41 @@ describe("Ein Lauf nimmt seinen ganzen Prozessbaum mit (bug-023)", () => {
   });
 });
 
+describe("Ein von aussen per SIGKILL beendeter Lauf (bug-026)", () => {
+  it("AC: das Ergebnis trägt das Signal, mit dem der Prozess starb", async () => {
+    // Genau das tut der OOM-Killer des Kernels: er schickt SIGKILL, ohne dass
+    // der Prozess selbst mit einem Exit-Code antworten könnte.
+    let stdout = "";
+    const pending = run(
+      NODE,
+      ["-e", 'process.stdout.write("PID " + process.pid + "\\n"); setInterval(() => {}, 1000);'],
+      { onData: (chunk) => (stdout += chunk) },
+    );
+    const until = Date.now() + 5000;
+    while (!/PID \d+/.test(stdout) && Date.now() < until) await sleep(20);
+    const pid = Number(stdout.match(/PID (\d+)/)![1]);
+    spawnedPids.push(pid);
+
+    process.kill(pid, "SIGKILL");
+    const res = await pending;
+
+    expect(res.ok).toBe(false);
+    expect(res.signal).toBe("SIGKILL");
+  });
+
+  it("ein regulärer Timeout-Kill trägt kein Signal — er bleibt Code 124", async () => {
+    // run()s eigener Timeout-Pfad antwortet über timeoutResult(), bevor das
+    // wirkliche Prozessende eintrifft — das Signal-Feld hier zu erwarten wäre
+    // der falsche Ort, das unterscheidet sich klar von einem OOM-Kill.
+    const res = await run(NODE, ["-e", "setInterval(() => {}, 1000);"], {
+      timeoutMs: 300,
+      killGraceMs: 500,
+    });
+    expect(res.code).toBe(124);
+    expect(res.signal).toBeFalsy();
+  });
+});
+
 describe("Ein abgebrochener Worker nimmt seine Laeufe mit (bug-023)", () => {
   it("AC: killAllProcessTrees beendet Kind und Enkel eines laufenden Aufrufs", async () => {
     let stdout = "";

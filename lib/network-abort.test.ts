@@ -2,11 +2,13 @@ import { describe, it, expect } from "vitest";
 import {
   isNetworkAbort,
   isClaudeTimeout,
+  isOomKill,
   networkAbortKey,
   withoutKey,
   NETWORK_ABORT_MAX_ATTEMPTS,
   NETWORK_ABORT_PAUSE_MS,
 } from "./network-abort";
+import { OOM_KILL_MESSAGE } from "./claude-runner";
 
 describe("isNetworkAbort (req-038)", () => {
   it("recognises the exact wording from bug-021 in Wegfara (07.09.)", () => {
@@ -56,6 +58,10 @@ describe("isNetworkAbort (req-038)", () => {
       ),
     ).toBe(false);
   });
+
+  it("must not be confused with an OOM-kill (bug-026)", () => {
+    expect(isNetworkAbort(OOM_KILL_MESSAGE)).toBe(false);
+  });
 });
 
 describe("isClaudeTimeout (req-038)", () => {
@@ -65,6 +71,17 @@ describe("isClaudeTimeout (req-038)", () => {
   it("does not fire on other failures", () => {
     expect(isClaudeTimeout("Connection closed mid-response")).toBe(false);
     expect(isClaudeTimeout(null)).toBe(false);
+  });
+});
+
+describe("isOomKill (bug-026)", () => {
+  it("recognises the exact OOM-kill summary shape from claude-runner", () => {
+    expect(isOomKill(OOM_KILL_MESSAGE)).toBe(true);
+  });
+  it("does not fire on other failures", () => {
+    expect(isOomKill("Claude-Lauf: Timeout (60 min)")).toBe(false);
+    expect(isOomKill("Connection closed mid-response")).toBe(false);
+    expect(isOomKill(null)).toBe(false);
   });
 });
 

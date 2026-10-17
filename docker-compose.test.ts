@@ -150,6 +150,25 @@ describe("docker-compose.yml — Telegram (req-033)", () => {
   });
 });
 
+describe("docker-compose.yml — Speicherlimit fuer den Worker (bug-026)", () => {
+  it("AC: der worker-Dienst hat ein Speicherlimit, nicht nur die anderen", () => {
+    // Ohne Limit darf der Dienst den ganzen Host-Speicher nehmen — genau das
+    // riss den Rechner am 14.10. an die Grenze (global_oom).
+    expect(serviceBlock("worker")).toMatch(/^\s*mem_limit:\s*\S+/m);
+  });
+
+  it("AC: kein zusaetzliches Swapping ueber das Limit hinaus", () => {
+    // memswap_limit = mem_limit: ein entgleister Lauf endet am Limit, statt
+    // sich ins Swapping zu retten und den ganzen Host zu bremsen.
+    const worker = serviceBlock("worker");
+    const mem = worker.match(/^\s*mem_limit:\s*(\S+)/m);
+    const swap = worker.match(/^\s*memswap_limit:\s*(\S+)/m);
+    expect(mem).toBeTruthy();
+    expect(swap).toBeTruthy();
+    expect(swap![1]).toBe(mem![1]);
+  });
+});
+
 describe("docker-compose.yml — Arbeitskopien ueberleben einen Deploy (req-062-Verlust)", () => {
   function serviceBlockLocal(name: string): string {
     const lines = COMPOSE.split("\n");

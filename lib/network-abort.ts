@@ -61,13 +61,24 @@ export function isClaudeTimeout(text: string | null | undefined): boolean {
 }
 
 /**
+ * Is this a Claude run killed by an external SIGKILL (bug-026), as opposed to
+ * a connection abort? Checked for the same reason as isClaudeTimeout above: a
+ * run the kernel's OOM killer shot must stay its own kind of failure and must
+ * never be retried on the short, network-outage pause — the memory pressure
+ * that killed it will still be there a few minutes later.
+ */
+export function isOomKill(text: string | null | undefined): boolean {
+  return !!text && /^Claude-Lauf: mutmaßlich wegen Speichermangel/.test(text);
+}
+
+/**
  * Is this failure text a dropped/failed connection rather than a real
  * failure of the package? Covers both directions the constraint calls out: a
  * connection to the KI provider that broke mid-response or never came up, and
  * the GitHub network faults bug-020 already recognises.
  */
 export function isNetworkAbort(text: string | null | undefined): boolean {
-  if (!text || isClaudeTimeout(text)) return false;
+  if (!text || isClaudeTimeout(text) || isOomKill(text)) return false;
   return PROVIDER_ABORT_PATTERNS.some((re) => re.test(text)) || isTransientNetworkError(text);
 }
 
