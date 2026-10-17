@@ -44,18 +44,18 @@ sichtbaren Liste.
 
 # Acceptance Criteria
 
-- [ ] Given ich öffne die App in einem 1280px breiten Fenster, when die
+- [x] Given ich öffne die App in einem 1280px breiten Fenster, when die
       Ansicht erscheint, then steht die Navigation am linken Rand.
-- [ ] Given ich öffne die App in einem 1280px breiten Fenster, when ich
+- [x] Given ich öffne die App in einem 1280px breiten Fenster, when ich
       den unteren Rand ansehe, then gibt es dort KEINE Leiste.
-- [ ] Given ich öffne die App in einem 390px breiten Fenster, when die
+- [x] Given ich öffne die App in einem 390px breiten Fenster, when die
       Ansicht erscheint, then steht die Leiste wie bisher unten und
       links ist keine Seitenleiste.
-- [ ] Given ich öffne die App in einem 1280px breiten Fenster, when ich
+- [x] Given ich öffne die App in einem 1280px breiten Fenster, when ich
       die Seitenleiste von oben nach unten lese, then lauten die
       Einträge "Aktivität", "Verlauf", "Chat", "Repos", "Zustand",
       "Tasks" und zuletzt "Einstellungen".
-- [ ] Given ich bin in einem 1280px breiten Fenster, when ich die
+- [x] Given ich bin in einem 1280px breiten Fenster, when ich die
       Seitenleiste ansehe, then gibt es KEINEN Eintrag "Mehr".
 - [ ] Given die Seitenleiste ist aufgeklappt, when ich auf den
       Einklapp-Knopf tippe, then zeigt sie nur noch Symbole ohne Text.

@@ -54,6 +54,18 @@ function jsonResponse(data: unknown) {
   return { ok: true, json: async () => data };
 }
 
+// req-041: ab 744px zeigt AppShell die Seitenleiste statt der unteren Leiste
+// (eigene Tests weiter unten). Diese Suite prüft weiterhin das iPhone-
+// Verhalten aus req-039/req-007, darum hier fest auf Telefonbreite stellen.
+function setWindowWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    writable: true,
+    configurable: true,
+    value: width,
+  });
+  window.dispatchEvent(new Event("resize"));
+}
+
 const systemMetrics = {
   disk: { freeBytes: 312_000_000_000, totalBytes: 500_000_000_000 },
   cpu: { percent: 37 },
@@ -79,6 +91,7 @@ const dashboard = {
 };
 
 beforeEach(() => {
+  setWindowWidth(390);
   entries = [logEntry()];
   systemCalls = 0;
   serverTaskTypes = defaultTaskTypes();
@@ -286,6 +299,73 @@ describe("Untere Navigation — fünf Plätze (req-039)", () => {
     expect(
       within(nav).queryByRole("button", { name: "Zustand" }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// req-041: ab 744px Fensterbreite wandert die Navigation von der unteren
+// Leiste in eine Seitenleiste am linken Rand; am iPhone (< 744px) bleibt
+// req-039 unverändert.
+describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
+  it("AC: bei 1280px steht die Navigation am linken Rand", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(nav.previousElementSibling).toBeNull();
+  });
+
+  it("AC: bei 1280px gibt es unten KEINE Leiste", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    expect(screen.queryByRole("button", { name: "Mehr" })).not.toBeInTheDocument();
+    // Die untere Leiste hatte fünf gleichartige Plätze; die Seitenleiste hat
+    // sieben (sechs oben + Einstellungen unten) — ein verlässlicher Unterschied.
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button").length).toBeGreaterThan(5);
+  });
+
+  it("AC: bei 390px steht die Leiste wie bisher unten, keine Seitenleiste links", async () => {
+    setWindowWidth(390);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(5); // req-039
+    expect(screen.getByRole("button", { name: "Mehr" })).toBeInTheDocument();
+  });
+
+  it("AC: die Seitenleiste listet von oben nach unten Aktivität, Verlauf, Chat, Repos, Zustand, Tasks, Einstellungen", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    const labels = within(nav)
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label"))
+      // Der Ein-/Ausklapp-Knopf gehört nicht zu den Menüpunkten (eigene AC).
+      .filter((l) => l !== "Seitenleiste einklappen" && l !== "Seitenleiste aufklappen");
+    expect(labels).toEqual([
+      "Aktivität",
+      "Verlauf",
+      "Chat",
+      "Repos",
+      "Zustand",
+      "Tasks",
+      "Einstellungen",
+    ]);
+  });
+
+  it('AC: es gibt KEINEN Eintrag "Mehr" in der Seitenleiste', async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    expect(screen.queryByRole("button", { name: "Mehr" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 });
 

@@ -16,6 +16,8 @@ import {
 } from "@/lib/repos";
 import type { TaskType } from "@/lib/task-types";
 import type { GithubRepo } from "@/lib/github-repos";
+import type { Tab } from "@/lib/tab";
+import { useWindowWidth } from "@/lib/use-window-width";
 import { Icon, type IconName } from "./Icon";
 import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
@@ -23,15 +25,11 @@ import { Settings } from "./Settings";
 import { WorkerDashboard } from "./WorkerDashboard";
 import { HealthOverview } from "./HealthOverview";
 import { Chat } from "./Chat";
+import { Sidebar } from "./Sidebar";
 
-type Tab =
-  | "aktiv"
-  | "zustand"
-  | "verlauf"
-  | "chat"
-  | "repos"
-  | "settings"
-  | "einstellungen";
+// req-041: ab dieser Fensterbreite wandert die Navigation von der unteren
+// Leiste in die Seitenleiste am linken Rand.
+export const SIDEBAR_BREAKPOINT = 744;
 
 // req-039: fünf Plätze in der unteren Leiste — Aktivität, Verlauf, Chat,
 // Repos, Mehr. Chat sitzt in der Mitte, abgesetzt (Kreis, größeres Symbol).
@@ -101,6 +99,14 @@ export function AppShell({
     initialWorkerEnabled,
   );
   const [tab, setTab] = useState<Tab>("aktiv");
+  // req-041: ab 744px wandert die Navigation von der unteren Leiste in die
+  // Seitenleiste am linken Rand; darunter bleibt req-039 unverändert.
+  const width = useWindowWidth();
+  const isPhone = width < SIDEBAR_BREAKPOINT;
+  // req-041: ob die Seitenleiste nur Symbole (eingeklappt) oder Symbol und
+  // Text (aufgeklappt) zeigt. Der Anfangszustand nach Fensterbreite und die
+  // Persistenz über einen Neustart hinweg kommen in einer späteren Etappe.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // req-040 AC8/AC9: ob mindestens ein Repo eine ungesehene, fertige
   // Chat-Antwort hat — der Hinweispunkt auf dem Chat-Knopf unten.
   const [chatUnread, setChatUnread] = useState(false);
@@ -338,148 +344,101 @@ export function AppShell({
     [persistOrder],
   );
 
-  const appStyle: CSSProperties = {
-    position: "relative",
-    height: "100dvh", // fixed viewport height: header/footer stay put, middle scrolls
-    maxWidth: 460,
-    margin: "0 auto",
-    display: "flex",
-    flexDirection: "column",
-    background: "var(--color-bg)",
-    color: "var(--color-text)",
-    fontFamily: "var(--font-body)",
-    overflow: "hidden",
-  };
+  const appStyle: CSSProperties = isPhone
+    ? {
+        position: "relative",
+        height: "100dvh", // fixed viewport height: header/footer stay put, middle scrolls
+        maxWidth: 460,
+        margin: "0 auto",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--color-bg)",
+        color: "var(--color-text)",
+        fontFamily: "var(--font-body)",
+        overflow: "hidden",
+      }
+    : {
+        // req-041: ab 744px nutzt die App die volle Fensterbreite —
+        // Seitenleiste links, Inhalt rechts — statt der schmalen, zentrierten
+        // Telefonspalte.
+        position: "relative",
+        height: "100dvh",
+        display: "flex",
+        background: "var(--color-bg)",
+        color: "var(--color-text)",
+        fontFamily: "var(--font-body)",
+        overflow: "hidden",
+      };
 
-  return (
-    <div style={appStyle}>
-      {/* App bar — its accent tint lives in nocturne.css (.app-bar), the app's
-          source of truth for the look (req-015). */}
+  // Theme-Knopf und (nur im Repos-Tab) der "Repo hinzufügen"-Knopf — am
+  // iPhone in der App-Bar, ab 744px im zusammengelegten Kopf der Hauptspalte.
+  const headerActions = (
+    <div style={{ display: "flex", gap: "var(--space-2)", flex: "none" }}>
+      <button
+        className="btn btn-icon btn-secondary"
+        aria-label="Theme wechseln"
+        onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+      >
+        <Icon name={theme === "dark" ? "sun" : "moon"} size={19} />
+      </button>
+      {tab === "repos" && (
+        <button
+          className="btn btn-icon btn-primary"
+          aria-label="Repo hinzufügen"
+          onClick={openSheet}
+        >
+          <Icon name="plus" size={20} />
+        </button>
+      )}
+    </div>
+  );
+
+  const moduleHeader = (
+    <div style={{ minWidth: 0 }}>
       <div
-        className="app-bar"
-        data-app-bar
         style={{
-          flexShrink: 0,
-          padding: "12px 16px 6px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-2)",
+          fontSize: 10,
+          letterSpacing: ".14em",
+          textTransform: "uppercase",
+          color: "var(--color-accent-300)",
+          marginBottom: 2,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            minWidth: 0,
-          }}
-        >
-          {/* Free-standing line logo — no tile, no box (req-015). */}
-          <div
-            data-logo
-            style={{
-              flex: "none",
-              display: "grid",
-              placeItems: "center",
-              color: "var(--color-accent)",
-            }}
-          >
-            <Icon name="brand" size={30} sw={1.6} />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              minWidth: 0,
-              lineHeight: 1.02,
-            }}
-          >
-            <span
-              style={{
-                fontWeight: 700,
-                fontSize: 18,
-                letterSpacing: "-.03em",
-              }}
-            >
-              appbaua
-            </span>
-            <span
-              style={{
-                fontSize: 9,
-                letterSpacing: ".16em",
-                textTransform: "uppercase",
-                color: muted(46),
-              }}
-            >
-              Coding-Worker
-            </span>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: "var(--space-2)", flex: "none" }}>
-          <button
-            className="btn btn-icon btn-secondary"
-            aria-label="Theme wechseln"
-            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-          >
-            <Icon name={theme === "dark" ? "sun" : "moon"} size={19} />
-          </button>
-          {tab === "repos" && (
-            <button
-              className="btn btn-icon btn-primary"
-              aria-label="Repo hinzufügen"
-              onClick={openSheet}
-            >
-              <Icon name="plus" size={20} />
-            </button>
-          )}
-        </div>
+        Modul
       </div>
-
-      {/* Module title */}
-      <div style={{ flexShrink: 0, padding: "6px 20px 10px", minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 10,
-            letterSpacing: ".14em",
-            textTransform: "uppercase",
-            color: "var(--color-accent-300)",
-            marginBottom: 2,
-          }}
-        >
-          Modul
+      <h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.02em" }}>
+        {MODULE_TITLE[tab]}
+      </h2>
+      {tab === "aktiv" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Was der Worker gerade tut.
         </div>
-        <h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.02em" }}>
-          {MODULE_TITLE[tab]}
-        </h2>
-        {tab === "aktiv" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Was der Worker gerade tut.
-          </div>
-        )}
-        {tab === "zustand" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Läuft jede überwachte App — und wenn nicht, woran es hängt.
-          </div>
-        )}
-        {tab === "repos" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Der Worker arbeitet die Liste von oben nach unten ab.
-          </div>
-        )}
-        {tab === "settings" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Priorität und Zeiten je Task-Typ — gilt für alle Repos.
-          </div>
-        )}
-        {tab === "einstellungen" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Wartung und Optionen der App.
-          </div>
-        )}
-      </div>
+      )}
+      {tab === "zustand" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Läuft jede überwachte App — und wenn nicht, woran es hängt.
+        </div>
+      )}
+      {tab === "repos" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Der Worker arbeitet die Liste von oben nach unten ab.
+        </div>
+      )}
+      {tab === "settings" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Priorität und Zeiten je Task-Typ — gilt für alle Repos.
+        </div>
+      )}
+      {tab === "einstellungen" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Wartung und Optionen der App.
+        </div>
+      )}
+    </div>
+  );
 
-      {tab === "aktiv" ? (
+  const moduleContent =
+    tab === "aktiv" ? (
         <WorkerDashboard />
       ) : tab === "zustand" ? (
         <HealthOverview />
@@ -849,10 +808,12 @@ export function AppShell({
         <Settings />
       ) : (
         <RunLog />
-      )}
+      );
 
-      {/* Bottom tab bar — five places (req-039): Aktivität, Verlauf, Chat,
-          Repos, Mehr. */}
+  // Bottom tab bar — five places (req-039): Aktivität, Verlauf, Chat, Repos,
+  // Mehr. Nur am iPhone (< 744px) — ab dort übernimmt die Sidebar (req-041).
+  const bottomNav = (
+    <>
       <nav
         aria-label="Hauptnavigation"
         style={{
@@ -1007,6 +968,122 @@ export function AppShell({
             ))}
           </div>
         </div>
+      )}
+    </>
+  );
+
+  return (
+    <div style={appStyle}>
+      {isPhone ? (
+        <>
+          {/* App bar — its accent tint lives in nocturne.css (.app-bar), the
+              app's source of truth for the look (req-015). */}
+          <div
+            className="app-bar"
+            data-app-bar
+            style={{
+              flexShrink: 0,
+              padding: "12px 16px 6px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "var(--space-2)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                minWidth: 0,
+              }}
+            >
+              {/* Free-standing line logo — no tile, no box (req-015). */}
+              <div
+                data-logo
+                style={{
+                  flex: "none",
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--color-accent)",
+                }}
+              >
+                <Icon name="brand" size={30} sw={1.6} />
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  minWidth: 0,
+                  lineHeight: 1.02,
+                }}
+              >
+                <span
+                  style={{
+                    fontWeight: 700,
+                    fontSize: 18,
+                    letterSpacing: "-.03em",
+                  }}
+                >
+                  appbaua
+                </span>
+                <span
+                  style={{
+                    fontSize: 9,
+                    letterSpacing: ".16em",
+                    textTransform: "uppercase",
+                    color: muted(46),
+                  }}
+                >
+                  Coding-Worker
+                </span>
+              </div>
+            </div>
+            {headerActions}
+          </div>
+
+          {/* Module title */}
+          <div style={{ flexShrink: 0, padding: "6px 20px 10px" }}>
+            {moduleHeader}
+          </div>
+
+          {moduleContent}
+          {bottomNav}
+        </>
+      ) : (
+        <>
+          {/* req-041: Seitenleiste ersetzt ab 744px die untere Leiste. */}
+          <Sidebar
+            tab={tab}
+            onSelect={setTab}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
+          />
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "flex-end",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "16px 22px 12px",
+              }}
+            >
+              {moduleHeader}
+              {headerActions}
+            </div>
+            {moduleContent}
+          </div>
+        </>
       )}
 
       {/* Add sheet */}

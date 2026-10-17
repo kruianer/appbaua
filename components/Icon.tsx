@@ -37,6 +37,9 @@ export const ICONS = {
   chat: '<path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2z"/>',
   // "Mehr" — die drei ausgelagerten Menüpunkte (req-039).
   more: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
+  // Ein-/Ausklapp-Knopf der Seitenleiste (req-041).
+  chevronLeft: '<path d="M14 6l-6 6 6 6"/>',
+  chevronRight: '<path d="M10 6l6 6-6 6"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;
