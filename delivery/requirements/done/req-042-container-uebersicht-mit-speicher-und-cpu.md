@@ -65,7 +65,7 @@ Prüfungen.
 - [x] Given ich öffne die Container-Übersicht auf einem iPhone, when ich
       sie ansehe, then sind Name, Zustand, Speicher und CPU jedes
       Containers lesbar, ohne seitlich schieben zu müssen.
-- [ ] Given die Messung läuft noch, when ich die Übersicht öffne, then
+- [x] Given die Messung läuft noch, when ich die Übersicht öffne, then
       sehe ich, dass gemessen wird, und die Seite wirkt nicht leer.
 
 # Constraints

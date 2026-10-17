@@ -20,6 +20,9 @@ export const POLL_MS = 15_000;
 
 export function ContainerOverview() {
   const [groups, setGroups] = useState<ContainerGroup[] | null>(null);
+  // Vor der allerersten fertigen Messrunde (req-042, AC12) — bis dahin ist
+  // "wird gemessen" die richtige Annahme, nicht "keine Container".
+  const [measuring, setMeasuring] = useState(true);
   const [pending, setPending] = useState<{ id: string; name: string } | null>(null);
   const [restarting, setRestarting] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -28,8 +31,9 @@ export function ContainerOverview() {
     try {
       const res = await fetch("/api/health/containers", { cache: "no-store" });
       if (!res.ok) return;
-      const data = (await res.json()) as { groups?: ContainerGroup[] };
+      const data = (await res.json()) as { groups?: ContainerGroup[]; measuring?: boolean };
       setGroups(data.groups ?? []);
+      setMeasuring(data.measuring ?? false);
     } catch {
       /* letzten bekannten Stand stehen lassen */
     }
@@ -86,6 +90,28 @@ export function ContainerOverview() {
         >
           <Icon name="sync" size={17} />
           <span>{note}</span>
+        </div>
+      )}
+
+      {measuring && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "var(--space-2)",
+            padding: "var(--space-4)",
+            borderRadius: "var(--radius-md)",
+            border: `1px solid color-mix(in srgb, var(--color-text) 15%, transparent)`,
+          }}
+        >
+          <Icon name="activity" size={20} />
+          <div>
+            <div style={{ fontWeight: 600 }}>Messung läuft …</div>
+            <div style={{ fontSize: 13 }}>
+              Speicher und CPU brauchen zwei Momentaufnahmen im Abstand — bei
+              vielen Containern dauert das einen Moment.
+            </div>
+          </div>
         </div>
       )}
 

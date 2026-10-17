@@ -147,4 +147,20 @@ describe("Container-Übersicht (req-042)", () => {
     );
     expect(text.style.overflowWrap).toBe("anywhere");
   });
+
+  it("AC: während die Messung noch läuft, sieht man das — die Seite wirkt nicht leer", async () => {
+    groups = [];
+    vi.stubGlobal("fetch", async () => ({
+      ok: true,
+      json: async () => ({ groups: [], measuring: true }),
+    }));
+    render(<ContainerOverview />);
+    expect(await screen.findByText(/Messung läuft/)).toBeInTheDocument();
+  });
+
+  it("zeigt die Messung nicht mehr an, sobald Werte vorliegen", async () => {
+    render(<ContainerOverview />);
+    await screen.findByText("appbaua · prod");
+    expect(screen.queryByText(/Messung läuft/)).not.toBeInTheDocument();
+  });
 });
