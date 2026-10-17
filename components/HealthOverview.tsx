@@ -11,6 +11,7 @@ import {
 } from "@/lib/health";
 import type { HeartbeatView } from "@/lib/heartbeat-service";
 import type { LogAnalysis } from "@/lib/log-analysis";
+import { ContainerOverview } from "./ContainerOverview";
 import { Icon } from "./Icon";
 
 // Zustandsseite (req-032): je überwachter App eine Karte mit Ampel und den
@@ -148,7 +149,44 @@ function HeartbeatLine({ heartbeat }: { heartbeat: HeartbeatView }) {
   );
 }
 
+type ZustandView = "pruefungen" | "container";
+
+/** Umschalter zwischen den zwei Ansichten des Zustands-Moduls (req-042). */
+function ViewSwitch({
+  view,
+  onChange,
+}: {
+  view: ZustandView;
+  onChange: (view: ZustandView) => void;
+}) {
+  const OPTIONS: { key: ZustandView; label: string }[] = [
+    { key: "pruefungen", label: "Prüfungen" },
+    { key: "container", label: "Container-Übersicht" },
+  ];
+  return (
+    <div
+      role="tablist"
+      aria-label="Zustands-Ansicht"
+      style={{ display: "flex", gap: "var(--space-2)", marginBottom: "var(--space-2)" }}
+    >
+      {OPTIONS.map((o) => (
+        <button
+          key={o.key}
+          role="tab"
+          aria-selected={view === o.key}
+          className={view === o.key ? "btn btn-primary" : "btn btn-secondary"}
+          onClick={() => onChange(o.key)}
+          style={{ fontSize: 13, padding: "6px 12px" }}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function HealthOverview() {
+  const [view, setView] = useState<ZustandView>("pruefungen");
   const [apps, setApps] = useState<AppHealth[] | null>(null);
   const [heartbeat, setHeartbeat] = useState<HeartbeatView | null>(null);
   const [pending, setPending] = useState<{ repoId: string; container: string } | null>(
@@ -230,6 +268,23 @@ export function HealthOverview() {
     [analyzing, load],
   );
 
+  if (view === "container") {
+    return (
+      <div
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          // bug-021: vertikal scrollen ja, seitlich verschieben nein.
+          overflowX: "clip",
+          padding: "0 20px 14px",
+        }}
+      >
+        <ViewSwitch view={view} onChange={setView} />
+        <ContainerOverview />
+      </div>
+    );
+  }
+
   return (
     <div
             style={{
@@ -240,6 +295,7 @@ export function HealthOverview() {
               padding: "0 20px 14px",
             }}
           >
+      <ViewSwitch view={view} onChange={setView} />
       {note && (
         <div
           role="status"

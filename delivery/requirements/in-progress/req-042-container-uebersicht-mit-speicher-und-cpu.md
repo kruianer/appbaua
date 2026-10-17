@@ -36,7 +36,7 @@ Prüfungen.
 
 # Acceptance Criteria
 
-- [ ] Given ich öffne den Menüpunkt "Zustand", when die Ansicht
+- [x] Given ich öffne den Menüpunkt "Zustand", when die Ansicht
       erscheint, then kann ich zur Container-Übersicht wechseln.
 - [ ] Given ich öffne die Container-Übersicht, when sie geladen ist,
       then sehe ich eine Gruppe "appbaua · prod".

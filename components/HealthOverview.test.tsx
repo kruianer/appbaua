@@ -227,6 +227,17 @@ describe("Zustandsseite (req-032)", () => {
     expect(screen.queryByText(/KI-Log-Analyse/)).not.toBeInTheDocument();
   });
 
+  it("AC (req-042): von der Zustandsseite aus zur Container-Übersicht wechseln", async () => {
+    const user = userEvent.setup();
+    render(<HealthOverview />);
+    await screen.findByRole("tab", { name: "Prüfungen" });
+
+    await user.click(screen.getByRole("tab", { name: "Container-Übersicht" }));
+    expect(
+      await screen.findByRole("heading", { name: "Container-Übersicht" }),
+    ).toBeInTheDocument();
+  });
+
   it("bricht die Rückfrage ab, ohne etwas anzufassen", async () => {
     const user = userEvent.setup();
     render(<HealthOverview />);
