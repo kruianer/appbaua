@@ -83,12 +83,17 @@ export function failedDir(base: string): string {
 }
 
 /**
- * Choose the oldest .md by filename (mtime is unreliable after a clone, so we
- * order by name — requirement/bug files are prefixed req-NNN / bug-NNN, which
- * sorts oldest-first). Returns the filename or null.
+ * All .md files, oldest first by filename (mtime is unreliable after a
+ * clone, so we order by name — requirement/bug files are prefixed req-NNN /
+ * bug-NNN, which sorts oldest-first).
  */
+export function sortedMds(files: string[]): string[] {
+  return files.filter((f) => f.toLowerCase().endsWith(".md")).sort();
+}
+
+/** The single oldest .md by filename (see sortedMds), or null if none wait. */
 export function oldestMd(files: string[]): string | null {
-  const mds = files.filter((f) => f.toLowerCase().endsWith(".md")).sort();
+  const mds = sortedMds(files);
   return mds.length ? mds[0] : null;
 }
 

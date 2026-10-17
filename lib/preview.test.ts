@@ -24,7 +24,7 @@ function deps(over: Partial<PreviewDeps> = {}): PreviewDeps {
 }
 
 describe("buildPreview (req-022)", () => {
-  it("AC: a file-driven type with a waiting file shows its name", async () => {
+  it("AC: a file-driven type shows every waiting file, oldest first (bug-025)", async () => {
     const [bug] = defaultTaskTypes();
     const d = deps({
       listReady: vi.fn(async (_dir, rel) =>
@@ -32,12 +32,9 @@ describe("buildPreview (req-022)", () => {
       ),
     });
     const rows = await buildPreview([repo()], [bug], WED_18, "tok", d);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({
-      repo: "appbaua",
-      taskType: "Bugs",
-      mdName: "bug-001.md", // oldest first, same claim order as execute-step
-    });
+    expect(rows).toHaveLength(2);
+    expect(rows.map((r) => r.mdName)).toEqual(["bug-001.md", "bug-003.md"]);
+    expect(rows[0]).toMatchObject({ repo: "appbaua", taskType: "Bugs" });
   });
 
   it("AC: a file-driven type with nothing waiting produces NO row", async () => {
@@ -46,7 +43,7 @@ describe("buildPreview (req-022)", () => {
     expect(rows).toEqual([]);
   });
 
-  it("AC: a recurring type shows the placeholder, not a filename", async () => {
+  it("AC: a recurring type produces NO rows (bug-025) — only bugs/requirements belong here", async () => {
     const review: TaskType = {
       id: "code-review",
       label: "Code-Review",
@@ -55,7 +52,7 @@ describe("buildPreview (req-022)", () => {
       schedule: emptySchedule(),
     };
     const rows = await buildPreview([repo()], [review], WED_18, "tok", deps());
-    expect(rows[0].mdName).toBe("wiederkehrende Aufgabe");
+    expect(rows).toEqual([]);
   });
 
   it("AC: an 'always' type due now gets a queue position", async () => {
@@ -65,25 +62,23 @@ describe("buildPreview (req-022)", () => {
     expect(rows[0].due).toEqual({ kind: "queue", position: 0 });
   });
 
-  it("AC: a scheduled type not due yet gets its next window start", async () => {
-    const doku: TaskType = {
-      id: "doku",
-      label: "Doku",
+  it("AC: a file-driven type not due yet still shows its waiting file, with its next window start", async () => {
+    const req: TaskType = {
+      id: "requirement",
+      label: "Requirements",
       active: true,
       always: false,
       schedule: emptySchedule(),
     };
-    doku.schedule.thu = { enabled: true, start: "02:00", end: "06:00" };
+    req.schedule.thu = { enabled: true, start: "02:00", end: "06:00" };
     const rows = await buildPreview(
       [repo()],
-      [doku],
+      [req],
       WED_18,
       "tok",
-      deps({ listReady: vi.fn(async () => []) }),
+      deps({ listReady: vi.fn(async () => ["req-001.md"]) }),
     );
-    // Doku is not file-driven -> always shows the recurring placeholder,
-    // with an "at" due time since it is not due right now.
-    expect(rows[0].mdName).toBe("wiederkehrende Aufgabe");
+    expect(rows[0].mdName).toBe("req-001.md");
     expect(rows[0].due.kind).toBe("at");
   });
 

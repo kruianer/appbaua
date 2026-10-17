@@ -74,9 +74,12 @@ export function isTaskDue(t: TaskType, now: Date): boolean {
 export type PlannedStep = { repo: Repo; taskType: TaskType };
 
 /**
- * One row of the "Nächste Aktivitäten" preview (req-022): what the worker will
- * do next, in the same order it actually works — repo outer, task type inner
- * (bug-008) — so the preview is a truthful look-ahead, not a separate opinion.
+ * One row of the "Nächste Aktivitäten" preview (req-022). Display order is
+ * task type outer, repo inner (bug-025): all repos with bugs, then all repos
+ * with requirements, and so on — repo order follows the repos' configured
+ * priority, task-type order the Tasks menu's priority. This intentionally
+ * differs from planRun's repo-outer execution order; the preview groups for
+ * readability, it is not a literal run queue.
  */
 export type PreviewEntry = {
   repo: Repo;
@@ -112,12 +115,13 @@ export function planPreview(
   const activeTypes = taskTypes.filter((t) => t.active);
 
   // Queue position counts every entry that is due right now (whether "always"
-  // or a schedule whose window happens to be open), in planRun's own order —
-  // repo outer, type inner — so position 0 really is next in line.
+  // or a schedule whose window happens to be open), in THIS list's own
+  // display order — task type outer, repo inner (bug-025) — so position 0 is
+  // the first due entry a reader of the list encounters.
   let queueIndex = 0;
   const entries: PreviewEntry[] = [];
-  for (const repo of activeRepos) {
-    for (const taskType of activeTypes) {
+  for (const taskType of activeTypes) {
+    for (const repo of activeRepos) {
       if (isTaskDue(taskType, now)) {
         entries.push({ repo, taskType, due: { kind: "queue", position: queueIndex } });
         queueIndex += 1;

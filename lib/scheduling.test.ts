@@ -212,13 +212,13 @@ describe("planPreview (req-022)", () => {
     { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet", monitored: false },
   ];
 
-  it("orders repo outer, task-type inner — same order the worker actually works", () => {
+  it("orders task-type outer, repo inner (bug-025): all repos with bugs, then all with requirements", () => {
     const [bug, req] = defaultTaskTypes();
     const entries = planPreview(repos, [bug, req], WED_18);
     expect(entries.map((e) => `${e.taskType.label}×${e.repo.name}`)).toEqual([
       "Bugs×appbaua",
-      "Requirements×appbaua",
       "Bugs×worker",
+      "Requirements×appbaua",
       "Requirements×worker",
     ]);
   });
