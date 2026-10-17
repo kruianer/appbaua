@@ -45,6 +45,20 @@ export function isAllowedCommand(cmd: unknown): cmd is string[] {
 
 export type ExecResult = { exitCode: number | null; output: string };
 
+/**
+ * Eine Momentaufnahme von Speicher und CPU (req-042). CPU ist dabei ROH —
+ * total genutzte CPU-Zeit und verfügbare System-Zeit seit Containerstart —
+ * weil sich eine Last in Prozent erst aus der Differenz ZWEIER solcher
+ * Aufnahmen im Abstand ergibt, nicht aus einer einzelnen (siehe die
+ * Constraints von req-042 und cpuPercentFromSamples in lib/container-overview).
+ */
+export type ContainerStatsSample = {
+  memoryBytes: number;
+  cpuTotalUsage: number;
+  cpuSystemUsage: number;
+  onlineCpus: number;
+};
+
 export interface DockerClient {
   /** Alle Container des Rechners, auch gestoppte. */
   list(): Promise<DockerContainer[]>;
@@ -64,6 +78,8 @@ export interface DockerClient {
   logs(id: string, tail: number): Promise<string>;
   /** Genau diesen einen Container neu starten — nur auf Klick (req-032). */
   restart(id: string): Promise<void>;
+  /** Speicher- und CPU-Momentaufnahme eines laufenden Containers (req-042). */
+  stats(id: string): Promise<ContainerStatsSample>;
 }
 
 type RawContainer = {
@@ -250,6 +266,34 @@ export function createSocketDocker(
         "Neustart",
       );
     },
+
+    async stats(id) {
+      // stream=false: EINE Antwort statt eines Dauerstroms. Die Prozentrechnung
+      // selbst passiert erst mit der zweiten Aufnahme, in cpuPercentFromSamples.
+      const res = expectOk(
+        await request(
+          socketPath,
+          "GET",
+          `/containers/${encodeURIComponent(id)}/stats?stream=false`,
+        ),
+        "Messwerte lesen",
+      );
+      const parsed = JSON.parse(res.body) as {
+        memory_stats?: { usage?: number };
+        cpu_stats?: {
+          cpu_usage?: { total_usage?: number; percpu_usage?: number[] };
+          system_cpu_usage?: number;
+          online_cpus?: number;
+        };
+      };
+      const cpu = parsed.cpu_stats ?? {};
+      return {
+        memoryBytes: parsed.memory_stats?.usage ?? 0,
+        cpuTotalUsage: cpu.cpu_usage?.total_usage ?? 0,
+        cpuSystemUsage: cpu.system_cpu_usage ?? 0,
+        onlineCpus: cpu.online_cpus ?? cpu.cpu_usage?.percpu_usage?.length ?? 1,
+      };
+    },
   };
 }
 
@@ -307,6 +351,17 @@ export function createRemoteDocker(
     },
     async restart(id) {
       await post(`/containers/${encodeURIComponent(id)}/restart`);
+    },
+    async stats(id) {
+      const data = (await call(
+        `/containers/${encodeURIComponent(id)}/stats`,
+      )) as Partial<ContainerStatsSample>;
+      return {
+        memoryBytes: data.memoryBytes ?? 0,
+        cpuTotalUsage: data.cpuTotalUsage ?? 0,
+        cpuSystemUsage: data.cpuSystemUsage ?? 0,
+        onlineCpus: data.onlineCpus ?? 1,
+      };
     },
   };
 }

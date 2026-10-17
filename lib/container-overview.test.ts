@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { buildContainerOverview, parseProjectEnv } from "./container-overview";
+import {
+  buildContainerOverview,
+  containerSince,
+  containerStateLabel,
+  cpuPercentFromSamples,
+  formatCpuPercent,
+  formatMemory,
+  parseProjectEnv,
+} from "./container-overview";
 import type { DockerContainer } from "./health";
 import type { Repo } from "./repos";
 
@@ -82,5 +90,48 @@ describe("buildContainerOverview", () => {
     const containers = [container("1", "appbaua-prod-app-1", "appbaua-prod")];
     const { groups } = buildContainerOverview(repos, containers, new Map());
     expect(groups.some((g) => g.key === "sonstige")).toBe(false);
+  });
+});
+
+describe("cpuPercentFromSamples — Constraint: zwei Momentaufnahmen, nicht eine", () => {
+  it("errechnet den Anteil der genutzten System-Zeit", () => {
+    const prev = { cpuTotalUsage: 1_000_000_000, cpuSystemUsage: 10_000_000_000, onlineCpus: 2 };
+    const curr = { cpuTotalUsage: 1_200_000_000, cpuSystemUsage: 11_000_000_000, onlineCpus: 2 };
+    // (200_000_000 / 1_000_000_000) * 2 * 100 = 40
+    expect(cpuPercentFromSamples(prev, curr)).toBeCloseTo(40, 5);
+  });
+
+  it("liefert 0 statt eines negativen oder unsinnigen Werts", () => {
+    const prev = { cpuTotalUsage: 500, cpuSystemUsage: 1000, onlineCpus: 1 };
+    const curr = { cpuTotalUsage: 500, cpuSystemUsage: 1000, onlineCpus: 1 };
+    expect(cpuPercentFromSamples(prev, curr)).toBe(0);
+  });
+});
+
+describe("formatMemory / formatCpuPercent", () => {
+  it("zeigt den Speicher als Zahl mit Einheit", () => {
+    expect(formatMemory(412 * 1024 * 1024)).toBe("412 MB");
+  });
+
+  it("zeigt die CPU-Last in Prozent", () => {
+    expect(formatCpuPercent(3.2)).toBe("3.2 %");
+  });
+});
+
+describe("containerStateLabel / containerSince", () => {
+  it("AC: läuft, beendet, startet neu", () => {
+    expect(containerStateLabel("running")).toBe("läuft");
+    expect(containerStateLabel("exited")).toBe("beendet");
+    expect(containerStateLabel("restarting")).toBe("startet neu");
+  });
+
+  it("AC: 'läuft · seit 3 Stunden' aus Docker's Status-Zeile", () => {
+    expect(containerSince("Up 3 hours")).toBe("seit 3 Stunden");
+    expect(containerSince("Exited (0) 2 hours ago")).toBe("seit 2 Stunden");
+    expect(containerSince("Restarting (1) 5 seconds ago")).toBe("seit 5 Sekunden");
+  });
+
+  it("ohne erkennbare Dauer gibt es kein 'seit'", () => {
+    expect(containerSince("Created")).toBeNull();
   });
 });

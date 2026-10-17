@@ -111,6 +111,9 @@ function dockerStub(
     async restart(id) {
       restarts.push(id);
     },
+    async stats() {
+      return { memoryBytes: 0, cpuTotalUsage: 0, cpuSystemUsage: 0, onlineCpus: 1 };
+    },
   };
 }
 

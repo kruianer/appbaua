@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { ContainerGroup } from "@/lib/container-overview";
+import {
+  type ContainerGroup,
+  type ContainerRow,
+  containerSince,
+  containerStateLabel,
+  formatCpuPercent,
+  formatMemory,
+} from "@/lib/container-overview";
 
 // Container-Übersicht (req-042): zweite Ansicht des Zustands-Moduls, Speicher
 // und CPU-Last je Container, gruppiert nach App. Wird in HealthOverview per
@@ -34,16 +41,50 @@ export function ContainerOverview() {
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       {(groups ?? []).map((g) => (
         <div key={g.key} className="card elev-sm" style={{ gap: "var(--space-2)" }}>
-          <div style={{ fontWeight: 600, fontSize: 16 }}>{g.label}</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "baseline",
+              justifyContent: "space-between",
+              gap: "var(--space-2)",
+              flexWrap: "wrap",
+            }}
+          >
+            <span style={{ fontWeight: 600, fontSize: 16, minWidth: 0 }}>{g.label}</span>
+            <span style={{ fontSize: 12, color: "var(--color-text-muted, inherit)" }}>
+              {formatMemory(g.memoryBytesTotal)}
+            </span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {g.containers.map((c) => (
-              <div key={c.id} style={{ fontSize: 14 }}>
-                {c.name}
-              </div>
+              <ContainerRowView key={c.id} c={c} />
             ))}
           </div>
         </div>
       ))}
+    </div>
+  );
+}
+
+function ContainerRowView({ c }: { c: ContainerRow }) {
+  const since = containerSince(c.status);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "baseline",
+        gap: "var(--space-2)",
+        fontSize: 13,
+      }}
+    >
+      <span style={{ fontWeight: 600, wordBreak: "break-word" }}>{c.name}</span>
+      <span style={{ wordBreak: "break-word" }}>
+        {containerStateLabel(c.state)}
+        {since ? ` · ${since}` : ""}
+      </span>
+      {c.memoryBytes !== null && <span>{formatMemory(c.memoryBytes)}</span>}
+      {c.cpuPercent !== null && <span>{formatCpuPercent(c.cpuPercent)}</span>}
     </div>
   );
 }

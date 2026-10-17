@@ -70,6 +70,80 @@ function sumMemory(rows: ContainerRow[]): number {
   return rows.reduce((sum, r) => sum + (r.memoryBytes ?? 0), 0);
 }
 
+// ---------------------------------------------------------------------------
+// Speicher und CPU
+// ---------------------------------------------------------------------------
+
+export type CpuSample = {
+  cpuTotalUsage: number;
+  cpuSystemUsage: number;
+  onlineCpus: number;
+};
+
+/**
+ * CPU-Last zwischen zwei Momentaufnahmen — siehe Constraint von req-042: eine
+ * einzelne Messung reicht nicht, es braucht die Differenz zweier Messungen im
+ * Abstand. Dieselbe Formel wie `docker stats`: welcher Anteil der seit der
+ * letzten Messung vergangenen System-Zeit auf diesen Container entfiel.
+ */
+export function cpuPercentFromSamples(prev: CpuSample, curr: CpuSample): number {
+  const cpuDelta = curr.cpuTotalUsage - prev.cpuTotalUsage;
+  const systemDelta = curr.cpuSystemUsage - prev.cpuSystemUsage;
+  if (systemDelta <= 0 || cpuDelta <= 0) return 0;
+  const cpus = curr.onlineCpus || 1;
+  return (cpuDelta / systemDelta) * cpus * 100;
+}
+
+export function formatMemory(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`;
+}
+
+export function formatCpuPercent(percent: number): string {
+  return `${percent.toFixed(1)} %`;
+}
+
+const STATE_LABELS: Record<string, string> = {
+  running: "läuft",
+  restarting: "startet neu",
+  exited: "beendet",
+  dead: "beendet",
+  paused: "angehalten",
+  created: "angelegt",
+};
+
+/** Docker's `State` auf Deutsch, in den Worten der Function-Beschreibung. */
+export function containerStateLabel(state: string): string {
+  return STATE_LABELS[state.toLowerCase()] ?? state;
+}
+
+const DURATION_DE: Record<string, string> = {
+  second: "Sekunde",
+  seconds: "Sekunden",
+  minute: "Minute",
+  minutes: "Minuten",
+  hour: "Stunde",
+  hours: "Stunden",
+  day: "Tag",
+  days: "Tage",
+  week: "Woche",
+  weeks: "Wochen",
+  month: "Monat",
+  months: "Monate",
+};
+
+/**
+ * "Up 3 hours" -> "seit 3 Stunden"; "Restarting (1) 5 seconds ago" -> "seit 5
+ * Sekunden". null, wenn der Status keine Dauer nennt (z.B. "Created").
+ */
+export function containerSince(status: string): string | null {
+  const m = status.match(
+    /(\d+)\s+(seconds|second|minutes|minute|hours|hour|days|day|weeks|week|months|month)/i,
+  );
+  if (!m) return null;
+  const unit = DURATION_DE[m[2].toLowerCase()] ?? m[2];
+  return `seit ${m[1]} ${unit}`;
+}
+
 /**
  * Container nach App und Umgebung gruppiert (req-042): "appbaua · dev" /
  * "appbaua · prod", Container ohne passendes Repo am Ende unter "Sonstige".

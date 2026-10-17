@@ -163,6 +163,24 @@ describe("createRemoteDocker — die App spricht über den health-agent", () => 
     ]);
   });
 
+  it("holt Speicher- und CPU-Momentaufnahme eines Containers (req-042)", async () => {
+    const urls: string[] = [];
+    const docker = createRemoteDocker(
+      "http://health-agent:3100",
+      stubFetch((url) => {
+        urls.push(url);
+        return { memoryBytes: 1024, cpuTotalUsage: 10, cpuSystemUsage: 100, onlineCpus: 2 };
+      }),
+    );
+    expect(await docker.stats("abc")).toEqual({
+      memoryBytes: 1024,
+      cpuTotalUsage: 10,
+      cpuSystemUsage: 100,
+      onlineCpus: 2,
+    });
+    expect(urls[0]).toBe("http://health-agent:3100/containers/abc/stats");
+  });
+
   it("eine abschlägige Antwort des Agenten wirft, statt still nichts zu tun", async () => {
     const docker = createRemoteDocker("http://health-agent:3100", (async () => ({
       ok: false,

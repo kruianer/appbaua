@@ -43,21 +43,21 @@ Prüfungen.
 - [x] Given ich öffne die Container-Übersicht, when ich die Gruppe
       "appbaua · prod" ansehe, then stehen dort unter anderem die
       Container "appbaua-prod-app-1" und "appbaua-prod-worker-1".
-- [ ] Given ich öffne die Container-Übersicht, when ich einen laufenden
+- [x] Given ich öffne die Container-Übersicht, when ich einen laufenden
       Container ansehe, then steht dort sein belegter Arbeitsspeicher
       als Zahl mit Einheit (z.B. "412 MB").
-- [ ] Given ich öffne die Container-Übersicht, when ich einen laufenden
+- [x] Given ich öffne die Container-Übersicht, when ich einen laufenden
       Container ansehe, then steht dort seine CPU-Last in Prozent.
-- [ ] Given ich öffne die Container-Übersicht, when ich einen laufenden
+- [x] Given ich öffne die Container-Übersicht, when ich einen laufenden
       Container ansehe, then steht dort sein Zustand und seit wann
       (z.B. "läuft · seit 3 Stunden").
-- [ ] Given eine Gruppe enthält mehrere Container, when ich ihre
+- [x] Given eine Gruppe enthält mehrere Container, when ich ihre
       Überschrift ansehe, then steht dort die Summe des Speichers aller
       Container dieser Gruppe.
 - [x] Given auf dem Rechner läuft ein Container, der zu keiner
       eingetragenen App gehört, when ich die Übersicht ansehe, then
       steht er in der Gruppe "Sonstige".
-- [ ] Given ein Container ist beendet, when ich ihn in der Übersicht
+- [x] Given ein Container ist beendet, when ich ihn in der Übersicht
       ansehe, then ist sein Zustand als beendet erkennbar und es steht
       KEINE CPU-Last bei ihm.
 - [ ] Given ich sehe einen Container in der Übersicht, when ich seinen

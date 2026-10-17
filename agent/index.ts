@@ -7,12 +7,13 @@
 // Gegenteil (wer mit der Engine reden darf, ist auf dem Host praktisch root).
 // Also bekommt ihn ein Dienst, der sonst nichts kann und nichts sieht.
 //
-// Er nimmt genau fünf Aufrufe entgegen:
+// Er nimmt genau sechs Aufrufe entgegen:
 //   GET  /containers                 alle Container (auch gestoppte)
 //   GET  /containers/:id/env?name=X  EINE Umgebungsvariable
 //   POST /containers/:id/exec        ein Befehl aus der Erlaubnisliste
 //   GET  /containers/:id/logs?tail=N die letzten N Logzeilen (req-035)
 //   POST /containers/:id/restart     Neustart genau dieses Containers
+//   GET  /containers/:id/stats       Speicher/CPU-Momentaufnahme (req-042)
 // Alles andere ist 404. Insbesondere gibt es keinen Durchgriff auf die
 // Engine-API und keinen Weg, einen beliebigen Befehl zu starten.
 
@@ -91,6 +92,10 @@ const server = http.createServer(async (req, res) => {
       if (target.kind !== "restart") return {};
       await docker.restart(target.id);
       return { restarted: target.id };
+    },
+    stats: async () => {
+      if (target.kind !== "stats") return {};
+      return docker.stats(target.id);
     },
   };
 

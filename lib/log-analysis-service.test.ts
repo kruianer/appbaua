@@ -61,6 +61,9 @@ function dockerStub(logs: Record<string, string>) {
       return logs[id] ?? "";
     },
     async restart() {},
+    async stats() {
+      return { memoryBytes: 0, cpuTotalUsage: 0, cpuSystemUsage: 0, onlineCpus: 1 };
+    },
   };
   return { client, asked };
 }
