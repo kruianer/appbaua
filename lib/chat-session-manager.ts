@@ -7,6 +7,7 @@ import {
 import { getChatUiStateStore } from "./chat-store";
 import { prepareChatRepo } from "./chat-workspace";
 import { type ClaudeOutcome, runClaude } from "./claude-runner";
+import { touchActiveSession } from "./chat-session-lru";
 
 // Orchestrates one chat turn (req-040): append the user's message, make sure
 // the repo has a working copy of its OWN (chat-workspace.ts, AC15), run
@@ -48,6 +49,13 @@ export async function sendChatMessage(
   const token = deps.token ?? process.env.GITHUB_TOKEN;
   const getActiveRepoId =
     deps.getActiveRepoId ?? (() => getChatUiStateStore().getActiveRepoId());
+
+  // req-040 AC10/AC11: höchstens fünf Sitzungen gleichzeitig; eine sechste
+  // verdrängt die am längsten unbenutzte. "Verdrängt" betrifft nur dieses
+  // In-Memory-Set — das Gespräch liegt im Store und bleibt davon unberührt,
+  // also auch nach einer Verdrängung vollständig lesbar.
+  const touched = touchActiveSession(activeSessionIds, repo.id);
+  activeSessionIds = touched.active;
 
   await store.appendMessage({
     repoId: repo.id,
@@ -122,6 +130,21 @@ const runningTurns = new Map<string, Promise<void>>();
 
 export function isChatTurnRunning(repoId: string): boolean {
   return runningTurns.has(repoId);
+}
+
+// req-040 AC10/AC11: the repos whose session currently counts as active,
+// oldest-use first. Bookkeeping only (see touchActiveSession above) — never
+// gates a turn, never touches the persisted conversation.
+let activeSessionIds: string[] = [];
+
+/** Repos whose session counts as active right now, oldest-use first. */
+export function activeSessionRepoIds(): string[] {
+  return [...activeSessionIds];
+}
+
+/** Test-only reset: production never needs to clear this between runs. */
+export function resetActiveSessionsForTests(): void {
+  activeSessionIds = [];
 }
 
 export function startChatTurn(

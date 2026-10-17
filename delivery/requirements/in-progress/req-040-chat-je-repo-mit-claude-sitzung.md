@@ -55,9 +55,9 @@ den Chat, und der Chat wartet nie auf ihn.
       Chat-Knopf einen Hinweispunkt.
 - [x] Given der Hinweispunkt ist zu sehen, when ich das Repo mit der
       fertigen Antwort öffne, then ist der Punkt verschwunden.
-- [ ] Given in fünf Repos laufen Sitzungen, when ich in einem sechsten
+- [x] Given in fünf Repos laufen Sitzungen, when ich in einem sechsten
       Repo schreibe, then bekomme ich dort eine Antwort.
-- [ ] Given die Sitzung des am längsten unbenutzten Repos wurde dafür
+- [x] Given die Sitzung des am längsten unbenutzten Repos wurde dafür
       beendet, when ich dieses Repo öffne, then ist sein Gespräch
       vollständig lesbar.
 - [ ] Given ich habe acht Stunden nichts geschrieben, when ich den Chat

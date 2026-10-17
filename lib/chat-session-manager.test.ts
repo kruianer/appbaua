@@ -1,8 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import {
   sendChatMessage,
   startChatTurn,
   isChatTurnRunning,
+  activeSessionRepoIds,
+  resetActiveSessionsForTests,
   NO_TOKEN_MESSAGE,
 } from "./chat-session-manager";
 import { createMemoryChatSessionStore } from "./chat-session-store";
@@ -28,6 +30,10 @@ const repo: Repo = {
   model: "sonnet",
   monitored: false,
 };
+
+beforeEach(() => {
+  resetActiveSessionsForTests();
+});
 
 describe("sendChatMessage (req-040)", () => {
   it("AC4: Claudes Antwort steht danach im Gespräch", async () => {
@@ -174,6 +180,46 @@ describe("Hinweispunkt (req-040 AC8/AC9)", () => {
       getActiveRepoId: async () => null,
     });
     expect((await store.getSession(repo.id))?.unread).toBe(true);
+  });
+});
+
+describe("Fünf-Sitzungen-Grenze (req-040 AC10/AC11)", () => {
+  const baseDeps = {
+    store: createMemoryChatSessionStore(),
+    token: "tok",
+    prepareRepo: async (r: Repo) => ({ dir: `/chat/${r.id}`, branch: "dev" }),
+    runClaude: async () => ({ ok: true, summary: "ok", report: "Antwort" }),
+    now: () => new Date(),
+    getActiveRepoId: async () => null,
+  };
+  const repoOf = (id: string): Repo => ({ ...repo, id, name: id, url: `github.com/k/${id}` });
+
+  it("AC10: eine sechste Sitzung verdrängt die am längsten unbenutzte", async () => {
+    for (const id of ["r1", "r2", "r3", "r4", "r5"]) {
+      await sendChatMessage(repoOf(id), "Hallo", { ...baseDeps, store: createMemoryChatSessionStore() });
+    }
+    expect(activeSessionRepoIds()).toEqual(["r1", "r2", "r3", "r4", "r5"]);
+
+    await sendChatMessage(repoOf("r6"), "Hallo", { ...baseDeps, store: createMemoryChatSessionStore() });
+    const active = activeSessionRepoIds();
+    expect(active).toHaveLength(5);
+    expect(active).not.toContain("r1"); // am längsten unbenutzt
+    expect(active).toContain("r6");
+  });
+
+  it("AC11: das Gespräch des verdrängten Repos bleibt vollständig lesbar", async () => {
+    const store = createMemoryChatSessionStore();
+    for (const id of ["r1", "r2", "r3", "r4", "r5"]) {
+      await sendChatMessage(repoOf(id), `Hallo von ${id}`, { ...baseDeps, store });
+    }
+    await sendChatMessage(repoOf("r6"), "Hallo von r6", { ...baseDeps, store });
+
+    expect(activeSessionRepoIds()).not.toContain("r1");
+    const r1Messages = await store.listMessages("r1");
+    expect(r1Messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "Hallo von r1"],
+      ["assistant", "Antwort"],
+    ]);
   });
 });
 
