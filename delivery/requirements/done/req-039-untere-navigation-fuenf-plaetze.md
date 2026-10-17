@@ -34,26 +34,26 @@ Erreichbarkeit ändert sich. Aktivität bleibt die Startansicht.
 
 # Acceptance Criteria
 
-- [ ] Given ich öffne die App, when ich die untere Leiste ansehe, then
+- [x] Given ich öffne die App, when ich die untere Leiste ansehe, then
       sehe ich genau fünf Plätze.
-- [ ] Given ich öffne die App, when ich die untere Leiste von links nach
+- [x] Given ich öffne die App, when ich die untere Leiste von links nach
       rechts lese, then lauten die Beschriftungen "Aktivität",
       "Verlauf", "Chat", "Repos", "Mehr".
-- [ ] Given ich öffne die App, when ich die untere Leiste ansehe, then
+- [x] Given ich öffne die App, when ich die untere Leiste ansehe, then
       ist das Chat-Symbol von einem Kreis umrandet.
-- [ ] Given ich öffne die App, when ich das Chat-Symbol mit den anderen
+- [x] Given ich öffne die App, when ich das Chat-Symbol mit den anderen
       vergleiche, then ist es sichtbar größer als diese.
-- [ ] Given ich bin in einem beliebigen Menüpunkt, when ich auf "Mehr"
+- [x] Given ich bin in einem beliebigen Menüpunkt, when ich auf "Mehr"
       tippe, then erscheint eine Liste mit genau drei Einträgen:
       "Zustand", "Tasks", "Einstellungen".
-- [ ] Given die "Mehr"-Liste ist offen, when ich auf "Zustand" tippe,
+- [x] Given die "Mehr"-Liste ist offen, when ich auf "Zustand" tippe,
       then sehe ich die Zustandsübersicht und die Liste ist geschlossen.
-- [ ] Given die "Mehr"-Liste ist offen, when ich daneben tippe, then
+- [x] Given die "Mehr"-Liste ist offen, when ich daneben tippe, then
       ist die Liste geschlossen und der Menüpunkt hat sich nicht
       geändert.
-- [ ] Given ich öffne die App neu, when die Startansicht erscheint,
+- [x] Given ich öffne die App neu, when die Startansicht erscheint,
       then ist der Menüpunkt "Aktivität" aktiv.
-- [ ] Given ich bin im Menüpunkt "Zustand" (über "Mehr" erreicht), when
+- [x] Given ich bin im Menüpunkt "Zustand" (über "Mehr" erreicht), when
       ich die untere Leiste ansehe, then erscheint "Zustand" NICHT als
       sechster Platz in der Leiste.
 

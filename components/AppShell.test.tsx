@@ -161,27 +161,128 @@ function renderShell() {
   );
 }
 
-describe("AppShell navigation (req-007)", () => {
-  // req-032 hat "Zustand" hinter "Aktivität" ergänzt: beide beantworten
-  // "läuft alles?", die erste über den Worker, die zweite über die
-  // überwachten Apps.
-  it("AC: the bottom navigation has six entries in order", async () => {
+// req-039: die Leiste aus req-007 (sechs gleich aussehende Plätze) ist
+// ersetzt durch fünf Plätze mit Chat in der Mitte und "Mehr" für die drei
+// ausgelagerten Menüpunkte.
+async function openMore(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Mehr" }));
+}
+
+async function gotoViaMore(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+) {
+  await openMore(user);
+  await user.click(screen.getByRole("menuitem", { name: label }));
+}
+
+describe("Untere Navigation — fünf Plätze (req-039)", () => {
+  it("AC: die untere Leiste hat genau fünf Plätze", async () => {
     renderShell();
     await screen.findByText("Leerlauf — nichts zu tun"); // dashboard settled
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(5);
+  });
+
+  it("AC: die Beschriftungen lauten von links nach rechts Aktivität, Verlauf, Chat, Repos, Mehr", async () => {
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
     const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
     const labels = within(nav)
       .getAllByRole("button")
       .map((b) => b.textContent);
-    expect(labels).toEqual([
-      "Aktivität",
-      "Zustand",
-      "Verlauf",
-      "Repos",
-      "Tasks",
-      "Einstellungen",
-    ]);
+    expect(labels).toEqual(["Aktivität", "Verlauf", "Chat", "Repos", "Mehr"]);
   });
 
+  it("AC: das Chat-Symbol ist von einem Kreis umrandet und größer als die anderen", async () => {
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const chatButton = screen.getByRole("button", { name: "Chat" });
+    const circle = chatButton.querySelector<HTMLElement>("div")!;
+    const circleStyle = circle.getAttribute("style") ?? "";
+    expect(circleStyle).toContain("border-radius: 999px");
+    expect(circleStyle).toMatch(/border:\s*2px solid/);
+
+    const chatSvg = circle.querySelector("svg")!;
+    const otherSvg = screen
+      .getByRole("button", { name: "Repos" })
+      .querySelector("svg")!;
+    expect(Number(chatSvg.getAttribute("width"))).toBeGreaterThan(
+      Number(otherSvg.getAttribute("width")),
+    );
+  });
+
+  it('AC: "Mehr" öffnet eine Liste mit genau drei Einträgen', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await openMore(user);
+
+    const menu = screen.getByRole("menu", { name: "Mehr" });
+    const items = within(menu)
+      .getAllByRole("menuitem")
+      .map((b) => b.textContent);
+    expect(items).toEqual(["Zustand", "Tasks", "Einstellungen"]);
+  });
+
+  it('AC: ein Tipp auf "Zustand" in der Liste zeigt die Zustandsübersicht und schließt die Liste', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await gotoViaMore(user, "Zustand");
+
+    expect(screen.getByRole("heading", { name: "Zustand" })).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("AC: ein Tipp daneben schließt die Liste, ohne den Menüpunkt zu ändern", async () => {
+    const user = userEvent.setup();
+    const { container } = renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await openMore(user);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    // Außerhalb der Liste tippen — direkt auf den Überlay-Hintergrund.
+    fireEvent.click(container.querySelector("[data-more-backdrop]")!);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Aktivität" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC: beim Neuöffnen ist der Menüpunkt Aktivität aktiv", async () => {
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    expect(
+      screen.getByRole("heading", { name: "Aktivität" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Aktivität" }).getAttribute("style"),
+    ).toContain("var(--color-accent)");
+  });
+
+  it("AC: Zustand erscheint nicht als sechster Platz in der Leiste", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await gotoViaMore(user, "Zustand");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(5);
+    expect(
+      within(nav).queryByRole("button", { name: "Zustand" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+describe("AppShell navigation (req-007 → req-039)", () => {
   it("AC: clearing the log empties the Verlauf tab, repos and tasks survive", async () => {
     const user = userEvent.setup();
     renderShell();
@@ -190,8 +291,8 @@ describe("AppShell navigation (req-007)", () => {
     await user.click(screen.getByRole("button", { name: "Verlauf" }));
     expect(await screen.findByText("Bugs × appbaua")).toBeInTheDocument();
 
-    // Delete it from the Einstellungen tab.
-    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+    // Delete it from the Einstellungen tab (reached via "Mehr").
+    await gotoViaMore(user, "Einstellungen");
     expect(
       await screen.findByText("Aktuell 1 Eintrag im Verlauf"),
     ).toBeInTheDocument();
@@ -213,7 +314,7 @@ describe("AppShell navigation (req-007)", () => {
     expect(
       screen.getByText("github.com/kruianer/appbaua"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
     expect(screen.getByText("Requirements")).toBeInTheDocument();
   });
 });
@@ -223,7 +324,7 @@ describe("Einstellungen — System-Kacheln (req-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+    await gotoViaMore(user, "Einstellungen");
 
     expect(await screen.findByText("System")).toBeInTheDocument();
     expect(screen.getByText("Freier Speicherplatz")).toBeInTheDocument();
@@ -238,7 +339,7 @@ describe("Einstellungen — System-Kacheln (req-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+    await gotoViaMore(user, "Einstellungen");
     expect(await screen.findByText("37 %")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Aktivität" }));
@@ -311,7 +412,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
     const toggle = await screen.findByRole("switch", {
       name: "Code-Review aktiv/inaktiv",
     });
@@ -326,7 +427,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
 
     // Weg vom Tab (TaskControl hängt aus) und zurück (TaskControl mountet neu).
     await user.click(screen.getByRole("button", { name: "Aktivität" }));
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
 
     expect(
       await screen.findByRole("switch", { name: "Code-Review aktiv/inaktiv" }),
@@ -337,7 +438,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
     const worker = await screen.findByRole("switch", {
       name: "Worker an/aus",
     });
@@ -351,7 +452,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Repos" }));
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
 
     expect(
       await screen.findByRole("switch", { name: "Worker an/aus" }),

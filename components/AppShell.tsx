@@ -27,29 +27,31 @@ type Tab =
   | "aktiv"
   | "zustand"
   | "verlauf"
+  | "chat"
   | "repos"
   | "settings"
   | "einstellungen";
 
-// Aktivität is the start view and the first nav entry (req-005).
-// Order: Aktivität, Zustand, Verlauf, Repos, Tasks, Einstellungen (req-007,
-// req-032). Zustand sits right behind Aktivität: both answer "läuft alles?",
-// the first about the worker, the second about the watched apps.
-// The "settings" key is the Tasks tab (historical); "einstellungen" is the
-// Einstellungsseite and owns the cog icon, so Tasks shows a list icon.
-const TABS: { key: Tab; label: string; icon: IconName }[] = [
-  { key: "aktiv", label: "Aktivität", icon: "activity" },
+// req-039: fünf Plätze in der unteren Leiste — Aktivität, Verlauf, Chat,
+// Repos, Mehr. Chat sitzt in der Mitte, abgesetzt (Kreis, größeres Symbol).
+// "Mehr" ist kein eigener Tab, sondern öffnet die Liste MORE_ITEMS mit den
+// drei ausgelagerten Menüpunkten. Aktivität bleibt die Startansicht.
+
+// Die drei Menüpunkte, die seit req-039 keinen eigenen Platz mehr haben und
+// nur noch über "Mehr" erreichbar sind. Der "settings"-Key bezeichnet
+// historisch den Tasks-Tab; "einstellungen" ist die Einstellungsseite.
+const MORE_ITEMS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "zustand", label: "Zustand", icon: "heart" },
-  { key: "verlauf", label: "Verlauf", icon: "clock" },
-  { key: "repos", label: "Repos", icon: "gitbranch" },
   { key: "settings", label: "Tasks", icon: "list" },
   { key: "einstellungen", label: "Einstellungen", icon: "settings" },
 ];
+const MORE_KEYS: Tab[] = MORE_ITEMS.map((i) => i.key);
 
 const MODULE_TITLE: Record<Tab, string> = {
   aktiv: "Aktivität",
   zustand: "Zustand",
   verlauf: "Verlauf",
+  chat: "Chat",
   repos: "Repo-Verwaltung",
   settings: "Task-Steuerung",
   einstellungen: "Einstellungen",
@@ -57,6 +59,25 @@ const MODULE_TITLE: Record<Tab, string> = {
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
+
+const navButtonStyle = (active: boolean): CSSProperties => ({
+  flex: 1,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 4,
+  background: "transparent",
+  border: "none",
+  cursor: "pointer",
+  padding: "4px 0",
+  color: active ? "var(--color-accent)" : muted(48),
+});
+
+const navLabelStyle: CSSProperties = {
+  fontSize: 10,
+  letterSpacing: ".01em",
+  whiteSpace: "nowrap",
+};
 
 export function AppShell({
   initialRepos,
@@ -76,6 +97,8 @@ export function AppShell({
     initialWorkerEnabled,
   );
   const [tab, setTab] = useState<Tab>("aktiv");
+  // req-039: ob die "Mehr"-Liste (Zustand, Tasks, Einstellungen) offen ist.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -432,6 +455,10 @@ export function AppShell({
         <WorkerDashboard />
       ) : tab === "zustand" ? (
         <HealthOverview />
+      ) : tab === "chat" ? (
+        // req-039 bringt nur den Platz in der Leiste; der Inhalt folgt mit
+        // req-040.
+        <div style={{ flex: 1 }} />
       ) : tab === "repos" ? (
         <>
           {/* List / empty state (Repo-Verwaltung only, no dashboard) */}
@@ -798,7 +825,8 @@ export function AppShell({
         <RunLog />
       )}
 
-      {/* Bottom tab bar */}
+      {/* Bottom tab bar — five places (req-039): Aktivität, Verlauf, Chat,
+          Repos, Mehr. */}
       <nav
         aria-label="Hauptnavigation"
         style={{
@@ -821,38 +849,121 @@ export function AppShell({
               "linear-gradient(to right, transparent, var(--color-divider) 48px, var(--color-divider) calc(100% - 48px), transparent)",
           }}
         />
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            aria-label={t.label}
-            onClick={() => setTab(t.key)}
+        <button
+          aria-label="Aktivität"
+          onClick={() => setTab("aktiv")}
+          style={navButtonStyle(tab === "aktiv")}
+        >
+          <Icon name="activity" size={23} />
+          <span style={navLabelStyle}>Aktivität</span>
+        </button>
+        <button
+          aria-label="Verlauf"
+          onClick={() => setTab("verlauf")}
+          style={navButtonStyle(tab === "verlauf")}
+        >
+          <Icon name="clock" size={23} />
+          <span style={navLabelStyle}>Verlauf</span>
+        </button>
+        {/* Chat sitzt in der Mitte, abgesetzt: Symbol im Kreis und größer
+            als die übrigen (req-039). Der Inhalt folgt mit req-040. */}
+        <button
+          aria-label="Chat"
+          onClick={() => setTab("chat")}
+          style={navButtonStyle(tab === "chat")}
+        >
+          <div
             style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 4,
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px 0",
-              color:
-                tab === t.key ? "var(--color-accent)" : muted(48),
+              width: 42,
+              height: 42,
+              marginTop: -10,
+              display: "grid",
+              placeItems: "center",
+              borderRadius: 999,
+              border: `2px solid ${
+                tab === "chat" ? "var(--color-accent)" : muted(48)
+              }`,
+              background: "var(--color-bg)",
             }}
           >
-            <Icon name={t.icon} size={23} />
-            <span
-              style={{
-                fontSize: 10,
-                letterSpacing: ".01em",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {t.label}
-            </span>
-          </button>
-        ))}
+            <Icon name="chat" size={24} />
+          </div>
+          <span style={navLabelStyle}>Chat</span>
+        </button>
+        <button
+          aria-label="Repos"
+          onClick={() => setTab("repos")}
+          style={navButtonStyle(tab === "repos")}
+        >
+          <Icon name="gitbranch" size={23} />
+          <span style={navLabelStyle}>Repos</span>
+        </button>
+        <button
+          aria-label="Mehr"
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((o) => !o)}
+          style={navButtonStyle(MORE_KEYS.includes(tab))}
+        >
+          <Icon name="more" size={23} />
+          <span style={navLabelStyle}>Mehr</span>
+        </button>
       </nav>
+
+      {/* "Mehr"-Liste (req-039): Zustand, Tasks, Einstellungen. Ein Tipp
+          daneben schließt sie, ohne den Menüpunkt zu ändern. */}
+      {moreOpen && (
+        <div
+          data-more-backdrop
+          onClick={() => setMoreOpen(false)}
+          style={{ position: "absolute", inset: 0, zIndex: 30 }}
+        >
+          <div
+            role="menu"
+            aria-label="Mehr"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute",
+              right: 12,
+              bottom: 78,
+              minWidth: 180,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              padding: "var(--space-2)",
+              background: "var(--color-surface)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            {MORE_ITEMS.map((item) => (
+              <button
+                key={item.key}
+                role="menuitem"
+                onClick={() => {
+                  setTab(item.key);
+                  setMoreOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 10px",
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: "var(--radius-sm, 6px)",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  color: "var(--color-text)",
+                }}
+              >
+                <Icon name={item.icon} size={18} />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Add sheet */}
       {sheetOpen && (
