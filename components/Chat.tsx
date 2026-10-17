@@ -24,7 +24,11 @@ const ROLE_LABEL: Record<ChatMessage["role"], string> = {
 /** Wie oft nachgefragt wird, solange eine Antwort für das offene Repo noch läuft. */
 export const POLL_MS = 1500;
 
-export function Chat({ repos }: { repos: Repo[] }) {
+// req-041 AC11-13: ab 744px zweispaltig — links die Repo-Liste (ständig
+// sichtbar statt der Auswahl von req-040), rechts das Gespräch, mit einer
+// lesbaren Höchstbreite statt voll ausgezogenem Text. Am iPhone (split=false,
+// Default) unverändert gegenüber req-040.
+export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean }) {
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [draft, setDraft] = useState("");
   const [messagesByRepo, setMessagesByRepo] = useState<Record<string, ChatMessage[]>>({});
@@ -136,6 +140,195 @@ export function Chat({ repos }: { repos: Repo[] }) {
     }
   };
 
+  const activeRepo = repos.find((r) => r.id === repoId) ?? null;
+
+  // req-041 AC13: im Split lesbar schmal statt voll ausgezogen — ab etwa
+  // 90 Zeichen je Zeile wird Lesen mühsam, darum eine Höchstbreite statt der
+  // vollen Spaltenbreite.
+  const messagesList = (
+    <div
+      data-chat-messages
+      style={{
+        flex: 1,
+        overflowY: "auto",
+        padding: split ? 16 : "0 20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--space-2)",
+        ...(split ? { maxWidth: 760, width: "100%", alignSelf: "center" } : {}),
+      }}
+    >
+      {messages.map((m) => (
+        <div
+          key={m.id}
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+            alignSelf: m.role === "user" ? "flex-end" : "stretch",
+            maxWidth: "88%",
+          }}
+        >
+          <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
+          <div
+            style={{
+              padding: "8px 10px",
+              borderRadius: "var(--radius-md)",
+              background:
+                m.role === "user"
+                  ? "var(--color-accent)"
+                  : m.role === "system"
+                    ? "color-mix(in srgb, var(--color-accent) 14%, transparent)"
+                    : "var(--color-surface)",
+              color: m.role === "user" ? "var(--color-bg)" : "var(--color-text)",
+              fontSize: 14,
+              lineHeight: 1.4,
+              whiteSpace: "pre-wrap",
+            }}
+          >
+            {m.content}
+          </div>
+        </div>
+      ))}
+      {sending && (
+        <div style={{ fontSize: 12, color: muted(55) }}>Claude schreibt …</div>
+      )}
+    </div>
+  );
+
+  const composer = (
+    <div
+      style={{
+        display: "flex",
+        gap: "var(--space-2)",
+        padding: split ? "12px 16px 14px" : "10px 20px 14px",
+        flexShrink: 0,
+        borderTop: split ? "1px solid var(--color-divider)" : undefined,
+      }}
+    >
+      <textarea
+        aria-label="Nachricht"
+        className="input"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Nachricht an Claude…"
+        rows={1}
+        style={{ flex: 1, resize: "none" }}
+      />
+      <button
+        className="btn btn-primary"
+        aria-label="Senden"
+        onClick={send}
+        disabled={!draft.trim() || !repoId || sending}
+      >
+        {sending ? "…" : "Senden"}
+      </button>
+    </div>
+  );
+
+  if (split) {
+    // req-041 AC11/AC12: die Repo-Auswahl aus req-040 wird zur ständig
+    // sichtbaren linken Spalte; ein Klick dort wechselt die rechte Spalte.
+    return (
+      <div
+        style={{
+          display: "flex",
+          flex: 1,
+          minHeight: 0,
+          borderTop: "1px solid var(--color-divider)",
+        }}
+      >
+        <div
+          style={{
+            flex: "none",
+            width: 300,
+            minWidth: 0,
+            borderRight: "1px solid var(--color-divider)",
+            overflowY: "auto",
+            padding: 12,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              textTransform: "uppercase",
+              letterSpacing: ".12em",
+              margin: "2px 4px 8px",
+              color: muted(45),
+            }}
+          >
+            Repos
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {repos.map((r) => (
+              <button
+                key={r.id}
+                onClick={() => selectRepo(r.id)}
+                aria-current={r.id === repoId}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  padding: "9px 10px",
+                  borderRadius: "var(--radius-md)",
+                  cursor: "pointer",
+                  border: "1px solid transparent",
+                  borderColor: r.id === repoId ? "var(--color-accent)" : "transparent",
+                  background:
+                    r.id === repoId
+                      ? "color-mix(in srgb, var(--color-accent) 12%, transparent)"
+                      : "transparent",
+                  textAlign: "left",
+                  font: "inherit",
+                  fontSize: 13.5,
+                  color: r.active ? "var(--color-text)" : muted(40),
+                }}
+              >
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {r.name}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "10px 16px",
+              borderBottom: "1px solid var(--color-divider)",
+            }}
+          >
+            <span data-chat-active-repo style={{ fontSize: 14, fontWeight: 600 }}>
+              {activeRepo?.name ?? ""}
+            </span>
+          </div>
+          {messagesList}
+          {composer}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -159,79 +352,8 @@ export function Chat({ repos }: { repos: Repo[] }) {
           ))}
         </select>
       </div>
-      <div
-        data-chat-messages
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "0 20px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-2)",
-        }}
-      >
-        {messages.map((m) => (
-          <div
-            key={m.id}
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
-              alignSelf: m.role === "user" ? "flex-end" : "stretch",
-              maxWidth: "88%",
-            }}
-          >
-            <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
-            <div
-              style={{
-                padding: "8px 10px",
-                borderRadius: "var(--radius-md)",
-                background:
-                  m.role === "user"
-                    ? "var(--color-accent)"
-                    : m.role === "system"
-                      ? "color-mix(in srgb, var(--color-accent) 14%, transparent)"
-                      : "var(--color-surface)",
-                color: m.role === "user" ? "var(--color-bg)" : "var(--color-text)",
-                fontSize: 14,
-                lineHeight: 1.4,
-                whiteSpace: "pre-wrap",
-              }}
-            >
-              {m.content}
-            </div>
-          </div>
-        ))}
-        {sending && (
-          <div style={{ fontSize: 12, color: muted(55) }}>Claude schreibt …</div>
-        )}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          gap: "var(--space-2)",
-          padding: "10px 20px 14px",
-          flexShrink: 0,
-        }}
-      >
-        <textarea
-          aria-label="Nachricht"
-          className="input"
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          placeholder="Nachricht an Claude…"
-          rows={1}
-          style={{ flex: 1, resize: "none" }}
-        />
-        <button
-          className="btn btn-primary"
-          aria-label="Senden"
-          onClick={send}
-          disabled={!draft.trim() || !repoId || sending}
-        >
-          {sending ? "…" : "Senden"}
-        </button>
-      </div>
+      {messagesList}
+      {composer}
     </div>
   );
 }

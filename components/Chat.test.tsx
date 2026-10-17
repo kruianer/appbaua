@@ -192,3 +192,49 @@ describe("Chat (req-040)", () => {
     expect(screen.queryByText("Claude schreibt …")).not.toBeInTheDocument();
   });
 });
+
+// req-041 AC11-13: ab 744px wird die Repo-Auswahl zur ständig sichtbaren
+// linken Spalte, rechts steht das Gespräch — über die Prop `split`, die
+// AppShell ab dieser Breite setzt.
+describe("Chat zweispaltig (req-041 AC11-13)", () => {
+  it("AC11: links steht eine Liste aller Repos, rechts das Gespräch des gewählten Repos", async () => {
+    render(<Chat repos={repos} split />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+
+    expect(screen.queryByRole("combobox", { name: "Repo" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Wellarita" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "CellarVoice" })).toBeInTheDocument();
+    // Wellarita ist vorausgewählt (erstes Repo ohne gespeicherte Sitzung).
+    expect(document.querySelector("[data-chat-active-repo]")).toHaveTextContent(
+      "Wellarita",
+    );
+  });
+
+  it("AC12: ein Klick auf Wellarita in der Liste zeigt rechts das Gespräch von Wellarita", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} split />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+
+    await user.click(screen.getByRole("button", { name: "CellarVoice" }));
+    await waitFor(() =>
+      expect(document.querySelector("[data-chat-active-repo]")).toHaveTextContent(
+        "CellarVoice",
+      ),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Wellarita" }));
+    await waitFor(() =>
+      expect(document.querySelector("[data-chat-active-repo]")).toHaveTextContent(
+        "Wellarita",
+      ),
+    );
+  });
+
+  it("AC13: das Gespräch bleibt lesbar schmal statt über die volle Breite gezogen", async () => {
+    render(<Chat repos={repos} split />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+
+    const messages = document.querySelector("[data-chat-messages]") as HTMLElement;
+    expect(messages.style.maxWidth).toBe("760px");
+  });
+});

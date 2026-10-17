@@ -465,7 +465,7 @@ export function AppShell({
       ) : tab === "zustand" ? (
         <HealthOverview />
       ) : tab === "chat" ? (
-        <Chat repos={repos} />
+        <Chat repos={repos} split={!isPhone} />
       ) : tab === "repos" ? (
         <>
           {/* List / empty state (Repo-Verwaltung only, no dashboard) */}

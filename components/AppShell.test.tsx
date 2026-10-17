@@ -477,6 +477,23 @@ describe("Seitenleiste — Anfangszustand und Persistenz (req-041)", () => {
   });
 });
 
+// req-041: AppShell reicht die Fensterbreite an Chat weiter (split-Prop) —
+// Chat.test.tsx prüft das Verhalten selbst im Detail (AC11-13).
+describe("Chat zweispaltig über AppShell (req-041)", () => {
+  it("AC: bei 1280px zeigt der Chat-Tab die Repo-Liste statt der Dropdown-Auswahl", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(within(nav).getByRole("button", { name: "Chat" }));
+
+    expect(screen.queryByRole("combobox", { name: "Repo" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "beta" })).toBeInTheDocument();
+  });
+});
+
 describe("Hinweispunkt auf dem Chat-Knopf (req-040 AC8/AC9)", () => {
   it("AC8: trägt einen Hinweispunkt, wenn ein Repo eine ungesehene Antwort hat", async () => {
     chatUnreadRepoIds = ["r2"];

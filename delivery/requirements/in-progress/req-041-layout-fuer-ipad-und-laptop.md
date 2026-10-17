@@ -69,13 +69,13 @@ sichtbaren Liste.
       eingeklappt.
 - [x] Given ich habe die Seitenleiste eingeklappt, when ich die App
       schließe und neu öffne, then ist sie weiterhin eingeklappt.
-- [ ] Given ich bin im Chat in einem 1280px breiten Fenster, when die
+- [x] Given ich bin im Chat in einem 1280px breiten Fenster, when die
       Ansicht erscheint, then steht links eine Liste aller Repos und
       rechts das Gespräch des gewählten Repos.
-- [ ] Given ich bin im Chat in einem 1280px breiten Fenster, when ich
+- [x] Given ich bin im Chat in einem 1280px breiten Fenster, when ich
       links auf "Wellarita" tippe, then zeigt die rechte Spalte das
       Gespräch von Wellarita.
-- [ ] Given ich bin im Chat in einem 1280px breiten Fenster, when ich
+- [x] Given ich bin im Chat in einem 1280px breiten Fenster, when ich
       eine lange Antwort lese, then reicht keine Textzeile über die
       volle Fensterbreite.
 - [ ] Given ich ziehe das Fenster von 1280px auf 390px schmal, when ich
