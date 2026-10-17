@@ -7,7 +7,7 @@ import {
 import { getChatUiStateStore } from "./chat-store";
 import { prepareChatRepo } from "./chat-workspace";
 import { type ClaudeOutcome, runClaude } from "./claude-runner";
-import { touchActiveSession } from "./chat-session-lru";
+import { touchActiveSession, pruneIdleSessions } from "./chat-session-lru";
 
 // Orchestrates one chat turn (req-040): append the user's message, make sure
 // the repo has a working copy of its OWN (chat-workspace.ts, AC15), run
@@ -50,12 +50,18 @@ export async function sendChatMessage(
   const getActiveRepoId =
     deps.getActiveRepoId ?? (() => getChatUiStateStore().getActiveRepoId());
 
-  // req-040 AC10/AC11: höchstens fünf Sitzungen gleichzeitig; eine sechste
-  // verdrängt die am längsten unbenutzte. "Verdrängt" betrifft nur dieses
-  // In-Memory-Set — das Gespräch liegt im Store und bleibt davon unberührt,
-  // also auch nach einer Verdrängung vollständig lesbar.
+  // req-040 AC10/AC11/AC12: höchstens fünf Sitzungen gleichzeitig; eine
+  // sechste verdrängt die am längsten unbenutzte, und eine Sitzung ohne
+  // Eingabe acht Stunden lang endet von selbst (erst geprüft, dann erst
+  // angetippt — sonst würde eine abgelaufene Sitzung fälschlich noch Platz
+  // wegnehmen). Beides betrifft nur dieses In-Memory-Set — das Gespräch
+  // liegt im Store und bleibt davon unberührt, bleibt also auch nach einer
+  // Verdrängung oder einem Leerlaufende vollständig lesbar und beschreibbar.
+  const nowMs = now().getTime();
+  activeSessionIds = pruneIdleSessions(activeSessionIds, lastActiveAtMs, nowMs);
   const touched = touchActiveSession(activeSessionIds, repo.id);
   activeSessionIds = touched.active;
+  lastActiveAtMs[repo.id] = nowMs;
 
   await store.appendMessage({
     repoId: repo.id,
@@ -136,6 +142,8 @@ export function isChatTurnRunning(repoId: string): boolean {
 // oldest-use first. Bookkeeping only (see touchActiveSession above) — never
 // gates a turn, never touches the persisted conversation.
 let activeSessionIds: string[] = [];
+/** When each repo's session was last touched (epoch ms) — AC12's 8h clock. */
+let lastActiveAtMs: Record<string, number> = {};
 
 /** Repos whose session counts as active right now, oldest-use first. */
 export function activeSessionRepoIds(): string[] {
@@ -145,6 +153,7 @@ export function activeSessionRepoIds(): string[] {
 /** Test-only reset: production never needs to clear this between runs. */
 export function resetActiveSessionsForTests(): void {
   activeSessionIds = [];
+  lastActiveAtMs = {};
 }
 
 export function startChatTurn(

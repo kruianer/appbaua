@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { touchActiveSession, MAX_ACTIVE_SESSIONS } from "./chat-session-lru";
+import {
+  touchActiveSession,
+  pruneIdleSessions,
+  MAX_ACTIVE_SESSIONS,
+  SESSION_IDLE_MS,
+} from "./chat-session-lru";
 
 // req-040 AC10/AC11: höchstens fünf gleichzeitige Sitzungen; die am
 // längsten unbenutzte wird für eine sechste verdrängt.
@@ -31,5 +36,26 @@ describe("touchActiveSession", () => {
     const five = ["a", "b", "c", "d", "e"];
     const { evicted } = touchActiveSession(five, "f");
     expect(evicted).not.toBe("f");
+  });
+});
+
+// req-040 AC12: eine Sitzung ohne Eingabe acht Stunden lang wird beendet.
+describe("pruneIdleSessions", () => {
+  it("lässt eine Sitzung innerhalb der acht Stunden unberührt", () => {
+    const lastActiveAtMs = { a: 1000 };
+    const result = pruneIdleSessions(["a"], lastActiveAtMs, 1000 + SESSION_IDLE_MS);
+    expect(result).toEqual(["a"]);
+  });
+
+  it("entfernt eine Sitzung, die länger als acht Stunden nicht benutzt wurde", () => {
+    const lastActiveAtMs = { a: 1000 };
+    const result = pruneIdleSessions(["a"], lastActiveAtMs, 1000 + SESSION_IDLE_MS + 1);
+    expect(result).toEqual([]);
+  });
+
+  it("betrifft nur die abgelaufene Sitzung, andere bleiben aktiv", () => {
+    const lastActiveAtMs = { a: 0, b: 1000 };
+    const result = pruneIdleSessions(["a", "b"], lastActiveAtMs, 1000 + SESSION_IDLE_MS);
+    expect(result).toEqual(["b"]);
   });
 });

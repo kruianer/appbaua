@@ -31,6 +31,8 @@ const repo: Repo = {
   monitored: false,
 };
 
+const repoOf = (id: string): Repo => ({ ...repo, id, name: id, url: `github.com/k/${id}` });
+
 beforeEach(() => {
   resetActiveSessionsForTests();
 });
@@ -192,7 +194,6 @@ describe("Fünf-Sitzungen-Grenze (req-040 AC10/AC11)", () => {
     now: () => new Date(),
     getActiveRepoId: async () => null,
   };
-  const repoOf = (id: string): Repo => ({ ...repo, id, name: id, url: `github.com/k/${id}` });
 
   it("AC10: eine sechste Sitzung verdrängt die am längsten unbenutzte", async () => {
     for (const id of ["r1", "r2", "r3", "r4", "r5"]) {
@@ -219,6 +220,55 @@ describe("Fünf-Sitzungen-Grenze (req-040 AC10/AC11)", () => {
     expect(r1Messages.map((m) => [m.role, m.content])).toEqual([
       ["user", "Hallo von r1"],
       ["assistant", "Antwort"],
+    ]);
+  });
+});
+
+describe("Acht-Stunden-Leerlaufende (req-040 AC12)", () => {
+  it("eine acht Stunden unbenutzte Sitzung endet von selbst, ohne dass dafür fünf andere nötig wären", async () => {
+    const store = createMemoryChatSessionStore();
+    let clockMs = 0;
+    const deps = {
+      store,
+      token: "tok",
+      prepareRepo: async (r: Repo) => ({ dir: `/chat/${r.id}`, branch: "dev" }),
+      runClaude: async () => ({ ok: true, summary: "ok", report: "Antwort" }),
+      now: () => new Date(clockMs),
+      getActiveRepoId: async () => null,
+    };
+
+    await sendChatMessage(repo, "Hallo", deps);
+    expect(activeSessionRepoIds()).toEqual([repo.id]);
+
+    clockMs += 8 * 60 * 60_000 + 1; // acht Stunden und einen Moment später
+    await sendChatMessage(repoOf("r2"), "Hallo von r2", deps);
+
+    expect(activeSessionRepoIds()).not.toContain(repo.id);
+    expect(activeSessionRepoIds()).toContain("r2");
+  });
+
+  it("das Gespräch bleibt da, und ich kann nach acht Stunden weiterschreiben", async () => {
+    const store = createMemoryChatSessionStore();
+    let clockMs = 0;
+    const deps = {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({ ok: true, summary: "ok", report: "Antwort" }),
+      now: () => new Date(clockMs),
+      getActiveRepoId: async () => null,
+    };
+
+    await sendChatMessage(repo, "Erste Nachricht", deps);
+    clockMs += 8 * 60 * 60_000 + 1;
+    await sendChatMessage(repo, "Nach acht Stunden", deps);
+
+    const messages = await store.listMessages(repo.id);
+    expect(messages.map((m) => m.content)).toEqual([
+      "Erste Nachricht",
+      "Antwort",
+      "Nach acht Stunden",
+      "Antwort",
     ]);
   });
 });

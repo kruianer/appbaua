@@ -25,3 +25,21 @@ export function touchActiveSession(
   const [evicted, ...rest] = next;
   return { active: rest, evicted };
 }
+
+/**
+ * req-040 constraint: "Eine Sitzung ohne Eingabe wird nach acht Stunden
+ * beendet. Der Gesprächstext bleibt erhalten." Same split as the eviction
+ * above — only this in-memory active set loses the entry, never the
+ * persisted conversation.
+ */
+export const SESSION_IDLE_MS = 8 * 60 * 60_000;
+
+/** Drop every repo whose last use is older than `idleMs` (default: 8h). */
+export function pruneIdleSessions(
+  active: string[],
+  lastActiveAtMs: Record<string, number>,
+  nowMs: number,
+  idleMs: number = SESSION_IDLE_MS,
+): string[] {
+  return active.filter((id) => nowMs - (lastActiveAtMs[id] ?? 0) <= idleMs);
+}

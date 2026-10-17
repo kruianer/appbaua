@@ -60,7 +60,7 @@ den Chat, und der Chat wartet nie auf ihn.
 - [x] Given die Sitzung des am längsten unbenutzten Repos wurde dafür
       beendet, when ich dieses Repo öffne, then ist sein Gespräch
       vollständig lesbar.
-- [ ] Given ich habe acht Stunden nichts geschrieben, when ich den Chat
+- [x] Given ich habe acht Stunden nichts geschrieben, when ich den Chat
       eines Repos öffne, then ist das Gespräch noch da und ich kann
       weiterschreiben.
 - [ ] Given das Abo-Limit ist erreicht, when ich eine Nachricht
