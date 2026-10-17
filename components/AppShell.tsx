@@ -22,6 +22,7 @@ import { RunLog } from "./RunLog";
 import { Settings } from "./Settings";
 import { WorkerDashboard } from "./WorkerDashboard";
 import { HealthOverview } from "./HealthOverview";
+import { Chat } from "./Chat";
 
 type Tab =
   | "aktiv"
@@ -456,9 +457,7 @@ export function AppShell({
       ) : tab === "zustand" ? (
         <HealthOverview />
       ) : tab === "chat" ? (
-        // req-039 bringt nur den Platz in der Leiste; der Inhalt folgt mit
-        // req-040.
-        <div style={{ flex: 1 }} />
+        <Chat repos={repos} />
       ) : tab === "repos" ? (
         <>
           {/* List / empty state (Repo-Verwaltung only, no dashboard) */}

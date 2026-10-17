@@ -33,10 +33,10 @@ den Chat, und der Chat wartet nie auf ihn.
 
 # Acceptance Criteria
 
-- [ ] Given ich öffne den Chat zum ersten Mal, when die Ansicht
+- [x] Given ich öffne den Chat zum ersten Mal, when die Ansicht
       erscheint, then sehe ich eine Repo-Auswahl und ein leeres
       Eingabefeld.
-- [ ] Given ich öffne die Repo-Auswahl, when ich die Einträge lese, then
+- [x] Given ich öffne die Repo-Auswahl, when ich die Einträge lese, then
       stehen dort alle eingetragenen Repos, auch die inaktiven.
 - [ ] Given ich habe zuletzt mit "CellarVoice" gearbeitet, when ich den
       Chat erneut öffne, then ist "CellarVoice" vorausgewählt.
