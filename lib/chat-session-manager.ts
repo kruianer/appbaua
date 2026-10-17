@@ -106,3 +106,34 @@ export async function sendChatMessage(
     createdAt: now().toISOString(),
   });
 }
+
+// req-040 AC5/AC6: a repo's turn must keep running when the operator switches
+// to another repo, and the other repo must be writable right away — neither
+// may wait on the other. sendChatMessage above is a single awaitable turn;
+// startChatTurn below is what the API route calls instead of awaiting it
+// directly, so the HTTP request returns immediately while the turn (which can
+// run for up to CLAUDE_TIMEOUT_MS) keeps going server-side. `isChatTurnRunning`
+// lets a caller (tests, diagnostics) ask whether a given repo's turn is still
+// in flight.
+const runningTurns = new Map<string, Promise<void>>();
+
+export function isChatTurnRunning(repoId: string): boolean {
+  return runningTurns.has(repoId);
+}
+
+export function startChatTurn(
+  repo: Repo,
+  content: string,
+  deps: SendMessageDeps = {},
+): Promise<void> {
+  const turn = sendChatMessage(repo, content, deps).catch(() => {
+    // sendChatMessage already turns every failure it can anticipate into a
+    // chat message of its own; this is only the backstop against an
+    // unexpected throw taking the whole turn down as an unhandled rejection.
+  });
+  runningTurns.set(repo.id, turn);
+  void turn.finally(() => {
+    if (runningTurns.get(repo.id) === turn) runningTurns.delete(repo.id);
+  });
+  return turn;
+}

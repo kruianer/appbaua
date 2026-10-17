@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { listRepos } from "@/lib/repo-service";
 import { getChatSessionStore } from "@/lib/chat-session-store";
-import { sendChatMessage } from "@/lib/chat-session-manager";
+import { startChatTurn } from "@/lib/chat-session-manager";
 
 // req-040: das Gespräch eines Repos lesen (GET) bzw. eine Nachricht schicken
-// und auf Claudes Antwort warten (POST). Etappe 3: noch synchron — der
-// nächste Schritt (AC5/AC6) macht den Versand hintergrundfähig, damit ein
-// Repo-Wechsel nicht auf eine laufende Antwort eines anderen Repos wartet.
+// (POST). Der Versand selbst läuft im Hintergrund weiter (AC5/AC6): diese
+// Route wartet NICHT auf Claudes Antwort — ein Lauf kann bis zu
+// CLAUDE_TIMEOUT_MS dauern, und ein Repo-Wechsel darf nie auf einen anderen
+// Lauf warten müssen. Die Antwort holt die Ansicht über das nächste GET.
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ repoId: string }> },
@@ -31,7 +32,9 @@ export async function POST(
   if (!repo) {
     return NextResponse.json({ error: "unknown-repo" }, { status: 404 });
   }
-  await sendChatMessage(repo, content);
-  const messages = await getChatSessionStore().listMessages(repoId);
-  return NextResponse.json({ messages });
+  // Fire-and-forget: der Turn läuft serverseitig weiter, egal was der Client
+  // als Nächstes tut (AC5/AC6). Fehler daraus landen als Systemnachricht im
+  // Gespräch selbst (sendChatMessage), nie als unbehandelte Ablehnung hier.
+  void startChatTurn(repo, content);
+  return NextResponse.json({ ok: true });
 }

@@ -43,9 +43,9 @@ den Chat, und der Chat wartet nie auf ihn.
 - [x] Given ich schreibe "Welche Bugs liegen in ready?" im Repo
       "CellarVoice", when Claude antwortet, then steht die Antwort im
       Gespräch.
-- [ ] Given in "CellarVoice" läuft gerade eine Antwort, when ich auf
+- [x] Given in "CellarVoice" läuft gerade eine Antwort, when ich auf
       "Wellarita" umschalte, then kann ich dort sofort schreiben.
-- [ ] Given ich habe in "CellarVoice" eine Antwort abgewartet, when ich
+- [x] Given ich habe in "CellarVoice" eine Antwort abgewartet, when ich
       nach "Wellarita" und zurück schalte, then steht das CellarVoice-
       Gespräch unverändert da.
 - [x] Given ich habe die App geschlossen und öffne sie neu, when ich den

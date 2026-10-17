@@ -1,7 +1,19 @@
 import { describe, it, expect } from "vitest";
-import { sendChatMessage, NO_TOKEN_MESSAGE } from "./chat-session-manager";
+import {
+  sendChatMessage,
+  startChatTurn,
+  isChatTurnRunning,
+  NO_TOKEN_MESSAGE,
+} from "./chat-session-manager";
 import { createMemoryChatSessionStore } from "./chat-session-store";
 import type { Repo } from "./repos";
+
+/** A promise plus the functions that settle it, for controlling timing in tests. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
 
 // req-040 AC4: eine Nachricht bekommt Claudes Antwort im Gespräch. AC7
 // (persistiert "über einen Neustart") ist dieselbe Mechanik, bloß von einem
@@ -114,5 +126,77 @@ describe("sendChatMessage (req-040)", () => {
     expect(resumeSeen[0]).toBeUndefined();
     expect(resumeSeen[1]).toBe("sess-1");
     expect(sessionIdSeen[1]).toBeUndefined();
+  });
+});
+
+const wellarita: Repo = {
+  id: "r2",
+  name: "Wellarita",
+  url: "github.com/k/wellarita",
+  active: true,
+  model: "sonnet",
+  monitored: false,
+};
+
+describe("startChatTurn (req-040 AC5/AC6)", () => {
+  it("isChatTurnRunning ist wahr, solange der Lauf noch nicht fertig ist, danach falsch", async () => {
+    const store = createMemoryChatSessionStore();
+    const gate = deferred<void>();
+    const turn = startChatTurn(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => {
+        await gate.promise;
+        return { ok: true, summary: "ok", report: "fertig" };
+      },
+      now: () => new Date(),
+    });
+
+    expect(isChatTurnRunning(repo.id)).toBe(true);
+    gate.resolve();
+    await turn;
+    expect(isChatTurnRunning(repo.id)).toBe(false);
+  });
+
+  it("zwei Repos laufen unabhängig — das zweite bekommt seine Antwort, während das erste noch läuft", async () => {
+    const storeA = createMemoryChatSessionStore();
+    const storeB = createMemoryChatSessionStore();
+    const gateA = deferred<void>();
+
+    const turnA = startChatTurn(repo, "Frage an CellarVoice", {
+      store: storeA,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => {
+        await gateA.promise;
+        return { ok: true, summary: "ok", report: "Antwort A" };
+      },
+      now: () => new Date(),
+    });
+
+    const turnB = startChatTurn(wellarita, "Frage an Wellarita", {
+      store: storeB,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r2", branch: "dev" }),
+      runClaude: async () => ({ ok: true, summary: "ok", report: "Antwort B" }),
+      now: () => new Date(),
+    });
+
+    // B ist fertig, OHNE dass A jemals freigegeben wurde — die beiden Läufe
+    // blockieren sich nicht gegenseitig.
+    await turnB;
+    expect(isChatTurnRunning(wellarita.id)).toBe(false);
+    expect(isChatTurnRunning(repo.id)).toBe(true);
+    const bMessages = await storeB.listMessages(wellarita.id);
+    expect(bMessages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(bMessages[1].content).toBe("Antwort B");
+
+    // A bekommt sein Ergebnis unverändert, sobald es freigegeben wird.
+    gateA.resolve();
+    await turnA;
+    const aMessages = await storeA.listMessages(repo.id);
+    expect(aMessages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(aMessages[1].content).toBe("Antwort A");
   });
 });

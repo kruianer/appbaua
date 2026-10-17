@@ -6,8 +6,9 @@ import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 
 // req-040: der Chat-Tab — Repo-Auswahl (auch inaktive Repos), ein leeres
-// Eingabefeld, die Vorauswahl des zuletzt genutzten Repos (AC3) und das
-// Senden einer Nachricht mit Claudes Antwort im Gespräch (AC4).
+// Eingabefeld, die Vorauswahl des zuletzt genutzten Repos (AC3), das Senden
+// einer Nachricht mit Claudes Antwort im Gespräch (AC4) und die
+// Unabhängigkeit der Gespräche verschiedener Repos voneinander (AC5/AC6).
 
 const cellarVoice: Repo = {
   id: "r1",
@@ -32,11 +33,18 @@ const repos: Repo[] = [wellarita, cellarVoice];
 let stateCalls: { method: string; body?: unknown }[];
 let activeRepoId: string | null;
 let messagesByRepo: Record<string, ChatMessage[]>;
+/** Hält eine Antwort künstlich zurück, bis das Flag auf true gesetzt wird. */
+let releaseAnswer: Record<string, boolean>;
+
+function nextId(repoId: string): number {
+  return (messagesByRepo[repoId]?.length ?? 0) + 1;
+}
 
 beforeEach(() => {
   stateCalls = [];
   activeRepoId = null;
   messagesByRepo = { r1: [], r2: [] };
+  releaseAnswer = { r1: true, r2: true };
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url === "/api/chat/state" && (!init || init.method === undefined)) {
       stateCalls.push({ method: "GET" });
@@ -50,22 +58,36 @@ beforeEach(() => {
     }
     const messagesMatch = url.match(/^\/api\/chat\/(\w+)\/messages$/);
     if (messagesMatch && (!init || init.method === undefined)) {
-      return { ok: true, json: async () => ({ messages: messagesByRepo[messagesMatch[1]] ?? [] }) };
+      const repoId = messagesMatch[1];
+      const list = messagesByRepo[repoId] ?? [];
+      // Die Antwort (letzte Nachricht) erscheint erst, wenn freigegeben —
+      // simuliert einen noch laufenden Claude-Lauf.
+      const visible =
+        releaseAnswer[repoId] || list.length === 0 || list[list.length - 1].role === "user"
+          ? list
+          : list.slice(0, -1);
+      return { ok: true, json: async () => ({ messages: visible }) };
     }
     if (messagesMatch && init?.method === "POST") {
       const repoId = messagesMatch[1];
       const { content } = JSON.parse(String(init.body));
-      const list = messagesByRepo[repoId] ?? [];
-      const userMsg: ChatMessage = { id: list.length + 1, repoId, role: "user", content, createdAt: "t" };
+      const userMsg: ChatMessage = {
+        id: nextId(repoId),
+        repoId,
+        role: "user",
+        content,
+        createdAt: "t",
+      };
+      messagesByRepo[repoId] = [...(messagesByRepo[repoId] ?? []), userMsg];
       const answerMsg: ChatMessage = {
-        id: list.length + 2,
+        id: nextId(repoId),
         repoId,
         role: "assistant",
         content: `Antwort auf: ${content}`,
         createdAt: "t",
       };
-      messagesByRepo[repoId] = [...list, userMsg, answerMsg];
-      return { ok: true, json: async () => ({ messages: messagesByRepo[repoId] }) };
+      messagesByRepo[repoId] = [...messagesByRepo[repoId], answerMsg];
+      return { ok: true, json: async () => ({ ok: true }) };
     }
     return { ok: true, json: async () => ({}) };
   });
@@ -112,6 +134,7 @@ describe("Chat (req-040)", () => {
     render(<Chat repos={repos} />);
     await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
 
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
     const input = screen.getByRole("textbox", { name: "Nachricht" });
     await user.type(input, "Welche Bugs liegen in ready?");
     await user.click(screen.getByRole("button", { name: "Senden" }));
@@ -121,5 +144,51 @@ describe("Chat (req-040)", () => {
     );
     expect(screen.getByText("Welche Bugs liegen in ready?")).toBeInTheDocument();
     expect(input).toHaveValue("");
+  });
+
+  it("AC5: läuft in CellarVoice noch eine Antwort, kann ich in Wellarita sofort schreiben und senden", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false; // CellarVoices Antwort "läuft noch"
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage an CellarVoice");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    // CellarVoice wartet jetzt auf die (zurückgehaltene) Antwort.
+    await waitFor(() => expect(screen.getByText("Claude schreibt …")).toBeInTheDocument());
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "Wellarita");
+    // Wellarita ist unberührt von CellarVoices laufender Antwort.
+    expect(screen.queryByText("Claude schreibt …")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Senden" })).toBeDisabled(); // leeres Feld, nicht "busy"
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage an Wellarita");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() =>
+      expect(screen.getByText("Antwort auf: Frage an Wellarita")).toBeInTheDocument(),
+    );
+  });
+
+  it("AC6: nach einer abgewarteten Antwort bleibt das Gespräch beim Zurückschalten unverändert", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage an CellarVoice");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() =>
+      expect(screen.getByText("Antwort auf: Frage an CellarVoice")).toBeInTheDocument(),
+    );
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "Wellarita");
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await waitFor(() =>
+      expect(screen.getByText("Antwort auf: Frage an CellarVoice")).toBeInTheDocument(),
+    );
+    expect(screen.getByText("Frage an CellarVoice")).toBeInTheDocument();
+    expect(screen.queryByText("Claude schreibt …")).not.toBeInTheDocument();
   });
 });
