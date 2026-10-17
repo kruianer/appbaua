@@ -38,7 +38,7 @@ den Chat, und der Chat wartet nie auf ihn.
       Eingabefeld.
 - [x] Given ich öffne die Repo-Auswahl, when ich die Einträge lese, then
       stehen dort alle eingetragenen Repos, auch die inaktiven.
-- [ ] Given ich habe zuletzt mit "CellarVoice" gearbeitet, when ich den
+- [x] Given ich habe zuletzt mit "CellarVoice" gearbeitet, when ich den
       Chat erneut öffne, then ist "CellarVoice" vorausgewählt.
 - [ ] Given ich schreibe "Welche Bugs liegen in ready?" im Repo
       "CellarVoice", when Claude antwortet, then steht die Antwort im

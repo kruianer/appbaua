@@ -40,6 +40,7 @@ import {
 import { type AlertState, normalizeAlertState } from "./telegram-alerts";
 import { type AnalysisState, normalizeAnalyses } from "./log-analysis";
 import type { AuthStore } from "./auth-store";
+import type { ChatUiStateStore } from "./chat-store";
 import type {
   AuthUser,
   AuthCredential,
@@ -480,6 +481,26 @@ export function createPgNetworkAbortStore(): NetworkAbortStore {
         `INSERT INTO network_abort_counts (id, counts) VALUES ('worker', $1)
          ON CONFLICT (id) DO UPDATE SET counts = EXCLUDED.counts`,
         [JSON.stringify(counts)],
+      );
+    },
+  };
+}
+
+export function createPgChatUiStateStore(): ChatUiStateStore {
+  return {
+    async getActiveRepoId(): Promise<string | null> {
+      await ensureSchema();
+      const res = await getPool().query<{ active_repo_id: string | null }>(
+        "SELECT active_repo_id FROM chat_ui_state WHERE id = 'chat'",
+      );
+      return res.rows[0]?.active_repo_id ?? null;
+    },
+    async setActiveRepoId(repoId: string): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO chat_ui_state (id, active_repo_id) VALUES ('chat', $1)
+         ON CONFLICT (id) DO UPDATE SET active_repo_id = EXCLUDED.active_repo_id`,
+        [repoId],
       );
     },
   };

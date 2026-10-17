@@ -1,17 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Repo } from "@/lib/repos";
 
 // Chat-Tab (req-040): oben die Repo-Auswahl, darunter das Gespräch mit
-// Claude. Jedes Repo hat sein eigenes Gespräch — das folgt mit den nächsten
-// Etappen dieses Requirements; diese Etappe liefert erst einmal die Ansicht
-// selbst: Auswahl (auch inaktive Repos, der Worker-Status spielt hier keine
-// Rolle) und ein leeres Eingabefeld.
+// Claude. Jedes Repo hat sein eigenes Gespräch. Die Auswahl merkt sich das
+// zuletzt offene Repo serverseitig (req-040 AC3) — das wirkt über Geräte
+// hinweg, wie der Betreiber auch von überall arbeiten will.
 
 export function Chat({ repos }: { repos: Repo[] }) {
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [draft, setDraft] = useState("");
+
+  useEffect(() => {
+    fetch("/api/chat/state")
+      .then((r) => r.json())
+      .then((d: { activeRepoId?: string | null }) => {
+        if (d.activeRepoId && repos.some((r) => r.id === d.activeRepoId)) {
+          setRepoId(d.activeRepoId);
+        }
+      })
+      .catch(() => {});
+    // Nur beim ersten Öffnen des Tabs laden, nicht bei jeder Änderung der
+    // Repo-Liste (Hinzufügen/Entfernen eines Repos darf die Auswahl nicht
+    // zurücksetzen).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selectRepo = (id: string) => {
+    setRepoId(id);
+    void fetch("/api/chat/state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repoId: id }),
+    }).catch(() => {});
+  };
 
   return (
     <div
@@ -27,7 +50,7 @@ export function Chat({ repos }: { repos: Repo[] }) {
           aria-label="Repo"
           className="input"
           value={repoId}
-          onChange={(e) => setRepoId(e.target.value)}
+          onChange={(e) => selectRepo(e.target.value)}
         >
           {repos.map((r) => (
             <option key={r.id} value={r.id}>

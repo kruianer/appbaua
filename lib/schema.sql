@@ -213,3 +213,11 @@ CREATE TABLE IF NOT EXISTS auth_backup_codes (
 );
 
 CREATE INDEX IF NOT EXISTS auth_backup_codes_user_idx ON auth_backup_codes (user_id);
+
+-- Chat-UI-Zustand (req-040): welches Repo zuletzt offen war, damit der
+-- Chat-Tab es beim nächsten Öffnen vorauswählt statt immer auf das erste
+-- Repo der Liste zurückzufallen. Einzelne Zeile, Muster wie worker_state.
+CREATE TABLE IF NOT EXISTS chat_ui_state (
+  id             TEXT PRIMARY KEY,
+  active_repo_id TEXT
+);
