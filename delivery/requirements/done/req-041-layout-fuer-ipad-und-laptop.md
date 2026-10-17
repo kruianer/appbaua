@@ -78,7 +78,7 @@ sichtbaren Liste.
 - [x] Given ich bin im Chat in einem 1280px breiten Fenster, when ich
       eine lange Antwort lese, then reicht keine Textzeile über die
       volle Fensterbreite.
-- [ ] Given ich ziehe das Fenster von 1280px auf 390px schmal, when ich
+- [x] Given ich ziehe das Fenster von 1280px auf 390px schmal, when ich
       hinsehe, then ist die Navigation unten und der Chat einspaltig.
 
 # Constraints

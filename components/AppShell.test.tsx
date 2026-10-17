@@ -494,6 +494,30 @@ describe("Chat zweispaltig über AppShell (req-041)", () => {
   });
 });
 
+// req-041 AC14: die Fensterbreite entscheidet laufend, nicht nur beim ersten
+// Erscheinen — ein Verkleinern während die App schon offen ist, schaltet
+// zurück auf untere Leiste und einspaltigen Chat.
+describe("Reagiert auf Fenster-Verkleinern (req-041 AC14)", () => {
+  it("AC14: von 1280px auf 390px gezogen steht die Navigation wieder unten, der Chat einspaltig", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const sidebar = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(within(sidebar).getByRole("button", { name: "Chat" }));
+    expect(screen.queryByRole("combobox", { name: "Repo" })).not.toBeInTheDocument();
+
+    setWindowWidth(390);
+
+    await waitFor(() => {
+      const bottomNav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+      expect(within(bottomNav).getAllByRole("button")).toHaveLength(5); // req-039
+    });
+    expect(screen.getByRole("combobox", { name: "Repo" })).toBeInTheDocument();
+  });
+});
+
 describe("Hinweispunkt auf dem Chat-Knopf (req-040 AC8/AC9)", () => {
   it("AC8: trägt einen Hinweispunkt, wenn ein Repo eine ungesehene Antwort hat", async () => {
     chatUnreadRepoIds = ["r2"];
