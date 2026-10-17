@@ -57,9 +57,9 @@ sichtbaren Liste.
       "Tasks" und zuletzt "Einstellungen".
 - [x] Given ich bin in einem 1280px breiten Fenster, when ich die
       Seitenleiste ansehe, then gibt es KEINEN Eintrag "Mehr".
-- [ ] Given die Seitenleiste ist aufgeklappt, when ich auf den
+- [x] Given die Seitenleiste ist aufgeklappt, when ich auf den
       Einklapp-Knopf tippe, then zeigt sie nur noch Symbole ohne Text.
-- [ ] Given die Seitenleiste ist eingeklappt, when ich auf den
+- [x] Given die Seitenleiste ist eingeklappt, when ich auf den
       Aufklapp-Knopf tippe, then zeigt sie wieder Symbol und Text.
 - [ ] Given ich öffne die App in einem 1280px breiten Fenster, when die
       Ansicht zum ersten Mal erscheint, then ist die Seitenleiste

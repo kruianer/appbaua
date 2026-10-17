@@ -369,6 +369,53 @@ describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
   });
 });
 
+// req-041 AC6/AC7: die Seitenleiste lässt sich von Hand ein- und ausklappen,
+// unabhängig vom Anfangszustand (eigene ACs weiter unten).
+describe("Seitenleiste ein-/ausklappen (req-041)", () => {
+  it("AC6: ein Tipp auf den Einklapp-Knopf zeigt nur noch Symbole ohne Text", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "Aktivität",
+    );
+
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    );
+
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "",
+    );
+  });
+
+  it("AC7: ein Tipp auf den Aufklapp-Knopf zeigt wieder Symbol und Text", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    );
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "",
+    );
+
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste aufklappen" }),
+    );
+
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "Aktivität",
+    );
+  });
+});
+
 describe("Hinweispunkt auf dem Chat-Knopf (req-040 AC8/AC9)", () => {
   it("AC8: trägt einen Hinweispunkt, wenn ein Repo eine ungesehene Antwort hat", async () => {
     chatUnreadRepoIds = ["r2"];
