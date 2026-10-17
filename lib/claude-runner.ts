@@ -360,6 +360,20 @@ export async function runClaude(
     onModel?: (model: string) => void;
     /** Clock for the throttle; injectable for tests. */
     now?: () => number;
+    /**
+     * Continue a previous conversation by its Claude session id (req-040):
+     * the Chat feature's turns are separate CLI invocations that must still
+     * share one context, which `--resume` is what the CLI itself offers for
+     * that. Mutually exclusive with `sessionId` — a turn either continues an
+     * existing session or starts a new one, never both.
+     */
+    resume?: string;
+    /**
+     * Start a NEW conversation under a caller-chosen session id (req-040)
+     * instead of letting the CLI generate one — so the id is known up front
+     * and can be persisted for the next turn's `resume`.
+     */
+    sessionId?: string;
   },
 ): Promise<ClaudeOutcome> {
   const runImpl = deps?.runImpl ?? run;
@@ -410,6 +424,8 @@ export async function runClaude(
         "--output-format",
         "stream-json",
         "--verbose",
+        ...(deps?.resume ? ["--resume", deps.resume] : []),
+        ...(deps?.sessionId ? ["--session-id", deps.sessionId] : []),
       ],
       // Closed stdin: nothing is piped in, and an open pipe makes the CLI wait
       // for input and warn about it (bug-001).

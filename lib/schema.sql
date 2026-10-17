@@ -221,3 +221,26 @@ CREATE TABLE IF NOT EXISTS chat_ui_state (
   id             TEXT PRIMARY KEY,
   active_repo_id TEXT
 );
+
+-- Chat-Gespräche (req-040). Ein Verlauf-Eintrag je Nachricht, zeitlich
+-- sortiert über die id. role: 'user' | 'assistant' | 'system' (Systemtexte
+-- wie eine Rate-Limit-Meldung).
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id         BIGSERIAL PRIMARY KEY,
+  repo_id    TEXT NOT NULL,
+  role       TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS chat_messages_repo_idx ON chat_messages (repo_id, id);
+
+-- Eine Zeile je Repo mit laufendem/gewesenem Gespräch: die Claude-eigene
+-- Sitzungskennung (für --resume, damit der nächste Turn denselben Kontext
+-- fortsetzt) und wann zuletzt geschrieben wurde — das steuert sowohl die
+-- Fünf-Sitzungen-Grenze (AC10) als auch das Acht-Stunden-Leerlaufende (AC12).
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  repo_id           TEXT PRIMARY KEY,
+  claude_session_id TEXT NOT NULL,
+  last_active_at    TIMESTAMPTZ NOT NULL
+);

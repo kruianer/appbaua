@@ -107,6 +107,45 @@ describe("runClaude live output", () => {
   });
 });
 
+// req-040: the Chat feature continues a conversation across separate CLI
+// invocations via the CLI's own --resume/--session-id flags.
+describe("runClaude session continuation (req-040)", () => {
+  it("passes --session-id to start a NEW session under a caller-chosen id", async () => {
+    let seenArgs: string[] = [];
+    const runImpl: typeof run = async (_cmd, args) => {
+      seenArgs = args;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl, sessionId: "abc-123" });
+    expect(seenArgs).toContain("--session-id");
+    expect(seenArgs[seenArgs.indexOf("--session-id") + 1]).toBe("abc-123");
+    expect(seenArgs).not.toContain("--resume");
+  });
+
+  it("passes --resume to continue an existing session", async () => {
+    let seenArgs: string[] = [];
+    const runImpl: typeof run = async (_cmd, args) => {
+      seenArgs = args;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl, resume: "abc-123" });
+    expect(seenArgs).toContain("--resume");
+    expect(seenArgs[seenArgs.indexOf("--resume") + 1]).toBe("abc-123");
+    expect(seenArgs).not.toContain("--session-id");
+  });
+
+  it("passes neither flag when the call names no session (worker's own calls)", async () => {
+    let seenArgs: string[] = [];
+    const runImpl: typeof run = async (_cmd, args) => {
+      seenArgs = args;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl });
+    expect(seenArgs).not.toContain("--resume");
+    expect(seenArgs).not.toContain("--session-id");
+  });
+});
+
 // bug-001: the Aktivität tab used to show nothing but the CLI's stdin warning
 // for minutes, because print mode writes to stdout only at the very end. The
 // run now asks for the structured event stream and closes stdin.

@@ -40,7 +40,7 @@ den Chat, und der Chat wartet nie auf ihn.
       stehen dort alle eingetragenen Repos, auch die inaktiven.
 - [x] Given ich habe zuletzt mit "CellarVoice" gearbeitet, when ich den
       Chat erneut öffne, then ist "CellarVoice" vorausgewählt.
-- [ ] Given ich schreibe "Welche Bugs liegen in ready?" im Repo
+- [x] Given ich schreibe "Welche Bugs liegen in ready?" im Repo
       "CellarVoice", when Claude antwortet, then steht die Antwort im
       Gespräch.
 - [ ] Given in "CellarVoice" läuft gerade eine Antwort, when ich auf
@@ -48,7 +48,7 @@ den Chat, und der Chat wartet nie auf ihn.
 - [ ] Given ich habe in "CellarVoice" eine Antwort abgewartet, when ich
       nach "Wellarita" und zurück schalte, then steht das CellarVoice-
       Gespräch unverändert da.
-- [ ] Given ich habe die App geschlossen und öffne sie neu, when ich den
+- [x] Given ich habe die App geschlossen und öffne sie neu, when ich den
       Chat eines Repos öffne, then ist das bisherige Gespräch noch da.
 - [ ] Given ich sehe "CellarVoice" an und in "Wellarita" wird eine
       Antwort fertig, when ich die untere Leiste ansehe, then trägt der
@@ -69,7 +69,7 @@ den Chat, und der Chat wartet nie auf ihn.
 - [ ] Given im Chat läuft eine Sitzung, when der nächtliche Worker einen
       Lauf beginnt, then wird meine Sitzung NICHT beendet oder
       angehalten.
-- [ ] Given Claude hat im Chat eine Datei geändert, when ich im Repo
+- [x] Given Claude hat im Chat eine Datei geändert, when ich im Repo
       nachsehe, then liegt die Änderung NICHT in der Arbeitskopie des
       Workers.
 

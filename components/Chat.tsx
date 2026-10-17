@@ -2,15 +2,27 @@
 
 import { useEffect, useState } from "react";
 import type { Repo } from "@/lib/repos";
+import type { ChatMessage } from "@/lib/chat-session-store";
 
 // Chat-Tab (req-040): oben die Repo-Auswahl, darunter das Gespräch mit
 // Claude. Jedes Repo hat sein eigenes Gespräch. Die Auswahl merkt sich das
-// zuletzt offene Repo serverseitig (req-040 AC3) — das wirkt über Geräte
-// hinweg, wie der Betreiber auch von überall arbeiten will.
+// zuletzt offene Repo serverseitig (AC3) — das wirkt über Geräte hinweg, wie
+// der Betreiber auch von überall arbeiten will.
+
+const muted = (pct: number) =>
+  `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
+
+const ROLE_LABEL: Record<ChatMessage["role"], string> = {
+  user: "Ich",
+  assistant: "Claude",
+  system: "System",
+};
 
 export function Chat({ repos }: { repos: Repo[] }) {
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [draft, setDraft] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [sending, setSending] = useState(false);
 
   useEffect(() => {
     fetch("/api/chat/state")
@@ -27,6 +39,17 @@ export function Chat({ repos }: { repos: Repo[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (!repoId) {
+      setMessages([]);
+      return;
+    }
+    fetch(`/api/chat/${repoId}/messages`)
+      .then((r) => r.json())
+      .then((d: { messages?: ChatMessage[] }) => setMessages(d.messages ?? []))
+      .catch(() => {});
+  }, [repoId]);
+
   const selectRepo = (id: string) => {
     setRepoId(id);
     void fetch("/api/chat/state", {
@@ -34,6 +57,24 @@ export function Chat({ repos }: { repos: Repo[] }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ repoId: id }),
     }).catch(() => {});
+  };
+
+  const send = async () => {
+    const content = draft.trim();
+    if (!content || !repoId || sending) return;
+    setDraft("");
+    setSending(true);
+    try {
+      const res = await fetch(`/api/chat/${repoId}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content }),
+      });
+      const data = (await res.json()) as { messages?: ChatMessage[] };
+      if (data.messages) setMessages(data.messages);
+    } finally {
+      setSending(false);
+    }
   };
 
   return (
@@ -61,8 +102,48 @@ export function Chat({ repos }: { repos: Repo[] }) {
       </div>
       <div
         data-chat-messages
-        style={{ flex: 1, overflowY: "auto", padding: "0 20px" }}
-      />
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "0 20px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-2)",
+        }}
+      >
+        {messages.map((m) => (
+          <div
+            key={m.id}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              alignSelf: m.role === "user" ? "flex-end" : "stretch",
+              maxWidth: "88%",
+            }}
+          >
+            <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
+            <div
+              style={{
+                padding: "8px 10px",
+                borderRadius: "var(--radius-md)",
+                background:
+                  m.role === "user"
+                    ? "var(--color-accent)"
+                    : m.role === "system"
+                      ? "color-mix(in srgb, var(--color-accent) 14%, transparent)"
+                      : "var(--color-surface)",
+                color: m.role === "user" ? "var(--color-bg)" : "var(--color-text)",
+                fontSize: 14,
+                lineHeight: 1.4,
+                whiteSpace: "pre-wrap",
+              }}
+            >
+              {m.content}
+            </div>
+          </div>
+        ))}
+      </div>
       <div
         style={{
           display: "flex",
@@ -83,9 +164,10 @@ export function Chat({ repos }: { repos: Repo[] }) {
         <button
           className="btn btn-primary"
           aria-label="Senden"
-          disabled={!draft.trim() || !repoId}
+          onClick={send}
+          disabled={!draft.trim() || !repoId || sending}
         >
-          Senden
+          {sending ? "…" : "Senden"}
         </button>
       </div>
     </div>

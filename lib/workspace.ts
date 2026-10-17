@@ -80,6 +80,16 @@ export type PrepareDeps = WorkspaceDeps & {
    * own, so the branch decision is testable without a filesystem.
    */
   readFileImpl?: (dir: string, rel: string) => Promise<string | null>;
+  /**
+   * Clone roots are a shared resource keyed only by the repo's normalized URL
+   * (see repoDir), so two callers that must never see each other's working
+   * copy need two different roots. req-040 is the first such caller: the chat
+   * clones each target repo under its OWN root (chat-workspace.ts), separate
+   * from the worker's — a chat edit must never land in the worker's checkout
+   * and vice versa. Defaults to WORK_ROOT, the worker's own root, so every
+   * existing caller is unaffected.
+   */
+  root?: string;
 };
 
 // bug-023: Ein Aufruf nimmt seinen GANZEN Prozessbaum mit, nicht nur sein
@@ -414,10 +424,10 @@ export function authEnv(token: string): Record<string, string> {
   };
 }
 
-/** Local directory name for a repo (owner-repo). */
-export function repoDir(normalizedUrl: string): string {
+/** Local directory name for a repo (owner-repo), under `root` (default: the worker's own). */
+export function repoDir(normalizedUrl: string, root: string = WORK_ROOT): string {
   const slug = normalizedUrl.replace(/[^a-z0-9]+/gi, "-");
-  return path.join(WORK_ROOT, slug);
+  return path.join(root, slug);
 }
 
 /** The branch the worker commits on (delivery/devops.md). */
@@ -433,11 +443,12 @@ async function syncRepo(
   token: string,
   git: typeof run,
   wait: (ms: number) => Promise<void>,
+  root: string = WORK_ROOT,
 ): Promise<{ dir: string; auth: Record<string, string> }> {
-  const dir = repoDir(normalizedUrl);
+  const dir = repoDir(normalizedUrl, root);
   const url = remoteUrl(normalizedUrl);
   const auth = authEnv(token);
-  await fs.mkdir(WORK_ROOT, { recursive: true });
+  await fs.mkdir(root, { recursive: true });
 
   const exists = await fs
     .stat(path.join(dir, ".git"))
@@ -567,7 +578,13 @@ export async function prepareRepoOnConvention(
   const git = deps.runImpl ?? run;
   const wait = deps.sleepImpl ?? sleep;
   const read = deps.readFileImpl ?? readRepoFile;
-  const { dir, auth } = await syncRepo(normalizedUrl, token, git, wait);
+  const { dir, auth } = await syncRepo(
+    normalizedUrl,
+    token,
+    git,
+    wait,
+    deps.root ?? WORK_ROOT,
+  );
 
   const stated = devBranchFrom(await read(dir, DEVOPS_FILE).catch(() => null));
   // Untracked leftovers of an earlier run must not be swept into this step's
