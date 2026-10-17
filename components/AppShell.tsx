@@ -30,6 +30,11 @@ import { Sidebar } from "./Sidebar";
 // req-041: ab dieser Fensterbreite wandert die Navigation von der unteren
 // Leiste in die Seitenleiste am linken Rand.
 export const SIDEBAR_BREAKPOINT = 744;
+// req-041: ab dieser Breite ist der Anfangszustand der Seitenleiste
+// aufgeklappt statt eingeklappt (744–1023px eingeklappt, ab 1024px
+// aufgeklappt) — nur solange noch kein Zustand gespeichert ist.
+const SIDEBAR_EXPANDED_BREAKPOINT = 1024;
+const SIDEBAR_COLLAPSED_KEY = "appbaua.sidebar-collapsed";
 
 // req-039: fünf Plätze in der unteren Leiste — Aktivität, Verlauf, Chat,
 // Repos, Mehr. Chat sitzt in der Mitte, abgesetzt (Kreis, größeres Symbol).
@@ -104,9 +109,26 @@ export function AppShell({
   const width = useWindowWidth();
   const isPhone = width < SIDEBAR_BREAKPOINT;
   // req-041: ob die Seitenleiste nur Symbole (eingeklappt) oder Symbol und
-  // Text (aufgeklappt) zeigt. Der Anfangszustand nach Fensterbreite und die
-  // Persistenz über einen Neustart hinweg kommen in einer späteren Etappe.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Text (aufgeklappt) zeigt. Die Fensterbreite gibt nur den Anfangszustand
+  // vor (AC8/AC9) — ein von Hand gesetzter Zustand übersteht einen Neustart
+  // (AC10), darum erst entscheiden, sobald die echte Breite UND ein
+  // eventuell gespeicherter Zustand bekannt sind.
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState(true);
+  const [sidebarCollapsedReady, setSidebarCollapsedReady] = useState(false);
+
+  useEffect(() => {
+    if (sidebarCollapsedReady || width === 0) return;
+    const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    setSidebarCollapsedState(
+      stored !== null ? stored === "true" : width < SIDEBAR_EXPANDED_BREAKPOINT,
+    );
+    setSidebarCollapsedReady(true);
+  }, [width, sidebarCollapsedReady]);
+
+  const setSidebarCollapsed = useCallback((value: boolean) => {
+    setSidebarCollapsedState(value);
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(value));
+  }, []);
   // req-040 AC8/AC9: ob mindestens ein Repo eine ungesehene, fertige
   // Chat-Antwort hat — der Hinweispunkt auf dem Chat-Knopf unten.
   const [chatUnread, setChatUnread] = useState(false);
@@ -1057,7 +1079,7 @@ export function AppShell({
             tab={tab}
             onSelect={setTab}
             collapsed={sidebarCollapsed}
-            onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
+            onToggleCollapsed={() => setSidebarCollapsed(!sidebarCollapsed)}
           />
           <div
             style={{

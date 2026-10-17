@@ -61,13 +61,13 @@ sichtbaren Liste.
       Einklapp-Knopf tippe, then zeigt sie nur noch Symbole ohne Text.
 - [x] Given die Seitenleiste ist eingeklappt, when ich auf den
       Aufklapp-Knopf tippe, then zeigt sie wieder Symbol und Text.
-- [ ] Given ich öffne die App in einem 1280px breiten Fenster, when die
+- [x] Given ich öffne die App in einem 1280px breiten Fenster, when die
       Ansicht zum ersten Mal erscheint, then ist die Seitenleiste
       aufgeklappt.
-- [ ] Given ich öffne die App in einem 800px breiten Fenster, when die
+- [x] Given ich öffne die App in einem 800px breiten Fenster, when die
       Ansicht zum ersten Mal erscheint, then ist die Seitenleiste
       eingeklappt.
-- [ ] Given ich habe die Seitenleiste eingeklappt, when ich die App
+- [x] Given ich habe die Seitenleiste eingeklappt, when ich die App
       schließe und neu öffne, then ist sie weiterhin eingeklappt.
 - [ ] Given ich bin im Chat in einem 1280px breiten Fenster, when die
       Ansicht erscheint, then steht links eine Liste aller Repos und

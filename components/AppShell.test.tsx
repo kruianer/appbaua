@@ -92,6 +92,7 @@ const dashboard = {
 
 beforeEach(() => {
   setWindowWidth(390);
+  window.localStorage.clear();
   entries = [logEntry()];
   systemCalls = 0;
   serverTaskTypes = defaultTaskTypes();
@@ -413,6 +414,66 @@ describe("Seitenleiste ein-/ausklappen (req-041)", () => {
     expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
       "Aktivität",
     );
+  });
+});
+
+// req-041 AC8-10: die Fensterbreite gibt nur den ANFANGSZUSTAND vor — ein von
+// Hand gesetzter Zustand übersteht einen Neustart (neues render() derselben
+// Seite, gleiches localStorage).
+describe("Seitenleiste — Anfangszustand und Persistenz (req-041)", () => {
+  it("AC8: bei 1280px ist die Seitenleiste beim ersten Erscheinen aufgeklappt", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(
+      within(nav).getByRole("button", { name: "Aktivität" }).textContent,
+    ).toBe("Aktivität");
+    expect(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC9: bei 800px ist die Seitenleiste beim ersten Erscheinen eingeklappt", async () => {
+    setWindowWidth(800);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(
+      within(nav).getByRole("button", { name: "Aktivität" }).textContent,
+    ).toBe("");
+    expect(
+      within(nav).getByRole("button", { name: "Seitenleiste aufklappen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC10: eine von Hand eingeklappte Seitenleiste bleibt nach einem Neustart eingeklappt", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280); // würde ohne gespeicherten Zustand aufgeklappt starten
+    const { unmount } = renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    );
+    expect(
+      within(nav).getByRole("button", { name: "Aktivität" }).textContent,
+    ).toBe("");
+
+    unmount(); // "App schließen"
+    renderShell(); // "neu öffnen"
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const navAfterRestart = screen.getByRole("navigation", {
+      name: "Hauptnavigation",
+    });
+    expect(
+      within(navAfterRestart).getByRole("button", { name: "Aktivität" })
+        .textContent,
+    ).toBe("");
   });
 });
 
