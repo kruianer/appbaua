@@ -504,4 +504,51 @@ describe("sichtbare Schritte (req-048)", () => {
 
     expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument();
   });
+
+  it("AC4/AC8: ist die Antwort fertig, sind die Schritte eingeklappt statt die Antwort zu verdrängen", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    releaseAnswer.r1 = true;
+    await waitFor(
+      () => expect(screen.getByText(/Antwort auf: Frage/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+
+    const details = document.querySelector("[data-chat-steps]") as HTMLDetailsElement;
+    expect(details).toBeInTheDocument();
+    expect(details.open).toBe(false);
+  });
+
+  it("AC5: eingeklappte Schritte lassen sich weiterhin lesen", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    releaseAnswer.r1 = true;
+    await waitFor(
+      () => expect(screen.getByText(/Antwort auf: Frage/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+
+    const details = document.querySelector("[data-chat-steps]") as HTMLDetailsElement;
+    await user.click(screen.getByText("Schritte"));
+    expect(details.open).toBe(true);
+    expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument();
+  });
 });

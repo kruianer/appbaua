@@ -269,26 +269,51 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
         </div>
       ))}
       {sending && (
-        <div style={{ fontSize: 12, color: muted(55) }}>Claude schreibt …</div>
+        <>
+          <div style={{ fontSize: 12, color: muted(55) }}>Claude schreibt …</div>
+          {steps && (
+            <div
+              data-chat-steps
+              style={{
+                fontSize: 11.5,
+                lineHeight: 1.5,
+                color: muted(55),
+                fontFamily: "ui-monospace, Menlo, monospace",
+                whiteSpace: "pre-wrap",
+                maxHeight: 160,
+                overflowY: "auto",
+                padding: "6px 8px",
+                borderRadius: "var(--radius-md)",
+                background: "color-mix(in srgb, var(--color-text) 4%, transparent)",
+              }}
+            >
+              {steps}
+            </div>
+          )}
+        </>
       )}
-      {steps && (
-        <div
-          data-chat-steps
-          style={{
-            fontSize: 11.5,
-            lineHeight: 1.5,
-            color: muted(55),
-            fontFamily: "ui-monospace, Menlo, monospace",
-            whiteSpace: "pre-wrap",
-            maxHeight: 160,
-            overflowY: "auto",
-            padding: "6px 8px",
-            borderRadius: "var(--radius-md)",
-            background: "color-mix(in srgb, var(--color-text) 4%, transparent)",
-          }}
-        >
-          {steps}
-        </div>
+      {/* req-048 AC4/AC5/AC8: fertig, tritt die Antwort hervor — die Schritte
+          bleiben lesbar, aber eingeklappt, damit sie auf dem iPhone nicht die
+          Antworten aus dem Bild drängen. */}
+      {!sending && steps && (
+        <details data-chat-steps style={{ fontSize: 11.5, color: muted(55) }}>
+          <summary style={{ cursor: "pointer", userSelect: "none" }}>Schritte</summary>
+          <div
+            style={{
+              whiteSpace: "pre-wrap",
+              fontFamily: "ui-monospace, Menlo, monospace",
+              lineHeight: 1.5,
+              marginTop: 4,
+              maxHeight: 160,
+              overflowY: "auto",
+              padding: "6px 8px",
+              borderRadius: "var(--radius-md)",
+              background: "color-mix(in srgb, var(--color-text) 4%, transparent)",
+            }}
+          >
+            {steps}
+          </div>
+        </details>
       )}
     </div>
   );
