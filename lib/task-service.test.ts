@@ -26,6 +26,7 @@ describe("req-002 acceptance criteria", () => {
       "Security",
       "Doku",
       "Ideen",
+      "Selbstauftrag",
     ]);
   });
 

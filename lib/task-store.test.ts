@@ -26,6 +26,7 @@ describe("seedMissingDefaults", () => {
       "security",
       "doku",
       "ideen",
+      "selbstauftrag",
     ]);
     const security = types.find((t) => t.id === "security")!;
     expect(security.active).toBe(true);
@@ -59,7 +60,7 @@ describe("seedMissingDefaults", () => {
       },
     };
     const types = await seedMissingDefaults(counting).list();
-    expect(types).toHaveLength(7);
+    expect(types).toHaveLength(8);
     expect(writes).toBe(0);
   });
 

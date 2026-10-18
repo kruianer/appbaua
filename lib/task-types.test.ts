@@ -22,6 +22,7 @@ describe("defaultTaskTypes", () => {
       "Security",
       "Doku",
       "Ideen",
+      "Selbstauftrag",
     ]);
   });
   it("all start active, always-on, with an empty schedule", () => {
@@ -31,8 +32,8 @@ describe("defaultTaskTypes", () => {
       expect(Object.values(t.schedule).every((d) => !d.enabled)).toBe(true);
     }
   });
-  it("has exactly seven predefined types", () => {
-    expect(DEFAULT_TASK_TYPES).toHaveLength(7);
+  it("has exactly eight predefined types", () => {
+    expect(DEFAULT_TASK_TYPES).toHaveLength(8);
   });
 });
 
@@ -57,6 +58,7 @@ describe("withMissingDefaults", () => {
       "security",
       "doku",
       "ideen",
+      "selbstauftrag",
     ]);
   });
 
@@ -78,6 +80,7 @@ describe("withMissingDefaults", () => {
       "code-review",
       "security",
       "doku",
+      "selbstauftrag",
     ]);
     expect(next.find((t) => t.id === "doku")!.active).toBe(false);
     expect(next.find((t) => t.id === "doku")!.always).toBe(false);
@@ -94,6 +97,7 @@ describe("withMissingDefaults", () => {
       "security",
       "doku",
       "ideen",
+      "selbstauftrag",
     ]);
   });
 
