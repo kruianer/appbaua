@@ -113,6 +113,11 @@ services:
       # Worker-Container. Ein Fehler im Chat kann die Anmeldung so nicht
       # beschaedigen (bug-028).
       - claude-home:/claude-home:ro
+      # Die Chat-eigene Arbeitskopie (CHAT_WORKDIR, req-040 AC15). Als Volume,
+      # aus demselben Grund wie worker-work unten (bug-029): ohne eines
+      # ersetzt jeder Deploy den Container und damit die Arbeitskopie, was die
+      # laufende Claude-Sitzung ins Leere zeigen laesst.
+      - chat-work:/chat-work
     ports:
       - "${APP_PORT}:3000"
 
@@ -222,3 +227,4 @@ volumes:
   db-data:
   claude-home:
   worker-work:
+  chat-work:

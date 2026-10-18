@@ -27,3 +27,16 @@ describe("Dockerfile — Claude-Code-CLI im App-Container (bug-028)", () => {
     expect(DOCKERFILE).toContain("ENV HOME=/claude-home");
   });
 });
+
+describe("Dockerfile — Chat-Arbeitskopie ueberlebt einen Deploy (bug-029)", () => {
+  it("AC: CHAT_WORKDIR zeigt auf das eingehaengte chat-work-Volume", () => {
+    expect(DOCKERFILE).toContain("ENV CHAT_WORKDIR=/chat-work");
+  });
+
+  it("AC: das Verzeichnis gehoert dem nextjs-Nutzer, nicht root", () => {
+    // Ein benanntes Volume uebernimmt beim ersten Start die Rechte, die das
+    // Verzeichnis im Image schon hatte — ohne chown waere es fuer den
+    // nicht-root-Prozess unten unschreibbar.
+    expect(DOCKERFILE).toMatch(/chown -R nextjs:nodejs .*\/chat-work/);
+  });
+});

@@ -35,6 +35,10 @@ RUN apk add --no-cache git \
 # Where that rollout clones repos (must be writable by the app user).
 ENV WORKER_WORKDIR=/work
 
+# The chat's own working copy (req-040 AC15), on its own volume so a deploy
+# does not wipe it out from under a running Claude session (bug-029).
+ENV CHAT_WORKDIR=/chat-work
+
 # Claude Code auth lives here too (claude-home volume, mounted read-only — see
 # docker-compose.yml). Without this HOME points at /home/nextjs and the CLI
 # never finds the subscription login (bug-028).
@@ -49,9 +53,10 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Directory for the JSON fallback store (used only when DATABASE_URL is unset)
-# and the work dir for the appbaua rollout (req-012).
-RUN mkdir -p .data /work && chown -R nextjs:nodejs .data /work
+# Directory for the JSON fallback store (used only when DATABASE_URL is unset),
+# the work dir for the appbaua rollout (req-012), and the chat's own working
+# copy (bug-029).
+RUN mkdir -p .data /work /chat-work && chown -R nextjs:nodejs .data /work /chat-work
 
 USER nextjs
 EXPOSE 3000

@@ -214,3 +214,15 @@ describe("docker-compose.yml — Arbeitskopien ueberleben einen Deploy (req-062-
     expect(COMPOSE).toMatch(/^\s{2}worker-work:\s*$/m);
   });
 });
+
+describe("docker-compose.yml — Chat-Arbeitskopie ueberlebt einen Deploy (bug-029)", () => {
+  it("AC: CHAT_WORKDIR liegt in einem eigenen Volume, nicht im Container", () => {
+    // Ohne Volume ersetzt jeder Deploy den App-Container und damit die
+    // Chat-Arbeitskopie — die laufende Claude-Sitzung zeigt danach ins Leere.
+    expect(serviceBlock("app")).toMatch(/^\s*-\s*chat-work:\/chat-work\s*$/m);
+  });
+
+  it("das Volume ist auch deklariert", () => {
+    expect(COMPOSE).toMatch(/^\s{2}chat-work:\s*$/m);
+  });
+});

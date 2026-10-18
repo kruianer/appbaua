@@ -9,6 +9,7 @@ import { prepareChatRepo } from "./chat-workspace";
 import { type ClaudeOutcome, runClaude } from "./claude-runner";
 import { touchActiveSession, pruneIdleSessions } from "./chat-session-lru";
 import { isRateLimit } from "./rate-limit";
+import { isSessionNotFound } from "./chat-session-lost";
 
 // Orchestrates one chat turn (req-040): append the user's message, make sure
 // the repo has a working copy of its OWN (chat-workspace.ts, AC15), run
@@ -45,6 +46,14 @@ export const NO_TOKEN_MESSAGE = "Kein GitHub-Token für den Chat konfiguriert.";
 export const RATE_LIMIT_CHAT_MESSAGE =
   "Das Abo-Limit ist erreicht. Das betrifft auch den nächtlichen Worker — " +
   "er pausiert ebenfalls, bis das Limit zurückgesetzt ist.";
+
+/**
+ * What the chat says when Claude no longer knows the --resume'd session
+ * (bug-029) and the turn starts a fresh one instead. Shown so the broken
+ * thread is visible, even though it no longer blocks the conversation.
+ */
+export const SESSION_LOST_MESSAGE =
+  "Die vorherige Sitzung ist nicht mehr bekannt — das Gespräch beginnt neu.";
 
 export async function sendChatMessage(
   repo: Repo,
@@ -107,17 +116,41 @@ export async function sendChatMessage(
   const session = await store.getSession(repo.id);
   const sessionId = session?.claudeSessionId ?? newSessionId();
 
-  const outcome = await runClaudeImpl(dir, content, {
+  let outcome = await runClaudeImpl(dir, content, {
     model: CHAT_MODEL,
     ...(session ? { resume: sessionId } : { sessionId }),
   });
 
+  // bug-029: Claude no longer knows the session it was asked to --resume (most
+  // commonly because a container restart emptied CHAT_WORK_ROOT). Rather than
+  // leaving the repo permanently stuck on that dead id, drop it and retry once
+  // with a brand-new session — the SAME message gets answered either way.
+  let finalSessionId = sessionId;
+  let sessionLost = false;
+  if (session && !outcome.ok && isSessionNotFound(outcome.summary)) {
+    sessionLost = true;
+    finalSessionId = newSessionId();
+    outcome = await runClaudeImpl(dir, content, {
+      model: CHAT_MODEL,
+      sessionId: finalSessionId,
+    });
+  }
+
   await store.putSession({
     repoId: repo.id,
-    claudeSessionId: sessionId,
+    claudeSessionId: finalSessionId,
     lastActiveAt: now().toISOString(),
     unread: session?.unread ?? false,
   });
+
+  if (sessionLost) {
+    await store.appendMessage({
+      repoId: repo.id,
+      role: "system",
+      content: SESSION_LOST_MESSAGE,
+      createdAt: now().toISOString(),
+    });
+  }
 
   await store.appendMessage({
     repoId: repo.id,

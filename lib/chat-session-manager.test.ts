@@ -7,6 +7,7 @@ import {
   resetActiveSessionsForTests,
   NO_TOKEN_MESSAGE,
   RATE_LIMIT_CHAT_MESSAGE,
+  SESSION_LOST_MESSAGE,
 } from "./chat-session-manager";
 import { createMemoryChatSessionStore } from "./chat-session-store";
 import type { Repo } from "./repos";
@@ -220,6 +221,83 @@ describe("Abo-Limit (req-040 AC13)", () => {
 
     const [, errorMessage] = await store.listMessages(repo.id);
     expect(errorMessage).toMatchObject({ role: "system", content: "Fehler: irgendein anderer Fehler" });
+  });
+});
+
+describe("verlorene Sitzung (bug-029)", () => {
+  it("verwirft die unbekannte Sitzung, beginnt neu und beantwortet die Nachricht trotzdem", async () => {
+    const store = createMemoryChatSessionStore();
+    await store.putSession({
+      repoId: repo.id,
+      claudeSessionId: "tote-sitzung",
+      lastActiveAt: new Date(0).toISOString(),
+      unread: false,
+    });
+
+    const resumeSeen: (string | undefined)[] = [];
+    const sessionIdSeen: (string | undefined)[] = [];
+    await sendChatMessage(repo, "Hallo nach dem Neustart", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      newSessionId: () => "frische-sitzung",
+      runClaude: async (_dir, _prompt, opts: { resume?: string; sessionId?: string }) => {
+        resumeSeen.push(opts.resume);
+        sessionIdSeen.push(opts.sessionId);
+        if (opts.resume) {
+          return {
+            ok: false,
+            summary: "Claude-Lauf fehlgeschlagen: No conversation found with session ID: tote-sitzung",
+            report: "",
+          };
+        }
+        return { ok: true, summary: "ok", report: "Neue Antwort" };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    expect(resumeSeen).toEqual(["tote-sitzung", undefined]);
+    expect(sessionIdSeen).toEqual([undefined, "frische-sitzung"]);
+
+    const messages = await store.listMessages(repo.id);
+    expect(messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "Hallo nach dem Neustart"],
+      ["system", SESSION_LOST_MESSAGE],
+      ["assistant", "Neue Antwort"],
+    ]);
+    expect((await store.getSession(repo.id))?.claudeSessionId).toBe("frische-sitzung");
+  });
+
+  it("ein anderer Fehler löst KEINEN Neustart der Sitzung aus", async () => {
+    const store = createMemoryChatSessionStore();
+    await store.putSession({
+      repoId: repo.id,
+      claudeSessionId: "sitzung-1",
+      lastActiveAt: new Date(0).toISOString(),
+      unread: false,
+    });
+
+    let calls = 0;
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => {
+        calls += 1;
+        return { ok: false, summary: "irgendein anderer Fehler", report: "" };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    expect(calls).toBe(1);
+    const messages = await store.listMessages(repo.id);
+    expect(messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "Hallo"],
+      ["system", "Fehler: irgendein anderer Fehler"],
+    ]);
+    expect((await store.getSession(repo.id))?.claudeSessionId).toBe("sitzung-1");
   });
 });
 
