@@ -42,10 +42,12 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   const [draft, setDraft] = useState("");
   const [messagesByRepo, setMessagesByRepo] = useState<Record<string, ChatMessage[]>>({});
   const [pendingByRepo, setPendingByRepo] = useState<Record<string, boolean>>({});
+  const [stepsByRepo, setStepsByRepo] = useState<Record<string, string | null>>({});
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const messages = messagesByRepo[repoId] ?? [];
   const sending = pendingByRepo[repoId] ?? false;
+  const steps = stepsByRepo[repoId] ?? null;
 
   // bug-030: das Feld wächst mit dem Text, bis MAX_COMPOSER_HEIGHT_PX erreicht
   // ist — danach rollt sein Inhalt statt weiter zu wachsen. "auto" vor der
@@ -93,16 +95,30 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoId]);
 
+  // req-048: der Stand der Schritte des laufenden (oder gerade erst beendeten)
+  // Zugs dieses Repos — derselbe Ereignisstrom, den der Worker schon zeigt.
+  const loadSteps = async (id: string): Promise<void> => {
+    try {
+      const res = await fetch(`/api/chat/${id}/steps`);
+      const data = (await res.json()) as { steps?: string | null };
+      setStepsByRepo((prev) => ({ ...prev, [id]: data.steps ?? null }));
+    } catch {
+      // Nächster Tick versucht es erneut; der bisherige Stand bleibt stehen.
+    }
+  };
+
   // Solange für das GERADE OFFENE Repo eine Antwort noch läuft, fragt diese
   // Ansicht nach, bis sie da ist (AC5/AC6). Ein Wechsel zu einem anderen
   // Repo beendet nur dieses Nachfragen HIER — der Lauf selbst macht am
   // Server unabhängig weiter, und sein Ergebnis steht beim Zurückschalten
-  // über den Lade-Effekt oben ohnehin bereit.
+  // über den Lade-Effekt oben ohnehin bereit. Dieselbe Runde holt req-048s
+  // Schritte mit, damit ihr Stand beim Zurückschalten ebenfalls aktuell ist.
   useEffect(() => {
     if (!repoId || !pendingByRepo[repoId]) return;
     const before = (messagesByRepo[repoId] ?? []).length;
     let stopped = false;
     const check = () => {
+      void loadSteps(repoId);
       void loadMessages(repoId).then((msgs) => {
         if (!stopped && msgs.length > before) {
           setPendingByRepo((prev) => ({ ...prev, [repoId]: false }));
@@ -254,6 +270,25 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
       ))}
       {sending && (
         <div style={{ fontSize: 12, color: muted(55) }}>Claude schreibt …</div>
+      )}
+      {steps && (
+        <div
+          data-chat-steps
+          style={{
+            fontSize: 11.5,
+            lineHeight: 1.5,
+            color: muted(55),
+            fontFamily: "ui-monospace, Menlo, monospace",
+            whiteSpace: "pre-wrap",
+            maxHeight: 160,
+            overflowY: "auto",
+            padding: "6px 8px",
+            borderRadius: "var(--radius-md)",
+            background: "color-mix(in srgb, var(--color-text) 4%, transparent)",
+          }}
+        >
+          {steps}
+        </div>
       )}
     </div>
   );

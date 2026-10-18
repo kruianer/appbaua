@@ -37,6 +37,8 @@ let messagesByRepo: Record<string, ChatMessage[]>;
 let releaseAnswer: Record<string, boolean>;
 /** Jedes Repo, für das der Stopp-Knopf einen Abbruch angefragt hat (bug-030). */
 let cancelCalls: string[];
+/** Simuliert getChatSteps() je Repo (req-048) — wie die Steps-Route es liefert. */
+let stepsByRepo: Record<string, string | null>;
 
 function nextId(repoId: string): number {
   return (messagesByRepo[repoId]?.length ?? 0) + 1;
@@ -58,6 +60,7 @@ beforeEach(() => {
   messagesByRepo = { r1: [], r2: [] };
   releaseAnswer = { r1: true, r2: true };
   cancelCalls = [];
+  stepsByRepo = { r1: null, r2: null };
   mockScrollHeight = 20;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url === "/api/chat/state" && (!init || init.method === undefined)) {
@@ -86,6 +89,11 @@ beforeEach(() => {
       messagesByRepo[repoId] = [...(messagesByRepo[repoId] ?? []), abortMsg];
       releaseAnswer[repoId] = true;
       return { ok: true, json: async () => ({ ok: true, cancelled: true }) };
+    }
+    const stepsMatch = url.match(/^\/api\/chat\/(\w+)\/steps$/);
+    if (stepsMatch && (!init || init.method === undefined)) {
+      const repoId = stepsMatch[1];
+      return { ok: true, json: async () => ({ steps: stepsByRepo[repoId] ?? null }) };
     }
     const messagesMatch = url.match(/^\/api\/chat\/(\w+)\/messages$/);
     if (messagesMatch && (!init || init.method === undefined)) {
@@ -400,5 +408,100 @@ describe("Eingabefeld und Abbrechen (bug-030)", () => {
     await waitFor(() =>
       expect(screen.getByText("Antwort auf: weiter geht's")).toBeInTheDocument(),
     );
+  });
+});
+
+// req-048: während Claude arbeitet, zeigt der Chat dieselben Schritte
+// (gelesene Dateien, ausgeführte Befehle), die der Worker über
+// onOutput/describeEvent schon zeigt — hier über die neue Steps-Route.
+describe("sichtbare Schritte (req-048)", () => {
+  it("AC1: zeigt, dass Claude eine Datei liest", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: lib/foo.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Was steht in foo.ts?");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+
+    await waitFor(() => expect(screen.getByText("→ Read: lib/foo.ts")).toBeInTheDocument());
+  });
+
+  it("AC2: zeigt einen ausgeführten Befehl", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Bash: npm test";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Laufen die Tests?");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+
+    await waitFor(() => expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument());
+  });
+
+  it("AC3: neue Schritte kommen von selbst dazu, ohne dass ich etwas tun muss", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    // Der Stand ändert sich serverseitig, OHNE dass hier etwas getan wird —
+    // der nächste Poll-Tick (POLL_MS) muss das von selbst aufgreifen.
+    stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
+    await waitFor(
+      () => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+  });
+
+  it("AC6: beim Zurückschalten auf ein Repo mit laufendem Zug sehe ich den aktuellen Stand", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    // Weg zu Wellarita und zurück — zwischendurch läuft CellarVoice weiter.
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "Wellarita");
+    stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await waitFor(() => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument());
+  });
+
+  it("AC7: nach einem Stopp bleiben die bis dahin gezeigten Schritte stehen", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Bash: npm test";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Abbrechen" })).toBeInTheDocument(),
+    );
+    await waitFor(() => expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Abbrechen" }));
+    await waitFor(() => expect(screen.getByText("Abgebrochen.")).toBeInTheDocument());
+
+    expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument();
   });
 });

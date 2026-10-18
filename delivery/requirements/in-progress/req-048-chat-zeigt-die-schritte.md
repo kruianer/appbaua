@@ -30,26 +30,26 @@ den aktuellen Stand der Schritte, nicht nur „läuft noch".
 
 # Acceptance Criteria
 
-- [ ] Given ich schicke eine Nachricht, die Claude zum Lesen einer
+- [x] Given ich schicke eine Nachricht, die Claude zum Lesen einer
       Datei bringt, when es arbeitet, then sehe ich im Gespräch, dass
       es liest.
-- [ ] Given Claude führt einen Befehl aus, when es arbeitet, then sehe
+- [x] Given Claude führt einen Befehl aus, when es arbeitet, then sehe
       ich den Befehl im Gespräch.
-- [ ] Given Claude arbeitet seit einer Weile, when ich hinsehe, then
+- [x] Given Claude arbeitet seit einer Weile, when ich hinsehe, then
       kommen neue Schritte dazu, ohne dass ich etwas tun muss.
 - [ ] Given die Antwort ist fertig, when ich das Gespräch ansehe, then
       ist die Antwort hervorgehoben und die Schritte treten zurück.
 - [ ] Given die Antwort ist fertig, when ich die Schritte ansehen will,
       then kann ich sie weiterhin lesen.
-- [ ] Given in "CellarVoice" läuft eine Antwort und ich schalte zu
+- [x] Given in "CellarVoice" läuft eine Antwort und ich schalte zu
       "Wellarita" und zurück, when ich hinsehe, then sehe ich den
       aktuellen Stand der Schritte.
-- [ ] Given ich stoppe einen laufenden Lauf (bug-030), when ich
+- [x] Given ich stoppe einen laufenden Lauf (bug-030), when ich
       hinsehe, then bleiben die bis dahin gezeigten Schritte stehen.
 - [ ] Given ich lese ein abgeschlossenes Gespräch auf dem iPhone, when
       ich es durchgehe, then drängen die Schritte die Antworten nicht
       aus dem Bild.
-- [ ] Given Claude arbeitet, when ich die Schritte lese, then steht
+- [x] Given Claude arbeitet, when ich die Schritte lese, then steht
       dort KEIN Zugangsschlüssel und kein Passwort.
 
 # Constraints

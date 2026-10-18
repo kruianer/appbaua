@@ -11,6 +11,7 @@ import { touchActiveSession, pruneIdleSessions } from "./chat-session-lru";
 import { isRateLimit } from "./rate-limit";
 import { isSessionNotFound } from "./chat-session-lost";
 import { isAuthExpired, authExpiredChatMessage } from "./auth-expired";
+import { redact } from "./redact";
 
 // Orchestrates one chat turn (req-040): append the user's message, make sure
 // the repo has a working copy of its OWN (chat-workspace.ts, AC15), run
@@ -85,6 +86,25 @@ export function cancelChatTurn(repoId: string): boolean {
   return true;
 }
 
+/**
+ * Live Schritte des gerade laufenden (oder soeben beendeten) Zugs je Repo
+ * (req-048) — derselbe onOutput-Tail, den runClaude seit req-008/bug-001
+ * über describeEvent schon für den Worker liefert, jetzt auch für den Chat.
+ * Wird bei jedem Update überschrieben und erst geleert, wenn fuer dasselbe
+ * Repo ein NEUER Zug beginnt — ein beendeter oder gestoppter Zug behält also
+ * genau den Stand, den er zuletzt zeigte, statt zu verschwinden (bug-030).
+ */
+const currentSteps = new Map<string, string>();
+
+export function getChatSteps(repoId: string): string | null {
+  return currentSteps.get(repoId) ?? null;
+}
+
+/** Test-only reset: production never needs to clear this between runs. */
+export function resetChatStepsForTests(): void {
+  currentSteps.clear();
+}
+
 export async function sendChatMessage(
   repo: Repo,
   content: string,
@@ -152,6 +172,13 @@ export async function sendChatMessage(
   const controller = new AbortController();
   runningControllers.set(repo.id, controller);
 
+  // req-048: dieser Zug beginnt frisch — ein etwaiger Rest des vorigen Zugs
+  // (fertig oder gestoppt) räumt jetzt erst Platz, nicht wenn DIESER Zug endet.
+  currentSteps.delete(repo.id);
+  const onOutput = (tail: string) => {
+    currentSteps.set(repo.id, redact(tail));
+  };
+
   let outcome: ClaudeOutcome;
   let finalSessionId = sessionId;
   let sessionLost = false;
@@ -159,6 +186,7 @@ export async function sendChatMessage(
     outcome = await runClaudeImpl(dir, content, {
       model: CHAT_MODEL,
       signal: controller.signal,
+      onOutput,
       ...(session ? { resume: sessionId } : { sessionId }),
     });
 
@@ -172,6 +200,7 @@ export async function sendChatMessage(
       outcome = await runClaudeImpl(dir, content, {
         model: CHAT_MODEL,
         signal: controller.signal,
+        onOutput,
         sessionId: finalSessionId,
       });
     }

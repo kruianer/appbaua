@@ -6,6 +6,8 @@ import {
   activeSessionRepoIds,
   resetActiveSessionsForTests,
   cancelChatTurn,
+  getChatSteps,
+  resetChatStepsForTests,
   ABORTED_CHAT_MESSAGE,
   NO_TOKEN_MESSAGE,
   RATE_LIMIT_CHAT_MESSAGE,
@@ -41,6 +43,7 @@ const repoOf = (id: string): Repo => ({ ...repo, id, name: id, url: `github.com/
 
 beforeEach(() => {
   resetActiveSessionsForTests();
+  resetChatStepsForTests();
 });
 
 describe("sendChatMessage (req-040)", () => {
@@ -607,5 +610,109 @@ describe("cancelChatTurn (bug-030)", () => {
       getActiveRepoId: async () => null,
     });
     expect(cancelChatTurn(repo.id)).toBe(false);
+  });
+});
+
+// req-048: runClaude liefert über onOutput denselben Ereignisstrom, den der
+// Worker seit req-008/bug-001 schon per describeEvent zeigt — hier wird er
+// zusätzlich in getChatSteps() veröffentlicht, damit der Chat ihn lesen kann.
+describe("sichtbare Schritte (req-048)", () => {
+  it("meldet null, solange für das Repo kein Zug läuft oder lief", () => {
+    expect(getChatSteps("kein-repo")).toBeNull();
+  });
+
+  it("onOutput-Aufrufe landen in getChatSteps und bleiben nach Ende des Zugs stehen", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Was steht in lib/foo.ts?", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
+        opts.onOutput?.("→ Read: lib/foo.ts");
+        return { ok: true, summary: "ok", report: "Steht drin." };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    expect(getChatSteps(repo.id)).toBe("→ Read: lib/foo.ts");
+  });
+
+  it("maskiert Zugangsschlüssel in den Schritten genauso wie der Worker (bug-003)", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Push das mal", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
+        opts.onOutput?.("→ Bash: curl -H 'Authorization: Bearer sk-ABCDEFGHIJKLMNOP'");
+        return { ok: true, summary: "ok", report: "fertig" };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    expect(getChatSteps(repo.id)).not.toContain("sk-ABCDEFGHIJKLMNOP");
+  });
+
+  it("ein Abbruch (bug-030) lässt die bis dahin gezeigten Schritte stehen", async () => {
+    const store = createMemoryChatSessionStore();
+    const signalSeen = deferred<AbortSignal>();
+    const turn = startChatTurn(repo, "Frage, dann Stopp", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (
+        _dir,
+        _prompt,
+        opts: { signal?: AbortSignal; onOutput?: (tail: string) => void },
+      ) =>
+        new Promise((resolve) => {
+          opts.onOutput?.("→ Bash: npm test");
+          signalSeen.resolve(opts.signal!);
+          opts.signal!.addEventListener("abort", () =>
+            resolve({ ok: false, summary: ABORTED_MESSAGE, report: "" }),
+          );
+        }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    await signalSeen.promise;
+    expect(cancelChatTurn(repo.id)).toBe(true);
+    await turn;
+
+    expect(getChatSteps(repo.id)).toBe("→ Bash: npm test");
+  });
+
+  it("ein neuer Zug beginnt mit leeren Schritten statt die des vorigen Zugs fortzuführen", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Erster Zug", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
+        opts.onOutput?.("→ Read: alt.ts");
+        return { ok: true, summary: "ok", report: "fertig" };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+    expect(getChatSteps(repo.id)).toBe("→ Read: alt.ts");
+
+    const sawStepsAtStart = deferred<string | null>();
+    await sendChatMessage(repo, "Zweiter Zug", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => {
+        sawStepsAtStart.resolve(getChatSteps(repo.id));
+        return { ok: true, summary: "ok", report: "fertig" };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    expect(await sawStepsAtStart.promise).toBeNull();
   });
 });
