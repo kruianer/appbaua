@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   IDEA_DIR,
+  SELF_ASSIGN_DIR,
   isQueueDriven,
   newMdFiles,
   oldestMd,
@@ -57,6 +58,16 @@ describe("sourceFor", () => {
       kind: "feedback",
     });
   });
+
+  // req-047: the Selbstauftrag task writes straight into the SAME ready/
+  // folder a human-written Requirement lands in — no queue of its own.
+  it("maps selbstauftrag to the requirements' ready/ folder", () => {
+    expect(sourceFor("selbstauftrag")).toEqual({
+      base: SELF_ASSIGN_DIR,
+      kind: "self-assign",
+    });
+    expect(SELF_ASSIGN_DIR).toBe("delivery/requirements/ready");
+  });
 });
 
 describe("runsOncePerDay", () => {
@@ -70,6 +81,8 @@ describe("runsOncePerDay", () => {
     // req-043: Feedback has a ready/ queue too, so a day with files waiting
     // must not be skipped the way a once-per-day type would be.
     expect(runsOncePerDay(sourceFor("feedback"))).toBe(false);
+    // req-047: once per repo and calendar day, same as the idea task.
+    expect(runsOncePerDay(sourceFor("selbstauftrag"))).toBe(true);
   });
 });
 
@@ -81,6 +94,7 @@ describe("isQueueDriven", () => {
     expect(isQueueDriven("idea")).toBe(false);
     expect(isQueueDriven("security")).toBe(false);
     expect(isQueueDriven("doc")).toBe(false);
+    expect(isQueueDriven("self-assign")).toBe(false);
   });
 });
 

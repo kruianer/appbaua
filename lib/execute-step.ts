@@ -2,6 +2,7 @@ import type { Repo } from "./repos";
 import type { TaskType } from "./task-types";
 import { type RunLogEntry, RECURRING_MD } from "./run-log";
 import {
+  IDEA_DIR,
   IDEA_DIRECTION_FILE,
   doneDir,
   failedDir,
@@ -29,6 +30,7 @@ import {
 } from "./workspace";
 import {
   NO_IDEA_MESSAGE,
+  NO_SELF_ASSIGN_MESSAGE,
   docPrompt,
   feedbackPrompt,
   fileTaskPrompt,
@@ -36,6 +38,7 @@ import {
   recurringPrompt,
   runClaude,
   securityPrompt,
+  selfAssignPrompt,
   testFixPrompt,
 } from "./claude-runner";
 import {
@@ -434,6 +437,12 @@ export async function executeStep(
   const ideasBefore =
     src.kind === "idea" && src.base ? await d.listReady(dir, src.base) : [];
 
+  // Which requirements already waited in ready/ before this run, so the step
+  // can tell a genuine self-assignment from an empty-handed one (req-047) —
+  // the same trick the idea task uses: the folder decides, not the answer.
+  const selfAssignBefore =
+    src.kind === "self-assign" && src.base ? await d.listReady(dir, src.base) : [];
+
   let prompt: string;
   if (src.kind === "file" && mdRel) {
     prompt = fileTaskPrompt(mdRel);
@@ -449,6 +458,14 @@ export async function executeStep(
       ideaDir: src.base,
       doneDir: doneDir(src.base),
       directionFile: IDEA_DIRECTION_FILE,
+    });
+  } else if (src.kind === "self-assign" && src.base) {
+    prompt = selfAssignPrompt({
+      readyDir: src.base,
+      doneRequirementsDir: DONE_REQUIREMENTS_DIR,
+      ideaDir: IDEA_DIR,
+      feedbackDoneDir: doneDir("delivery/feedback"),
+      visionFile: "delivery/vision.md",
     });
   } else if (src.kind === "security") {
     prompt = securityPrompt({ policyFile: SECURITY_POLICY_FILE });
@@ -604,6 +621,31 @@ export async function executeStep(
     return {
       kind: "success",
       message: `Neue Idee: ${created.join(", ")} — ${pushed.detail}`,
+      md: runMd(),
+    };
+  }
+
+  // The Selbstauftrag task (req-047) is done when a new Requirement exists in
+  // ready/ — or honestly done when none does, exactly the same mechanics as
+  // the Ideen task above: the folder decides, not Claude's wording. The
+  // created file's name is carried in the message so the Verlauf names it
+  // (req-047 AC8), the same way the Ideen message already does.
+  if (src.kind === "self-assign" && src.base) {
+    const created = newMdFiles(
+      selfAssignBefore,
+      await d.listReady(dir, src.base),
+    );
+    if (created.length === 0) {
+      // Nothing was proposed, so nothing of this run belongs on dev — whatever
+      // it touched along the way is dropped rather than committed.
+      await d.discardChanges(dir).catch(() => {});
+      return { kind: "success", message: NO_SELF_ASSIGN_MESSAGE, md: runMd() };
+    }
+    const pushed = await push(`worker: Selbstauftrag ${created.join(", ")}`);
+    if (pushFailed(pushed)) return pushError(pushed);
+    return {
+      kind: "success",
+      message: `Selbstauftrag: ${created.join(", ")} — ${pushed.detail}`,
       md: runMd(),
     };
   }

@@ -1,4 +1,5 @@
 import {
+  SELF_ASSIGN_TASK_ID,
   type DaySchedule,
   type TaskType,
   type Weekday,
@@ -180,6 +181,11 @@ export function nextWindowStart(t: TaskType, now: Date): Date | null {
  * 2 — the repo list is the primary priority, per the vision ("Repo 1 vor Repo 2
  * vor Repo 3"). Only active repos and active+due task types are included.
  * `repos` and `taskTypes` are already in priority order (index 0 = highest).
+ *
+ * req-047: Selbstauftrag additionally needs the REPO's own switch
+ * (`repo.selfAssign`) — unlike every other task type, being active+due is not
+ * enough for it, because that switch is global while this one must not run
+ * anywhere nobody turned it on for.
  */
 export function planRun(
   repos: Repo[],
@@ -191,6 +197,7 @@ export function planRun(
   const steps: PlannedStep[] = [];
   for (const repo of activeRepos) {
     for (const taskType of dueTypes) {
+      if (taskType.id === SELF_ASSIGN_TASK_ID && !repo.selfAssign) continue;
       steps.push({ repo, taskType });
     }
   }

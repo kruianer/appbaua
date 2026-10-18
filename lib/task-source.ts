@@ -21,7 +21,23 @@ import type { RunLogEntry } from "./run-log";
 // what — if anything — the feedback becomes, and it never touches app code; see
 // FEEDBACK_KINDS below for where that decision is shared with "file".
 
-export type TaskKind = "file" | "recurring" | "idea" | "security" | "doc" | "feedback";
+// req-047 adds the seventh shape, "self-assign": once per repo and calendar
+// day like the idea type, but its result is a brand-new Requirement filed
+// straight into the repo's OWN delivery/requirements/ready/ — the same place
+// a human-written one lands. Whether it ran is read off that folder, the same
+// trick the idea task uses. Unlike every other type it also needs a switch
+// PER REPO (see Repo.selfAssign in repos.ts), because running everywhere by
+// accident is exactly what it must not do; that extra gate lives in
+// scheduling.ts (planRun), not here.
+
+export type TaskKind =
+  | "file"
+  | "recurring"
+  | "idea"
+  | "security"
+  | "doc"
+  | "feedback"
+  | "self-assign";
 
 /**
  * The kinds that claim a .md from a ready/ queue (requeue stale claims, pick
@@ -53,10 +69,20 @@ export const IDEA_DIR = "delivery/idea";
  */
 export const IDEA_DIRECTION_FILE = "delivery/idea-direction.md";
 
+/** Base folder for Requirements — same one "requirement" (req-006) works off. */
+export const REQUIREMENTS_DIR = "delivery/requirements";
+
+/**
+ * Where a self-assigned Requirement lands (req-047): the exact folder a
+ * human-written one is placed in, not a queue of its own — a self-assignment
+ * IS a new ready/ requirement, nothing more.
+ */
+export const SELF_ASSIGN_DIR = readyDir(REQUIREMENTS_DIR);
+
 // Maps the predefined task-type ids (req-002) to their source in a repo.
 export const TASK_SOURCES: Record<string, TaskTypeSource> = {
   bug: { base: "delivery/bugs", kind: "file" },
-  requirement: { base: "delivery/requirements", kind: "file" },
+  requirement: { base: REQUIREMENTS_DIR, kind: "file" },
   "code-review": { base: null, kind: "recurring" },
   // No work-item folder either: the Doku task writes the site itself into
   // USER_DOCS_DIR, and there is no ready/done queue in front of it (req-016).
@@ -67,6 +93,8 @@ export const TASK_SOURCES: Record<string, TaskTypeSource> = {
   security: { base: null, kind: "security" },
   // Queue like bug/requirement, but Claude only reads and decides (req-043).
   feedback: { base: "delivery/feedback", kind: "feedback" },
+  // base IS the folder the new .md goes into, same pattern as "ideen" (req-047).
+  selbstauftrag: { base: SELF_ASSIGN_DIR, kind: "self-assign" },
 };
 
 export function sourceFor(taskId: string): TaskTypeSource {

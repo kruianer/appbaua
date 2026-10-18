@@ -45,6 +45,7 @@ const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
 const security = defaultTaskTypes().find((t) => t.id === "security")!;
 const doku = defaultTaskTypes().find((t) => t.id === "doku")!;
 const feedback = defaultTaskTypes().find((t) => t.id === "feedback")!;
+const selbstauftrag = defaultTaskTypes().find((t) => t.id === "selbstauftrag")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
 
 /**
@@ -1545,6 +1546,179 @@ describe("executeStep — Ideen-Task (req-011)", () => {
     expect(d.kind).toBe("error");
     if (d.kind !== "error") return;
     expect(d.message).toContain("push failed: keine Rechte");
+  });
+});
+
+// req-047: the Selbstauftrag task. Once per repo and calendar day, Claude
+// proposes exactly one new Requirement straight into
+// delivery/requirements/ready/ — same mechanics as the Ideen task (req-011):
+// whether it happened is read off the folder, not off Claude's answer.
+describe("executeStep — Selbstauftrag-Task (req-047)", () => {
+  const SELF_ASSIGN_READY = "delivery/requirements/ready";
+
+  /**
+   * Fake for the ready/ folder: the listing before the Claude run and the
+   * one after it, same trick as the Ideen task's fake.
+   */
+  function readyFolder(before: string[], after: string[]) {
+    let calls = 0;
+    return vi.fn(async (_dir: string, rel: string) => {
+      if (rel !== SELF_ASSIGN_READY) return [];
+      calls += 1;
+      return calls === 1 ? before : after;
+    });
+  }
+
+  /** Claude run that writes one new requirement file into the working copy. */
+  function proposes(before: string[], name: string) {
+    return readyFolder(before, [...before, name]);
+  }
+
+  it("AC: a new requirement file is created and pushed on dev", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: proposes([], "req-050-dunkelmodus.md"),
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("req-050-dunkelmodus.md");
+    expect(d.message).toContain("auf dev gepusht");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: Selbstauftrag req-050-dunkelmodus.md",
+      "tok",
+      ON(),
+    );
+  });
+
+  it("AC: a second run on the same calendar day is skipped", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 5).toISOString(),
+        repo: "appbaua",
+        taskType: "Selbstauftrag",
+        status: "success",
+        message: "Selbstauftrag: req-050-dunkelmodus.md — auf dev gepusht",
+      },
+    ];
+    const prepareRepo = vi.fn(async () => PREPARED);
+    const d = await executeStep(repo, selbstauftrag, ranToday, deps({ prepareRepo }));
+    expect(d.kind).toBe("skip");
+    expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
+  });
+
+  it("AC: no new requirement -> nothing is committed and the log says so", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: readyFolder(["req-049-bestand.md"], ["req-049-bestand.md"]),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "kein sinnvoller Selbstauftrag gefunden",
+          report: "",
+        })),
+        commitAndPush,
+        discardChanges,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe("kein sinnvoller Selbstauftrag gefunden");
+    expect(commitAndPush).not.toHaveBeenCalled();
+    expect(discardChanges).toHaveBeenCalledWith("/work/appbaua"); // nothing half-done reaches dev
+  });
+
+  it("an empty-handed run still uses up the day", async () => {
+    const empty = await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({ listReady: readyFolder([], []) }),
+    );
+    expect(empty.kind).toBe("success");
+    if (empty.kind !== "success") return;
+    const log: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: now.toISOString(),
+        endedAt: now.toISOString(),
+        repo: "appbaua",
+        taskType: "Selbstauftrag",
+        status: "success",
+        message: empty.message,
+      },
+    ];
+    expect((await executeStep(repo, selbstauftrag, log, deps())).kind).toBe("skip");
+  });
+
+  it("AC: the vision, shipped work, feedback and open ideas reach Claude as sources", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "vorgeschlagen", report: "" };
+    });
+    await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({ listReady: proposes([], "req-050-dunkelmodus.md"), runClaude }),
+    );
+    expect(seenPrompt).toContain("delivery/vision.md");
+    expect(seenPrompt).toContain("delivery/requirements/done/");
+    expect(seenPrompt).toContain("delivery/feedback/done/");
+    expect(seenPrompt).toContain("delivery/idea/");
+    expect(seenPrompt).toContain("Nicht-Ziele");
+  });
+
+  it("claims no .md — the Selbstauftrag task has no work-item queue", async () => {
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: proposes([], "req-050-dunkelmodus.md"),
+        moveMd,
+        setCurrentMd,
+      }),
+    );
+    expect(moveMd).not.toHaveBeenCalled();
+    expect(setCurrentMd).not.toHaveBeenCalled();
+  });
+
+  it("files no review report — the requirement file is the result (req-010 stays untouched)", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: proposes([], "req-050-dunkelmodus.md"),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "vorgeschlagen",
+          report: "# Ein langer Bericht",
+        })),
+        writeRepoFile,
+      }),
+    );
+    expect(writeRepoFile).not.toHaveBeenCalled();
   });
 });
 

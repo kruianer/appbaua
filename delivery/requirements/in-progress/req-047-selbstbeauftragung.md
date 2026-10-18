@@ -41,28 +41,28 @@ gemeinsam. Ohne Einschalten läuft er nirgends.
       ist der Selbstauftrag dort NICHT eingeschaltet.
 - [x] Given ich schalte den Selbstauftrag für "Furtgoh" ein, when ich
       ein anderes Repo ansehe, then ist er dort NICHT eingeschaltet.
-- [ ] Given der Selbstauftrag ist nur für "Furtgoh" eingeschaltet, when
+- [x] Given der Selbstauftrag ist nur für "Furtgoh" eingeschaltet, when
       der Worker alle Repos durchgeht, then schreibt er NUR dort ein
       Requirement.
-- [ ] Given die Task-Art ist für ein Repo aktiv und sie lief heute noch
+- [x] Given die Task-Art ist für ein Repo aktiv und sie lief heute noch
       nicht, when der Worker das Repo an die Reihe nimmt, then legt er
       dort höchstens ein neues Requirement in `ready/` ab.
-- [ ] Given der Worker hat heute in diesem Repo schon einen Selbstauftrag
+- [x] Given der Worker hat heute in diesem Repo schon einen Selbstauftrag
       geschrieben, when er das Repo erneut an die Reihe nimmt, then legt
       er KEIN zweites an.
-- [ ] Given er hat ein Requirement geschrieben, when ich es lese, then
+- [x] Given er hat ein Requirement geschrieben, when ich es lese, then
       hat es dieselbe Form wie ein von mir geschriebenes (Frontmatter,
       Funktion, Abnahmekriterien, Out of Scope).
-- [ ] Given er hat ein Requirement geschrieben, when ich den Verlauf
+- [x] Given er hat ein Requirement geschrieben, when ich den Verlauf
       ansehe, then steht dort der Dateiname.
-- [ ] Given die Vision des Repos nennt ein Nicht-Ziel, when er ein
+- [x] Given die Vision des Repos nennt ein Nicht-Ziel, when er ein
       Requirement schreibt, then verstößt es NICHT dagegen.
-- [ ] Given er findet nichts, was sinnvoll als Nächstes käme, when der
+- [x] Given er findet nichts, was sinnvoll als Nächstes käme, when der
       Lauf endet, then entsteht KEINE Datei und der Verlauf sagt das.
 - [ ] Given das Wochenbudget des Repos ist aufgebraucht (req-044), when
       der Worker den Selbstauftrag ausführen würde, then legt er KEIN
       Requirement an.
-- [ ] Given die Task-Art ist aktiv, when der Worker läuft, then ändert
+- [x] Given die Task-Art ist aktiv, when der Worker läuft, then ändert
       der Selbstauftrag KEINEN Code — er schreibt nur die .md-Datei.
 
 # Constraints

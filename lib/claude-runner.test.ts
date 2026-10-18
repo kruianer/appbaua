@@ -15,7 +15,9 @@ import {
   LIVE_TAIL_LINES,
   NO_FEEDBACK_ACTION_MESSAGE,
   NO_IDEA_MESSAGE,
+  NO_SELF_ASSIGN_MESSAGE,
   OOM_KILL_MESSAGE,
+  selfAssignPrompt,
 } from "./claude-runner";
 import { SECURITY_OK_MESSAGE } from "./security-report";
 import { RELEASE_INFO_MARKER } from "./release-info";
@@ -249,6 +251,61 @@ describe("ideaPrompt (req-011)", () => {
 
   it("asks for no report — the idea file IS the result", () => {
     expect(p).not.toContain("Bericht");
+  });
+});
+
+// req-047: the Selbstauftrag task's result is a finished Requirement, not a
+// loose idea — it must read like one a human wrote, and it must respect the
+// vision's Non-Goals, which nothing else in the pipeline enforces.
+describe("selfAssignPrompt (req-047)", () => {
+  const p = selfAssignPrompt({
+    readyDir: "delivery/requirements/ready",
+    doneRequirementsDir: "delivery/requirements/done",
+    ideaDir: "delivery/idea",
+    feedbackDoneDir: "delivery/feedback/done",
+    visionFile: "delivery/vision.md",
+  });
+
+  it("asks for exactly one new requirement", () => {
+    expect(p).toContain("GENAU EIN neues Requirement");
+  });
+
+  it("AC: names vision, shipped requirements, feedback and open ideas as sources", () => {
+    expect(p).toContain("delivery/vision.md");
+    expect(p).toContain("delivery/requirements/done/");
+    expect(p).toContain("delivery/feedback/done/");
+    expect(p).toContain("delivery/idea/");
+  });
+
+  it("AC: the vision's Non-Goals are a boundary, not a suggestion", () => {
+    expect(p).toContain("Nicht-Ziele");
+    expect(p).toContain("Grenze");
+  });
+
+  it("AC: an open idea is read, never moved or deleted", () => {
+    expect(p).toContain("verschiebe, lösche");
+  });
+
+  it("AC: the file lands in ready/, in the same shape as a hand-written one", () => {
+    expect(p).toContain("delivery/requirements/ready/");
+    expect(p).toContain("Frontmatter");
+    expect(p).toContain("# Goal (Why)");
+    expect(p).toContain("# Function (What)");
+    expect(p).toContain("# Acceptance Criteria");
+    expect(p).toContain("# Out of Scope");
+  });
+
+  it("AC: changes nothing else in the repo", () => {
+    expect(p).toContain("Ändere sonst NICHTS in diesem Repo");
+  });
+
+  it("AC: finding nothing sensible -> no file, fixed answer", () => {
+    expect(p).toContain("lege KEINE Datei an");
+    expect(p).toContain(NO_SELF_ASSIGN_MESSAGE);
+  });
+
+  it("leaves committing and pushing to the worker", () => {
+    expect(p).toContain("Committe/pushe NICHT selbst.");
   });
 });
 

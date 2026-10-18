@@ -168,6 +168,30 @@ describe("planRun", () => {
     const steps = planRun(repos, [bug, notDue], WED_18);
     expect(steps.every((s) => s.taskType.label === "Bugs")).toBe(true);
   });
+
+  // req-047 AC4: Selbstauftrag is active+due like any other type, but only
+  // runs for repos that have the repo-level switch on.
+  it("runs Selbstauftrag only for repos with repo.selfAssign on", () => {
+    const selbstauftrag = typeWith({
+      id: "selbstauftrag",
+      label: "Selbstauftrag",
+      always: true,
+    });
+    const onlyFurtgoh = repos.map((r) =>
+      r.name === "appbaua" ? { ...r, selfAssign: true } : r,
+    );
+    const steps = planRun(onlyFurtgoh, [selbstauftrag], WED_18);
+    expect(steps.map((s) => s.repo.name)).toEqual(["appbaua"]);
+  });
+
+  it("runs Selbstauftrag nowhere when no repo has the switch on", () => {
+    const selbstauftrag = typeWith({
+      id: "selbstauftrag",
+      label: "Selbstauftrag",
+      always: true,
+    });
+    expect(planRun(repos, [selbstauftrag], WED_18)).toEqual([]);
+  });
 });
 
 describe("nextWindowStart (req-022)", () => {

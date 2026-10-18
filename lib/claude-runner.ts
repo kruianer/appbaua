@@ -243,6 +243,56 @@ export function ideaPrompt(paths: {
 }
 
 /**
+ * What the worker logs — and what Claude is asked to answer — when a
+ * self-assign run found nothing sensible to propose (req-047).
+ */
+export const NO_SELF_ASSIGN_MESSAGE = "kein sinnvoller Selbstauftrag gefunden";
+
+/**
+ * The prompt for the Selbstauftrag task (req-047). Unlike the Ideen prompt
+ * above, its result is not a loose idea but a finished Requirement, filed
+ * straight into `readyDir` — the same place a human-written one lands, so it
+ * must look like one: same frontmatter, same sections. The sources it is
+ * told to read (vision, shipped requirements + code, past feedback, open
+ * ideas, the repo's own conventions) and the vision's Non-Goals as a hard
+ * boundary are both named explicitly here, because the requirement makes
+ * both binding and nothing else in the pipeline enforces them.
+ */
+export function selfAssignPrompt(paths: {
+  readyDir: string;
+  doneRequirementsDir: string;
+  ideaDir: string;
+  feedbackDoneDir: string;
+  visionFile: string;
+}): string {
+  return [
+    `Schlage dir selbst GENAU EIN neues Requirement für dieses Repo vor —`,
+    `eines, das als Nächstes sinnvoll fehlt, nicht, was dir irgendwie einfällt.`,
+    `Schöpfe dabei aus ${paths.visionFile} (einschließlich ihrer Nicht-Ziele),`,
+    `den bereits umgesetzten Requirements in ${paths.doneRequirementsDir}/ und`,
+    `dem Code, früherem Feedback in ${paths.feedbackDoneDir}/, den offenen`,
+    `Ideen in ${paths.ideaDir}/ sowie den Vorgaben dieses Repos (Stack, DevOps,`,
+    `CLAUDE.md). Die Nicht-Ziele der Vision sind dabei eine Grenze, keine`,
+    `Anregung — verstoße NICHT gegen sie.`,
+    `Eine offene Idee ist nur eine Quelle, kein Auftrag: verschiebe, lösche`,
+    `oder ändere KEINE Datei in ${paths.ideaDir}/, auch wenn du sie aufgreifst.`,
+    `Lege das Requirement als neue .md-Datei direkt in ${paths.readyDir}/ ab,`,
+    `in genau derselben Form wie ein von Hand geschriebenes: Frontmatter`,
+    `(id, title, app, area, priority, created), danach die Abschnitte`,
+    `"# Goal (Why)", "# Function (What)", "# Acceptance Criteria" (als`,
+    `Given/when/then-Kästchen "- [ ] ...") und "# Out of Scope". Die id ist die`,
+    `nächste freie req-NNN-Nummer über ALLE Unterordner von`,
+    `delivery/requirements/ hinweg (draft, ready, in-progress, done); der`,
+    `Dateiname ist req-NNN-<slug>.md.`,
+    `Ändere sonst NICHTS in diesem Repo — kein Code, keine andere Datei; dies`,
+    `ist ausschließlich das Anlegen dieser einen .md.`,
+    `Findest du nichts Sinnvolles, lege KEINE Datei an und antworte genau`,
+    `"${NO_SELF_ASSIGN_MESSAGE}".`,
+    `Committe/pushe NICHT selbst. Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
  * The prompt for the Security task (req-014). Like a recurring task it answers
  * with a report — but only when it actually found something, because a run
  * without findings files no file at all. The four areas, the severity, the
