@@ -99,6 +99,32 @@ describe("Verlauf — .md-Name am Eintrag (req-015)", () => {
   });
 });
 
+// req-044: ein aufgebrauchtes Wochenbudget steht als eigene Zeile im
+// Verlauf — mit Repo-Namen, nicht als anonymes "—" wie die Leerlauf-Zeile.
+describe("Verlauf — Wochenbudget aufgebraucht (req-044)", () => {
+  it("AC: die Zeile nennt das Repo und den Grund", async () => {
+    stubLog([
+      entry({
+        repo: "Forschung",
+        taskType: null,
+        status: "idle",
+        message:
+          "Wochenbudget aufgebraucht (3/3) — Bugs und Requirements werden übersprungen, bis die Woche vorbei ist.",
+        md: null,
+      }),
+    ]);
+    render(<RunLog />);
+
+    expect(await screen.findByText("Forschung")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Wochenbudget aufgebraucht (3/3) — Bugs und Requirements werden übersprungen, bis die Woche vorbei ist.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Leerlauf")).toBeInTheDocument();
+  });
+});
+
 // bug-021: Der Verlauf ließ sich nicht nur nach oben und unten scrollen,
 // sondern auch seitlich verschieben. Fehlermeldungen enthalten lange
 // Zeichenketten ohne Leerzeichen — Dateipfade, JSON, Sitzungs-IDs —, und ohne

@@ -42,7 +42,7 @@ weiter wie bisher.
 - [x] Given für "Forschung" ist das Budget 3 und der Worker hat diese
       Woche dort 3 Pakete abgearbeitet, when ein viertes in `ready/`
       liegt, then bearbeitet er es NICHT.
-- [ ] Given das Budget eines Repos ist aufgebraucht, when ich den
+- [x] Given das Budget eines Repos ist aufgebraucht, when ich den
       Verlauf ansehe, then ist erkennbar, dass das Repo wegen des
       Budgets übersprungen wurde.
 - [x] Given das Budget von "Forschung" ist aufgebraucht, when ein
