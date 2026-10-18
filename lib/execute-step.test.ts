@@ -35,9 +35,11 @@ import {
 } from "./network-abort";
 import type { NetworkAbortCounts } from "./network-abort-store";
 import { NO_FEEDBACK_ACTION_MESSAGE, OOM_KILL_MESSAGE } from "./claude-runner";
+import { RELEASE_INFO_MARKER } from "./release-info";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
+const requirement = defaultTaskTypes().find((t) => t.id === "requirement")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
 const security = defaultTaskTypes().find((t) => t.id === "security")!;
@@ -840,6 +842,195 @@ describe("executeStep — Bericht ablegen (req-010)", () => {
     expect(d.kind).toBe("success");
     if (d.kind !== "success") return;
     expect(d.message).not.toContain("Bericht:");
+  });
+});
+
+// req-046: a finished Requirement/Bug tells the operator what changed for
+// them, in a Release-Info filed in the target repo — written in THIS run,
+// from Claude's own final answer, never reconstructed from the Verlauf.
+describe("executeStep — Release-Info je Paket (req-046)", () => {
+  const RELEASE_TEXT =
+    "Du kannst jetzt je Repo ein Wochenbudget setzen, unter Repos.";
+
+  function fileDeps(
+    md: string,
+    report: string,
+    over: Partial<ExecuteDeps> = {},
+  ): Partial<ExecuteDeps> {
+    return deps({
+      listReady: folders({ ready: [md] }),
+      runClaude: vi.fn(async () => ({
+        ok: true,
+        summary: "done",
+        report,
+      })),
+      ...over,
+    });
+  }
+
+  const reportWithMarker = `Alles abgehakt und committet.\n\n${RELEASE_INFO_MARKER}\n${RELEASE_TEXT}`;
+
+  it("AC1: a finished Requirement gets a Release-Info in the target repo", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      requirement,
+      [],
+      fileDeps("req-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    expect(d.kind).toBe("success");
+    const call = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    );
+    expect(call).toBeTruthy();
+    const [dir, rel, content] = call!;
+    expect(dir).toBe("/work/appbaua");
+    expect(rel).toBe("delivery/release-info/2026-07-24-req-001.md");
+    expect(content).toContain(RELEASE_TEXT);
+  });
+
+  it("AC2: a finished Bug gets a Release-Info in the target repo", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    expect(d.kind).toBe("success");
+    const call = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    );
+    expect(call).toBeTruthy();
+    expect(call![1]).toBe("delivery/release-info/2026-07-24-bug-001.md");
+  });
+
+  it("names repo and package so an entry can be told apart (AC8 groundwork)", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    const content = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    )![2];
+    expect(content).toContain("repo: appbaua");
+    expect(content).toContain("package: bug-001");
+  });
+
+  it("carries only the text AFTER the marker — nothing from before it", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    const content = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    )![2];
+    expect(content).not.toContain("Alles abgehakt");
+  });
+
+  it("no marker in the final answer -> no Release-Info is filed", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", "Fertig, alles grün.", { writeRepoFile }),
+    );
+    expect(d.kind).toBe("success");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  // AC9: ein abgebrochenes oder fehlgeschlagenes Paket bekommt KEINE
+  // Release-Info.
+  it("AC9: a failed Claude run files no Release-Info", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", "", {
+        writeRepoFile,
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "Timeout",
+          report: "",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("AC9: a red test gate (parked to failed/) files no Release-Info", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, {
+        writeRepoFile,
+        runTestGate: vi.fn(async () => red("npm test: 1 failing")),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("recurring/idea/security/doc/feedback tasks never file a Release-Info", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      deps({
+        writeRepoFile,
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "done",
+          report: reportWithMarker,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("a failing write never turns a finished package into an error", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, {
+        writeRepoFile: vi.fn(async (_d: string, rel: string) => {
+          if (rel.startsWith("delivery/release-info/")) {
+            throw new Error("Platte voll");
+          }
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
   });
 });
 

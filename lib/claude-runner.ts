@@ -1,6 +1,7 @@
 import { run, type RunResult } from "./workspace";
 import { describeEvent, finalResultText, modelFromEvent } from "./claude-events";
 import { SECURITY_OK_MESSAGE } from "./security-report";
+import { RELEASE_INFO_MARKER } from "./release-info";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
 // CLI runs non-interactively with permissions skipped so it never asks. Auth is
@@ -148,6 +149,17 @@ export function fileTaskPrompt(mdRelPath: string): string {
     ``,
     `Nennt die Datei keine Akzeptanzkriterien, arbeite sie wie bisher in`,
     `einem Zug ab und committe am Ende einmal.`,
+    ``,
+    `Sind alle Kriterien abgehakt, beende deine letzte Antwort mit dem Marker`,
+    `"${RELEASE_INFO_MARKER}" auf eigener Zeile, danach EIN bis wenige Sätze`,
+    `für den Betreiber der App — in SEINER Sprache, nicht technisch: was ist`,
+    `für ihn jetzt anders. Betraf die Änderung eine Funktion ohne eigene`,
+    `Oberfläche, ergänze einen Satz, woran er überhaupt merkt, dass es sie`,
+    `gibt. Muss er selbst etwas tun, damit die Änderung wirkt (z.B. eine`,
+    `Einstellung setzen), nenne genau das. Nenne nach dem Marker KEINE`,
+    `Dateinamen und KEINE Testzahlen — die stehen bereits im Verlauf.`,
+    `Lässt du ein Kriterium offen (z.B. weil die Zeit nicht reicht), lass den`,
+    `Marker ganz weg.`,
     ``,
     `PUSHE NICHT — das übernimmt der Worker.`,
     `Arbeite vollständig autonom; frage nichts.`,

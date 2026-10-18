@@ -47,6 +47,11 @@ import {
 } from "./test-gate";
 import { REPORT_DIR, reportContent, reportPath } from "./review-report";
 import {
+  extractReleaseInfo,
+  releaseInfoContent,
+  releaseInfoPath,
+} from "./release-info";
+import {
   DOC_SITE_FILE,
   DOC_UNCHANGED_MESSAGE,
   DONE_REQUIREMENTS_DIR,
@@ -698,6 +703,20 @@ export async function executeStep(
     gateNote = testGateNote(gate);
   }
 
+  // req-046: a finished Requirement/Bug gets a Release-Info in the target
+  // repo — written in THIS run, from Claude's own final answer (the one
+  // fileTaskPrompt asked to end with RELEASE_INFO_MARKER), never
+  // reconstructed afterwards from the Verlauf. Best effort, like fileReport
+  // below: a release info that cannot be written must not turn an otherwise
+  // finished package into a failed one.
+  let releaseInfoRel: string | null = null;
+  if (src.kind === "file" && mdName) {
+    const text = extractReleaseInfo(outcome.report);
+    if (text) {
+      releaseInfoRel = await fileReleaseInfo(d, dir, repo, mdName, text, d.now());
+    }
+  }
+
   // Success: for file-driven, move in-progress -> done before committing. Also
   // clears any network-abort count this package had run up (req-038) — it made
   // it through this time, so the Verlauf must not keep suggesting past trouble.
@@ -738,7 +757,9 @@ export async function executeStep(
 
   // The log stays a short message; it only names the file so the full report
   // remains findable from the Verlauf (req-010).
-  const note = reportRel ? ` (Bericht: ${reportRel})` : "";
+  const note =
+    (reportRel ? ` (Bericht: ${reportRel})` : "") +
+    (releaseInfoRel ? ` (Release-Info: ${releaseInfoRel})` : "");
   // A push that did not happen is a failed step (req-020). The .md is NOT
   // parked under failed/: the work itself was fine and nothing was committed,
   // so the next prepareRepo puts it back into ready/ and the next pass retries
@@ -901,6 +922,34 @@ async function fileReport(
       rel,
       reportContent({ ...ref, taskLabel: taskType.label, report }),
     );
+    return rel;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write a finished Requirement/Bug's Release-Info into the working copy
+ * (req-046) and return its repo-relative path. Best effort, same reasoning
+ * as fileReport above: a write that fails must not turn a finished package
+ * into a failed one.
+ */
+async function fileReleaseInfo(
+  d: ExecuteDeps,
+  dir: string,
+  repo: Repo,
+  mdName: string,
+  text: string,
+  now: Date,
+): Promise<string | null> {
+  try {
+    const ref = {
+      repoName: repo.name,
+      packageId: mdName.replace(/\.md$/i, ""),
+      now,
+    };
+    const rel = releaseInfoPath(ref);
+    await d.writeRepoFile(dir, rel, releaseInfoContent({ ...ref, text }));
     return rel;
   } catch {
     return null;

@@ -6,6 +6,7 @@ import {
   createLiveTail,
   docPrompt,
   feedbackPrompt,
+  fileTaskPrompt,
   ideaPrompt,
   lastLines,
   recurringPrompt,
@@ -17,6 +18,7 @@ import {
   OOM_KILL_MESSAGE,
 } from "./claude-runner";
 import { SECURITY_OK_MESSAGE } from "./security-report";
+import { RELEASE_INFO_MARKER } from "./release-info";
 import type { run } from "./workspace";
 
 // Live output of a running Claude step (req-008): only the last ~50 lines, and
@@ -152,6 +154,42 @@ describe("runClaude session continuation (req-040)", () => {
 // bug-001: the Aktivität tab used to show nothing but the CLI's stdin warning
 // for minutes, because print mode writes to stdout only at the very end. The
 // run now asks for the structured event stream and closes stdin.
+
+// req-046: the prompt is the only place that can tell Claude what the
+// Release-Info has to contain and how to separate it from the rest of its
+// answer — execute-step.ts only extracts text after RELEASE_INFO_MARKER.
+describe("fileTaskPrompt — Release-Info (req-046)", () => {
+  const p = fileTaskPrompt("delivery/bugs/ready/bug-001.md");
+
+  it("asks to end the final answer with the marker", () => {
+    expect(p).toContain(RELEASE_INFO_MARKER);
+  });
+
+  it("asks for the operator's language, not a technical one", () => {
+    expect(p).toContain("Betreiber der App");
+    expect(p).toContain("nicht technisch");
+  });
+
+  it("asks how to notice a feature without its own UI", () => {
+    expect(p).toContain("ohne eigene");
+    expect(p).toContain("Oberfläche");
+  });
+
+  it("asks to name a required manual step", () => {
+    expect(p).toContain("Muss er selbst etwas tun");
+  });
+
+  it("forbids file names and test counts after the marker", () => {
+    expect(p).toContain("KEINE");
+    expect(p).toContain("Dateinamen");
+    expect(p).toContain("Testzahlen");
+  });
+
+  it("says to leave the marker out when a criterion stays open", () => {
+    expect(p).toContain("lass den");
+    expect(p).toContain("Marker ganz weg");
+  });
+});
 
 describe("recurringPrompt (req-010)", () => {
   it("names the task and asks for the complete report as the final answer", () => {

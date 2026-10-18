@@ -32,25 +32,25 @@ sortiert, neueste zuerst.
 
 # Acceptance Criteria
 
-- [ ] Given der Worker hat ein Requirement abgeschlossen, when ich ins
+- [x] Given der Worker hat ein Requirement abgeschlossen, when ich ins
       Ziel-Repo sehe, then liegt dort eine Release-Info dazu.
-- [ ] Given der Worker hat einen Bug behoben, when ich ins Ziel-Repo
+- [x] Given der Worker hat einen Bug behoben, when ich ins Ziel-Repo
       sehe, then liegt dort eine Release-Info dazu.
-- [ ] Given ich lese eine Release-Info, when ich sie durchgehe, then
+- [x] Given ich lese eine Release-Info, when ich sie durchgehe, then
       steht dort in einem Satz, was jetzt anders ist.
-- [ ] Given das Paket betraf eine Funktion ohne Oberfläche, when ich
+- [x] Given das Paket betraf eine Funktion ohne Oberfläche, when ich
       die Release-Info lese, then steht dort, woran ich merke, dass es
       sie gibt.
-- [ ] Given ich muss selbst etwas tun, damit die Änderung wirkt (z.B.
+- [x] Given ich muss selbst etwas tun, damit die Änderung wirkt (z.B.
       eine Einstellung setzen), when ich die Release-Info lese, then
       steht dort, was.
-- [ ] Given ich lese eine Release-Info, when ich sie durchgehe, then
+- [x] Given ich lese eine Release-Info, when ich sie durchgehe, then
       stehen dort KEINE Dateinamen und KEINE Testzahlen.
 - [ ] Given ich öffne die Release-Infos in appbaua, when sie erscheinen,
       then sehe ich die Einträge aller Repos, neueste zuerst.
 - [ ] Given ich sehe die Liste, when ich einen Eintrag ansehe, then
       erkenne ich, zu welchem Repo und zu welchem Paket er gehört.
-- [ ] Given ein Paket wurde abgebrochen oder ist fehlgeschlagen, when
+- [x] Given ein Paket wurde abgebrochen oder ist fehlgeschlagen, when
       ich ins Repo sehe, then entsteht dafür KEINE Release-Info.
 - [ ] Given ich lese die Release-Infos auf dem iPhone, when ich sie
       durchgehe, then muss ich nicht seitlich schieben.
