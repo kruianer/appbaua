@@ -226,3 +226,31 @@ describe("docker-compose.yml — Chat-Arbeitskopie ueberlebt einen Deploy (bug-0
     expect(COMPOSE).toMatch(/^\s{2}chat-work:\s*$/m);
   });
 });
+
+describe("docker-compose.yml — Chat-Sitzungen koennen gespeichert werden (bug-032)", () => {
+  // Claude legt seine Sitzungen unter $HOME/.claude/projects ab — also im
+  // claude-home-Volume, das im App-Container seit bug-028 nur lesend
+  // eingehaengt ist. Ohne ein eigenes, schreibbares Volume genau fuer diesen
+  // Unterpfad konnte NIE eine Sitzung geschrieben werden, nicht erst nach
+  // einem Neustart.
+
+  it("AC: ein eigenes Volume macht genau den Sitzungs-Unterpfad schreibbar", () => {
+    expect(serviceBlock("app")).toMatch(
+      /^\s*-\s*chat-sessions:\/claude-home\/\.claude\/projects\s*$/m,
+    );
+  });
+
+  it("das Volume ist auch deklariert", () => {
+    expect(COMPOSE).toMatch(/^\s{2}chat-sessions:\s*$/m);
+  });
+
+  it("die Anmeldung selbst bleibt nur lesend — die Auflage aus bug-028 gilt weiter", () => {
+    // Der Fix macht NICHT das ganze claude-home-Volume schreibbar, sondern
+    // nur den Sitzungs-Unterpfad; die beiden Tests fuer bug-028 oben bleiben
+    // deshalb unveraendert gueltig. Hier zusaetzlich: kein Mount hebt /claude-home
+    // selbst schreibend ein.
+    const app = serviceBlock("app");
+    expect(app).toMatch(/^\s*-\s*claude-home:\/claude-home:ro\s*$/m);
+    expect(app).not.toMatch(/^\s*-\s*claude-home:\/claude-home\s*$/m);
+  });
+});

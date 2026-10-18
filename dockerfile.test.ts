@@ -40,3 +40,19 @@ describe("Dockerfile — Chat-Arbeitskopie ueberlebt einen Deploy (bug-029)", ()
     expect(DOCKERFILE).toMatch(/chown -R nextjs:nodejs .*\/chat-work/);
   });
 });
+
+describe("Dockerfile — Chat-Sitzungen koennen gespeichert werden (bug-032)", () => {
+  // docker-compose.yml mountet ein eigenes, schreibbares Volume genau auf
+  // /claude-home/.claude/projects (Unterpfad des nur lesenden claude-home-
+  // Volumes). Das Verzeichnis muss im Image schon existieren und dem
+  // nextjs-Nutzer gehoeren, sonst uebernimmt das benannte Volume beim ersten
+  // Start root-Rechte und bleibt fuer den nicht-root-Prozess unschreibbar.
+
+  it("AC: das Verzeichnis existiert im Image", () => {
+    expect(DOCKERFILE).toContain("/claude-home/.claude/projects");
+  });
+
+  it("AC: es gehoert dem nextjs-Nutzer, nicht root", () => {
+    expect(DOCKERFILE).toMatch(/chown -R nextjs:nodejs .*\/claude-home/);
+  });
+});

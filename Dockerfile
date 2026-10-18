@@ -56,7 +56,17 @@ COPY --from=builder /app/.next/static ./.next/static
 # Directory for the JSON fallback store (used only when DATABASE_URL is unset),
 # the work dir for the appbaua rollout (req-012), and the chat's own working
 # copy (bug-029).
-RUN mkdir -p .data /work /chat-work && chown -R nextjs:nodejs .data /work /chat-work
+#
+# /claude-home/.claude/projects also gets created here: docker-compose.yml
+# mounts a SEPARATE writable volume over exactly this subpath of the
+# read-only claude-home volume (bug-032). Claude Code keeps its sessions
+# there, named after the cwd — with claude-home entirely read-only (bug-028),
+# the chat could never write one, so EVERY turn, not just one after a
+# restart, found no session to resume. A named volume adopts the ownership
+# this directory already has in the image on first mount, so without the
+# chown below it would come up owned by root and stay unwritable for nextjs.
+RUN mkdir -p .data /work /chat-work /claude-home/.claude/projects \
+  && chown -R nextjs:nodejs .data /work /chat-work /claude-home
 
 USER nextjs
 EXPOSE 3000
