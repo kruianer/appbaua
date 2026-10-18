@@ -53,28 +53,40 @@ Volume liegt (`claude-home`). Der App-Container hat dieses Volume
 nicht eingehängt und sein `HOME` zeigt woanders hin. Selbst mit
 installierter CLI käme als Nächstes ein Anmeldefehler.
 
-Richtung für den Fix — bitte selbst abwägen:
+# Fix
 
-Zwei Wege, und die Wahl ist eine Sicherheitsfrage, keine technische:
+**Entschieden: Der App-Container wird ausgestattet.** Die CLI wird auch
+im `Dockerfile` der App installiert, und das `claude-home`-Volume wird
+dort eingehängt. Der Chat bleibt, wo er ist.
 
-**A) Den App-Container ausstatten.** CLI installieren und das
-`claude-home`-Volume einhängen. Einfach, aber: Der App-Container ist
-der einzige Dienst, der aus dem Internet erreichbar ist. Er bekäme
-damit die Abo-Anmeldung in seinen Lesebereich — genau die Art
-Ausweitung, die bug-005 für den GITHUB_TOKEN rückgängig gemacht hat.
+Der Betreiber hat das abgewogen: Die App steht hinter einem
+Cloudflare-Tunnel und einem Passkey, und er ist ihr einziger Nutzer.
 
-**B) Den Chat im Worker-Container ausführen.** Die App schickt die
-Nachricht dorthin, wo CLI und Anmeldung schon sind, und bekommt die
-Antwort zurück. Aufwendiger, aber die Abo-Anmeldung bleibt, wo sie
-ist. Der `health-agent` ist das Vorbild: ein Dienst mit einer engen,
-festen Schnittstelle, der nicht aus dem Internet erreichbar ist.
+Zwei Auflagen, die zur Entscheidung gehören:
 
-Zu bedenken bei B: Die Sitzungen aus req-040 (höchstens fünf, LRU,
-acht Stunden Leerlauf) liegen heute im App-Container. Wo sie nach
-einem Wechsel liegen, gehört mitentschieden.
+1. **Das Volume wird nur lesend eingehängt** (`claude-home:/claude-home:ro`).
+   Der App-Container muss die Anmeldung lesen; schreiben muss nur
+   `claude login`, und das läuft im Worker-Container. Ein Fehler im
+   Chat kann die Anmeldung so nicht beschädigen.
+2. **`HOME` des App-Containers muss auf `/claude-home` zeigen**, sonst
+   findet die CLI die Anmeldung nicht — heute steht es auf
+   `/home/nextjs`.
 
-Zu bedenken bei beiden: Der nächtliche Worker und der Chat teilen sich
-dasselbe Abo (Constraint in req-040). Daran ändert sich nichts.
+Zu bedenken — was im Schadensfall erreichbar wäre: Mit CLI und
+Anmeldung im selben Container läuft Claude Code dort mit Datei- und
+Bash-Zugriff, und der App-Container hält `GITHUB_TOKEN` mit
+Schreibrecht auf alle Repos des Betreibers. Der mögliche Schaden ist
+also Code in den Repos, nicht nur verbrauchte Tokens. Das ändert die
+Entscheidung nicht, gehört aber in die Akten: Wird der Zugang je für
+weitere Personen geöffnet, ist sie neu zu treffen.
+
+Zum Vergleich der verworfene Weg: **Den Chat im Worker-Container
+ausführen**, wo CLI und Anmeldung schon sind — Vorbild `health-agent`,
+ein Dienst mit enger Schnittstelle ohne Erreichbarkeit aus dem
+Internet. Aufwendiger; verworfen, weil der Zugang hinter Passkey liegt.
+
+Unverändert gilt: Der nächtliche Worker und der Chat teilen sich
+dasselbe Abo (Constraint in req-040).
 
 # Out of Scope
 
