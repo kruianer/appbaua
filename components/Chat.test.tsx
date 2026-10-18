@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Chat, MAX_COMPOSER_HEIGHT_PX, formatElapsed } from "./Chat";
 import type { Repo } from "@/lib/repos";
@@ -596,6 +596,106 @@ describe("sichtbare Schritte (req-048)", () => {
     await user.click(screen.getByText("Schritte"));
     expect(details.open).toBe(true);
     expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument();
+  });
+});
+
+// bug-034: der Gesprächsbereich rollt selbst mit, wenn man am Ende steht —
+// und bleibt stehen, wenn man hochgerollt hat. Außerdem gibt er in der
+// Flex-Spalte seinen Platz wirklich frei (min-height: 0), statt bei
+// wachsendem Inhalt die Kinder zusammenzudrücken.
+describe("Darstellung (bug-034)", () => {
+  let mockScrollHeight: number;
+  let mockClientHeight: number;
+
+  beforeEach(() => {
+    mockScrollHeight = 1000;
+    mockClientHeight = 300;
+    // jsdom layoutet nicht — scrollHeight/clientHeight sind sonst immer 0.
+    // scrollTop bleibt die echte jsdom-Implementierung (lesbar/schreibbar).
+    Object.defineProperty(HTMLDivElement.prototype, "scrollHeight", {
+      configurable: true,
+      get() {
+        return mockScrollHeight;
+      },
+    });
+    Object.defineProperty(HTMLDivElement.prototype, "clientHeight", {
+      configurable: true,
+      get() {
+        return mockClientHeight;
+      },
+    });
+  });
+
+  it("AC2: der Gesprächsbereich gibt seinen Platz in der Flex-Spalte frei (min-height: 0)", async () => {
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    const messages = document.querySelector("[data-chat-messages]") as HTMLElement;
+    expect(messages.style.minHeight).toBe("0");
+  });
+
+  it("AC1: nach dem Abschicken einer Nachricht steht der Gesprächsbereich am Ende", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    const messagesEl = document.querySelector("[data-chat-messages]") as HTMLDivElement;
+    messagesEl.scrollTop = 0; // bewusst nicht am Ende, bevor abgeschickt wird
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+
+    await waitFor(() => expect(screen.getByText("Antwort auf: Frage")).toBeInTheDocument());
+    expect(messagesEl.scrollTop).toBe(mockScrollHeight);
+  });
+
+  it("AC1: während die Schritte wachsen, bleibt die Ansicht am Ende", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    const messagesEl = document.querySelector("[data-chat-messages]") as HTMLDivElement;
+    expect(messagesEl.scrollTop).toBe(mockScrollHeight);
+
+    mockScrollHeight = 1400; // die Schritte sind gewachsen, der Bereich damit höher
+    stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
+    await waitFor(
+      () => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    await waitFor(() => expect(messagesEl.scrollTop).toBe(mockScrollHeight));
+  });
+
+  it("AC1 Ausnahme: nach oben gerollt, reißt ein wachsender Schritt die Ansicht nicht ans Ende", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    const messagesEl = document.querySelector("[data-chat-messages]") as HTMLDivElement;
+    // Nach oben gerollt, um die bisherigen Schritte zu lesen.
+    messagesEl.scrollTop = 0;
+    fireEvent.scroll(messagesEl);
+
+    stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
+    await waitFor(
+      () => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(messagesEl.scrollTop).toBe(0);
   });
 });
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 import { parseChatContentBlocks } from "@/lib/chat-message-blocks";
@@ -34,6 +34,13 @@ export const POLL_MS = 1500;
 export const MAX_COMPOSER_HEIGHT_PX = 220;
 
 /**
+ * bug-034: ab welchem Abstand zum unteren Rand die Ansicht noch als "am Ende"
+ * gilt. Ein kleiner Spielraum statt exakt 0, weil Scroll-Events auf Subpixel
+ * genau sein können.
+ */
+const SCROLL_BOTTOM_THRESHOLD_PX = 24;
+
+/**
  * "seit 2:14" statt eines stehenden Textes (bug-033 AC4): das Lebenszeichen
  * darf nicht davon abhängen, ob der Ereignisstrom (Schritte) gerade etwas zu
  * zeigen hat — eine verstrichene Zeit bewegt sich auch dann, wenn Claude
@@ -60,11 +67,46 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   // die Grundlage für "seit 2:14" statt eines stehenden Textes.
   const [sendingSinceByRepo, setSendingSinceByRepo] = useState<Record<string, number>>({});
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+  // bug-034: ob die Ansicht beim nächsten Zuwachs ans Ende rollen soll. Wer
+  // nach oben gerollt hat, um Älteres zu lesen, soll nicht herausgerissen
+  // werden — nur wer ohnehin am Ende steht (oder gerade selbst abgeschickt
+  // hat), bleibt dort.
+  const stickToBottomRef = useRef(true);
 
-  const messages = messagesByRepo[repoId] ?? [];
+  // useMemo statt eines einfachen Ausdrucks: sonst entsteht bei jedem Render
+  // eine neue Array-Referenz und der Scroll-Effekt unten (abhängig von
+  // `messages`) würde ständig neu laufen.
+  const messages = useMemo(() => messagesByRepo[repoId] ?? [], [messagesByRepo, repoId]);
   const sending = pendingByRepo[repoId] ?? false;
   const steps = stepsByRepo[repoId] ?? null;
   const sendingSince = sendingSinceByRepo[repoId] ?? null;
+
+  const scrollMessagesToBottom = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  };
+
+  const handleMessagesScroll = () => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distanceFromBottom < SCROLL_BOTTOM_THRESHOLD_PX;
+  };
+
+  // bug-034: rollt mit, solange "am Ende" gilt — bei jeder neuen Nachricht
+  // UND während die Schritte (alle POLL_MS) wachsen. Hat man hochgerollt,
+  // bleibt die Ansicht stehen (handleMessagesScroll setzt das Flag zurück).
+  useEffect(() => {
+    if (stickToBottomRef.current) scrollMessagesToBottom();
+  }, [messages, steps]);
+
+  // Beim Wechsel des Repos zeigt die Ansicht wieder das Ende seines
+  // Gesprächs, nicht die zufällige Scroll-Position vom vorherigen Repo.
+  useEffect(() => {
+    stickToBottomRef.current = true;
+  }, [repoId]);
 
   // bug-030: das Feld wächst mit dem Text, bis MAX_COMPOSER_HEIGHT_PX erreicht
   // ist — danach rollt sein Inhalt statt weiter zu wachsen. "auto" vor der
@@ -165,6 +207,9 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
     const targetRepoId = repoId;
     if (!content || !targetRepoId || pendingByRepo[targetRepoId]) return;
     setDraft("");
+    // bug-034: Abschicken gilt immer als "ans Ende" — unabhängig davon, wohin
+    // zuvor hochgerollt wurde.
+    stickToBottomRef.current = true;
     const countBeforeSend = (messagesByRepo[targetRepoId] ?? []).length + 1; // +1: die Nachricht selbst
     const optimistic: ChatMessage = {
       id: -Date.now(),
@@ -236,8 +281,11 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   const messagesList = (
     <div
       data-chat-messages
+      ref={messagesRef}
+      onScroll={handleMessagesScroll}
       style={{
         flex: 1,
+        minHeight: 0,
         overflowY: "auto",
         paddingTop: split ? 16 : 0,
         paddingLeft: split ? 16 : 20,
