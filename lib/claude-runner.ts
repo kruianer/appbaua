@@ -1,4 +1,4 @@
-import { run, type RunResult } from "./workspace";
+import { ABORT_EXIT_CODE, run, type RunResult } from "./workspace";
 import { describeEvent, finalResultText, modelFromEvent } from "./claude-events";
 import { SECURITY_OK_MESSAGE } from "./security-report";
 import { RELEASE_INFO_MARKER } from "./release-info";
@@ -42,6 +42,18 @@ export const CLAUDE_MODEL = "sonnet";
  * network-abort.ts, which guards isNetworkAbort against this exact text.
  */
 export const OOM_KILL_MESSAGE = "Claude-Lauf: mutmaßlich wegen Speichermangel beendet (SIGKILL)";
+
+/**
+ * What the Verlauf/Gespräch shows for a run the Stopp-Knopf ended (bug-030).
+ * Distinct from a timeout or a genuine failure: the operator asked for this,
+ * so it must never read like something went wrong.
+ */
+export const ABORTED_MESSAGE = "Claude-Lauf: abgebrochen";
+
+/** Was this failed run the Stopp-Knopf ending it, rather than a real failure? */
+export function isAborted(summary: string | null | undefined): boolean {
+  return summary === ABORTED_MESSAGE;
+}
 
 /** How much of the running output is published live, and how often (req-008). */
 export const LIVE_TAIL_LINES = 50;
@@ -488,6 +500,12 @@ export async function runClaude(
      * and can be persisted for the next turn's `resume`.
      */
     sessionId?: string;
+    /**
+     * Ends the run from outside (bug-030: der Stopp-Knopf im Chat). Forwarded
+     * straight to `run()`, which already knows how to take the whole process
+     * tree down on a timeout — an abort gets the identical treatment.
+     */
+    signal?: AbortSignal;
   },
 ): Promise<ClaudeOutcome> {
   const runImpl = deps?.runImpl ?? run;
@@ -543,7 +561,7 @@ export async function runClaude(
       ],
       // Closed stdin: nothing is piped in, and an open pipe makes the CLI wait
       // for input and warn about it (bug-001).
-      { cwd: dir, timeoutMs, onData, stdin: "ignore" },
+      { cwd: dir, timeoutMs, onData, stdin: "ignore", signal: deps?.signal },
     );
   } catch (err) {
     return {
@@ -585,6 +603,13 @@ export async function runClaude(
   // to write a final error message.
   if (res.signal === "SIGKILL") {
     return { ok: false, summary: OOM_KILL_MESSAGE, report: "" };
+  }
+  // bug-030: the Stopp-Knopf's own exit code — checked before the generic
+  // !res.ok branch for the same reason as the two above, and distinct from
+  // both: this is neither a timeout nor a crash, so it must never read as
+  // "Claude-Lauf fehlgeschlagen: …".
+  if (res.code === ABORT_EXIT_CODE) {
+    return { ok: false, summary: ABORTED_MESSAGE, report: "" };
   }
   if (!res.ok) {
     const tail = (res.stderr.trim() || finalResultText(res.stdout)).slice(-300);

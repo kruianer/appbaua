@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ABORTED_MESSAGE,
   CLAUDE_TIMEOUT_MINUTES,
   CLAUDE_TIMEOUT_MS,
   createActivityStream,
@@ -8,6 +9,7 @@ import {
   feedbackPrompt,
   fileTaskPrompt,
   ideaPrompt,
+  isAborted,
   lastLines,
   recurringPrompt,
   runClaude,
@@ -19,6 +21,7 @@ import {
   OOM_KILL_MESSAGE,
   selfAssignPrompt,
 } from "./claude-runner";
+import { ABORT_EXIT_CODE } from "./workspace";
 import { SECURITY_OK_MESSAGE } from "./security-report";
 import { RELEASE_INFO_MARKER } from "./release-info";
 import type { run } from "./workspace";
@@ -685,6 +688,31 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     });
     const out = await runClaude("/repo", "prompt", { runImpl });
     expect(out.summary).toContain("Timeout");
+  });
+
+  it("bug-030: a run the Stopp-Knopf ended gets its own message, not a failure", async () => {
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: ABORT_EXIT_CODE,
+      stdout: "",
+      stderr: "\n[aborted]",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.ok).toBe(false);
+    expect(out.summary).toBe(ABORTED_MESSAGE);
+    expect(isAborted(out.summary)).toBe(true);
+    expect(out.summary).not.toContain("fehlgeschlagen");
+  });
+
+  it("bug-030: forwards the caller's AbortSignal to run()", async () => {
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    const runImpl: typeof run = async (_cmd, _args, opts = {}) => {
+      seenSignal = opts.signal;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl, signal: controller.signal });
+    expect(seenSignal).toBe(controller.signal);
   });
 
   // req-010: the report that gets filed in the repo is Claude's final answer,

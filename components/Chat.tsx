@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 
@@ -24,6 +24,13 @@ const ROLE_LABEL: Record<ChatMessage["role"], string> = {
 /** Wie oft nachgefragt wird, solange eine Antwort für das offene Repo noch läuft. */
 export const POLL_MS = 1500;
 
+/**
+ * Wie hoch das Eingabefeld höchstens mitwächst, bevor sein Inhalt rollt
+ * (bug-030). Die genaue Grenze ist zum Ausprobieren gedacht, nicht berechnet —
+ * etwa die halbe Höhe eines typischen Gesprächsbereichs.
+ */
+export const MAX_COMPOSER_HEIGHT_PX = 220;
+
 // req-041 AC11-13: ab 744px zweispaltig — links die Repo-Liste (ständig
 // sichtbar statt der Auswahl von req-040), rechts das Gespräch, mit einer
 // lesbaren Höchstbreite statt voll ausgezogenem Text. Am iPhone (split=false,
@@ -33,9 +40,23 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   const [draft, setDraft] = useState("");
   const [messagesByRepo, setMessagesByRepo] = useState<Record<string, ChatMessage[]>>({});
   const [pendingByRepo, setPendingByRepo] = useState<Record<string, boolean>>({});
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const messages = messagesByRepo[repoId] ?? [];
   const sending = pendingByRepo[repoId] ?? false;
+
+  // bug-030: das Feld wächst mit dem Text, bis MAX_COMPOSER_HEIGHT_PX erreicht
+  // ist — danach rollt sein Inhalt statt weiter zu wachsen. "auto" vor der
+  // Messung wirft eine zu groß gewordene Höhe weg, sonst schrumpft das Feld
+  // nie wieder, wenn Text gelöscht wird.
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, MAX_COMPOSER_HEIGHT_PX);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > MAX_COMPOSER_HEIGHT_PX ? "auto" : "hidden";
+  }, [draft]);
 
   useEffect(() => {
     fetch("/api/chat/state")
@@ -140,6 +161,35 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
     }
   };
 
+  // bug-030: beendet den laufenden Lauf des offenen Repos. "ich kann SOFORT
+  // weiterschreiben" heißt: wie bei send() wird gleich einmal nachgefragt,
+  // statt auf den nächsten Intervall-Tick des Polling-Effekts oben zu warten
+  // (der bis zu POLL_MS brauchen könnte, weil pendingByRepo sich durch den
+  // Abbruch selbst nicht ändert und den Effekt deshalb nicht neu startet).
+  const cancel = async () => {
+    const targetRepoId = repoId;
+    if (!targetRepoId) return;
+    const countBefore = (messagesByRepo[targetRepoId] ?? []).length;
+    try {
+      await fetch(`/api/chat/${targetRepoId}/cancel`, { method: "POST" });
+    } catch {
+      // Das Nachfragen unten merkt das Ende des Laufs ohnehin.
+    }
+    const msgs = await loadMessages(targetRepoId);
+    if (msgs.length > countBefore) {
+      setPendingByRepo((prev) => ({ ...prev, [targetRepoId]: false }));
+    }
+  };
+
+  // bug-030: Enter schickt ab, Umschalt+Enter macht einen Zeilenumbruch — ohne
+  // preventDefault fügt der Browser bei Enter sonst selbst einen Umbruch ein.
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
+  };
+
   const activeRepo = repos.find((r) => r.id === repoId) ?? null;
 
   // req-041 AC13: im Split lesbar schmal statt voll ausgezogen — ab etwa
@@ -207,21 +257,23 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
       }}
     >
       <textarea
+        ref={textareaRef}
         aria-label="Nachricht"
         className="input"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={handleKeyDown}
         placeholder="Nachricht an Claude…"
         rows={1}
-        style={{ flex: 1, resize: "none" }}
+        style={{ flex: 1, resize: "none", overflowY: "hidden" }}
       />
       <button
         className="btn btn-primary"
-        aria-label="Senden"
-        onClick={send}
-        disabled={!draft.trim() || !repoId || sending}
+        aria-label={sending ? "Abbrechen" : "Senden"}
+        onClick={sending ? cancel : send}
+        disabled={!sending && (!draft.trim() || !repoId)}
       >
-        {sending ? "…" : "Senden"}
+        {sending ? "Stopp" : "Senden"}
       </button>
     </div>
   );

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Chat } from "./Chat";
+import { Chat, MAX_COMPOSER_HEIGHT_PX } from "./Chat";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 
@@ -35,16 +35,30 @@ let activeRepoId: string | null;
 let messagesByRepo: Record<string, ChatMessage[]>;
 /** Hält eine Antwort künstlich zurück, bis das Flag auf true gesetzt wird. */
 let releaseAnswer: Record<string, boolean>;
+/** Jedes Repo, für das der Stopp-Knopf einen Abbruch angefragt hat (bug-030). */
+let cancelCalls: string[];
 
 function nextId(repoId: string): number {
   return (messagesByRepo[repoId]?.length ?? 0) + 1;
 }
+
+// bug-030: jsdom layoutet nicht, scrollHeight ist dort sonst immer 0. Ein Test
+// kann den Wert setzen, den das Eingabefeld für seinen Inhalt "messen" würde.
+let mockScrollHeight = 20;
+Object.defineProperty(HTMLTextAreaElement.prototype, "scrollHeight", {
+  configurable: true,
+  get() {
+    return mockScrollHeight;
+  },
+});
 
 beforeEach(() => {
   stateCalls = [];
   activeRepoId = null;
   messagesByRepo = { r1: [], r2: [] };
   releaseAnswer = { r1: true, r2: true };
+  cancelCalls = [];
+  mockScrollHeight = 20;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url === "/api/chat/state" && (!init || init.method === undefined)) {
       stateCalls.push({ method: "GET" });
@@ -55,6 +69,23 @@ beforeEach(() => {
       stateCalls.push({ method: "POST", body });
       activeRepoId = body.repoId;
       return { ok: true, json: async () => ({ ok: true }) };
+    }
+    const cancelMatch = url.match(/^\/api\/chat\/(\w+)\/cancel$/);
+    if (cancelMatch && init?.method === "POST") {
+      const repoId = cancelMatch[1];
+      cancelCalls.push(repoId);
+      // Simuliert, was sendChatMessage nach einem Abbruch selbst ins Gespräch
+      // schreibt: eine Systemnachricht statt der (nie gekommenen) Antwort.
+      const abortMsg: ChatMessage = {
+        id: nextId(repoId),
+        repoId,
+        role: "system",
+        content: "Abgebrochen.",
+        createdAt: "t",
+      };
+      messagesByRepo[repoId] = [...(messagesByRepo[repoId] ?? []), abortMsg];
+      releaseAnswer[repoId] = true;
+      return { ok: true, json: async () => ({ ok: true, cancelled: true }) };
     }
     const messagesMatch = url.match(/^\/api\/chat\/(\w+)\/messages$/);
     if (messagesMatch && (!init || init.method === undefined)) {
@@ -236,5 +267,102 @@ describe("Chat zweispaltig (req-041 AC11-13)", () => {
 
     const messages = document.querySelector("[data-chat-messages]") as HTMLElement;
     expect(messages.style.maxWidth).toBe("760px");
+  });
+});
+
+// bug-030: das Eingabefeld ist auf einen Satz gebaut gewesen — hier wachsen,
+// Enter-zum-Senden und der Stopp-Knopf für einen laufenden Lauf.
+describe("Eingabefeld und Abbrechen (bug-030)", () => {
+  it("AC: das Feld wächst mit dem Text, bis zur Grenze — danach rollt es statt weiter zu wachsen", async () => {
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    const input = screen.getByRole("textbox", { name: "Nachricht" }) as HTMLTextAreaElement;
+
+    mockScrollHeight = 80; // mehrzeilig, aber unter der Grenze
+    await userEvent.type(input, "mehrzeilig");
+    await waitFor(() => expect(input.style.height).toBe("80px"));
+    expect(input.style.overflowY).toBe("hidden");
+
+    mockScrollHeight = MAX_COMPOSER_HEIGHT_PX + 100; // über der Grenze
+    await userEvent.type(input, " und noch mehr");
+    await waitFor(() => expect(input.style.height).toBe(`${MAX_COMPOSER_HEIGHT_PX}px`));
+    expect(input.style.overflowY).toBe("auto");
+  });
+
+  it("AC: Enter schickt die Nachricht ab", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    const input = screen.getByRole("textbox", { name: "Nachricht" });
+    await user.type(input, "Hallo{Enter}");
+
+    await waitFor(() =>
+      expect(screen.getByText("Antwort auf: Hallo")).toBeInTheDocument(),
+    );
+    expect(input).toHaveValue("");
+  });
+
+  it("AC: Umschalt+Enter fügt einen Zeilenumbruch ein, statt abzuschicken", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    const input = screen.getByRole("textbox", { name: "Nachricht" }) as HTMLTextAreaElement;
+    await user.type(input, "Zeile eins{Shift>}{Enter}{/Shift}Zeile zwei");
+
+    expect(input.value).toBe("Zeile eins\nZeile zwei");
+    expect(screen.queryByText(/Antwort auf:/)).not.toBeInTheDocument();
+  });
+
+  it("AC: während eine Antwort läuft, steht dort ein Stopp-Knopf statt Senden", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false; // CellarVoices Antwort "läuft noch"
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage an CellarVoice");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Abbrechen" })).toBeInTheDocument(),
+    );
+    expect(screen.getByRole("button", { name: "Abbrechen" })).toHaveTextContent("Stopp");
+    expect(screen.queryByRole("button", { name: "Senden" })).not.toBeInTheDocument();
+  });
+
+  it("AC: ein Druck auf Stopp beendet den Lauf; das bisher Gesagte bleibt stehen, und ich kann sofort weiterschreiben", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage an CellarVoice");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Abbrechen" })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Abbrechen" }));
+    expect(cancelCalls).toEqual(["r1"]);
+
+    // Die bereits gesendete Frage bleibt im Gespräch stehen.
+    expect(screen.getByText("Frage an CellarVoice")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("Abgebrochen.")).toBeInTheDocument());
+
+    // Sofort wieder bedienbar: Senden-Knopf statt Stopp, Feld nicht blockiert.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Senden" })).toBeInTheDocument(),
+    );
+    const input = screen.getByRole("textbox", { name: "Nachricht" });
+    await user.type(input, "weiter geht's");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() =>
+      expect(screen.getByText("Antwort auf: weiter geht's")).toBeInTheDocument(),
+    );
   });
 });

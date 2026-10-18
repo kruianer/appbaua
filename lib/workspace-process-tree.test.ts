@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
+  ABORT_EXIT_CODE,
   CLEANUP_SIGNALS,
   TREE_KILL_GRACE_MS,
   installProcessTreeCleanup,
@@ -276,5 +277,53 @@ describe("Ein abgebrochener Worker nimmt seine Laeufe mit (bug-023)", () => {
 
   it("die Frist fuers harte Beenden ist gesetzt", () => {
     expect(TREE_KILL_GRACE_MS).toBeGreaterThan(0);
+  });
+});
+
+// bug-030: der Stopp-Knopf im Chat braucht denselben Griff auf den laufenden
+// Prozessbaum, den ein Timeout schon hat — nur von aussen ausgeloest statt von
+// der Uhr.
+describe("Ein per AbortSignal abgebrochener Lauf (bug-030)", () => {
+  it("AC: signal.abort() beendet den ganzen Prozessbaum, nicht nur das Kind", async () => {
+    const controller = new AbortController();
+    let stdout = "";
+    const pending = run(NODE, ["-e", grandchildScript({ hold: true })], {
+      killGraceMs: 500,
+      signal: controller.signal,
+      onData: (chunk) => {
+        stdout += chunk;
+      },
+    });
+
+    const until = Date.now() + 5000;
+    while (!/ENKEL \d+/.test(stdout) && Date.now() < until) await sleep(20);
+    const enkel = grandchildPid(stdout);
+
+    controller.abort();
+    const res = await pending;
+
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe(ABORT_EXIT_CODE);
+    expect(await goneWithin(enkel, 3000)).toBe(true);
+    expect(liveProcessTreeCount()).toBe(0);
+  });
+
+  it("AC: ein bereits abgebrochenes Signal beendet den Aufruf sofort, ohne Timeout", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const res = await run(NODE, ["-e", "setInterval(() => {}, 1000);"], {
+      killGraceMs: 500,
+      signal: controller.signal,
+    });
+    expect(res.ok).toBe(false);
+    expect(res.code).toBe(ABORT_EXIT_CODE);
+  });
+
+  it("ein Lauf, der von selbst durchläuft, ist von einem ungenutzten Signal unberührt", async () => {
+    const controller = new AbortController();
+    const res = await run(NODE, ["-e", 'process.stdout.write("hallo")'], {
+      signal: controller.signal,
+    });
+    expect(res).toMatchObject({ ok: true, code: 0, stdout: "hallo" });
   });
 });

@@ -6,7 +6,7 @@ import {
 } from "./chat-session-store";
 import { getChatUiStateStore } from "./chat-store";
 import { prepareChatRepo } from "./chat-workspace";
-import { type ClaudeOutcome, runClaude } from "./claude-runner";
+import { type ClaudeOutcome, isAborted, runClaude } from "./claude-runner";
 import { touchActiveSession, pruneIdleSessions } from "./chat-session-lru";
 import { isRateLimit } from "./rate-limit";
 import { isSessionNotFound } from "./chat-session-lost";
@@ -54,6 +54,33 @@ export const RATE_LIMIT_CHAT_MESSAGE =
  */
 export const SESSION_LOST_MESSAGE =
   "Die vorherige Sitzung ist nicht mehr bekannt — das Gespräch beginnt neu.";
+
+/**
+ * What the Gespräch shows for a turn the Stopp-Knopf ended (bug-030). Kept
+ * short and neutral — the operator asked for this, it is not an error.
+ */
+export const ABORTED_CHAT_MESSAGE = "Abgebrochen.";
+
+/**
+ * Der Controller des gerade laufenden Claude-Aufrufs je Repo (bug-030) — der
+ * Griff, den der Stopp-Knopf braucht, um genau DIESEN Lauf zu beenden. Nur
+ * waehrend runClaudeImpl tatsaechlich laeuft gesetzt; das Vorbereiten der
+ * Arbeitskopie (prepareRepo) ist davon bewusst nicht erfasst, weil dort kein
+ * Prozess haengt, der bis zu zwei Stunden dauern koennte.
+ */
+const runningControllers = new Map<string, AbortController>();
+
+/**
+ * Beendet den gerade laufenden Claude-Aufruf fuer `repoId`, falls einer
+ * laeuft (bug-030). Gibt zurueck, ob es einen gab — ein Repo ohne laufenden
+ * Lauf hat hier nichts zu tun, aber das ist kein Fehler.
+ */
+export function cancelChatTurn(repoId: string): boolean {
+  const controller = runningControllers.get(repoId);
+  if (!controller) return false;
+  controller.abort();
+  return true;
+}
 
 export async function sendChatMessage(
   repo: Repo,
@@ -116,24 +143,38 @@ export async function sendChatMessage(
   const session = await store.getSession(repo.id);
   const sessionId = session?.claudeSessionId ?? newSessionId();
 
-  let outcome = await runClaudeImpl(dir, content, {
-    model: CHAT_MODEL,
-    ...(session ? { resume: sessionId } : { sessionId }),
-  });
+  // bug-030: der Griff fuer den Stopp-Knopf — nur waehrend des eigentlichen
+  // Claude-Aufrufs gesetzt, siehe runningControllers oben.
+  const controller = new AbortController();
+  runningControllers.set(repo.id, controller);
 
-  // bug-029: Claude no longer knows the session it was asked to --resume (most
-  // commonly because a container restart emptied CHAT_WORK_ROOT). Rather than
-  // leaving the repo permanently stuck on that dead id, drop it and retry once
-  // with a brand-new session — the SAME message gets answered either way.
+  let outcome: ClaudeOutcome;
   let finalSessionId = sessionId;
   let sessionLost = false;
-  if (session && !outcome.ok && isSessionNotFound(outcome.summary)) {
-    sessionLost = true;
-    finalSessionId = newSessionId();
+  try {
     outcome = await runClaudeImpl(dir, content, {
       model: CHAT_MODEL,
-      sessionId: finalSessionId,
+      signal: controller.signal,
+      ...(session ? { resume: sessionId } : { sessionId }),
     });
+
+    // bug-029: Claude no longer knows the session it was asked to --resume (most
+    // commonly because a container restart emptied CHAT_WORK_ROOT). Rather than
+    // leaving the repo permanently stuck on that dead id, drop it and retry once
+    // with a brand-new session — the SAME message gets answered either way.
+    if (session && !outcome.ok && isSessionNotFound(outcome.summary)) {
+      sessionLost = true;
+      finalSessionId = newSessionId();
+      outcome = await runClaudeImpl(dir, content, {
+        model: CHAT_MODEL,
+        signal: controller.signal,
+        sessionId: finalSessionId,
+      });
+    }
+  } finally {
+    if (runningControllers.get(repo.id) === controller) {
+      runningControllers.delete(repo.id);
+    }
   }
 
   await store.putSession({
@@ -156,9 +197,11 @@ export async function sendChatMessage(
     repoId: repo.id,
     ...(outcome.ok
       ? { role: "assistant" as const, content: outcome.report || outcome.summary }
-      : isRateLimit(outcome.summary)
-        ? { role: "system" as const, content: RATE_LIMIT_CHAT_MESSAGE }
-        : { role: "system" as const, content: `Fehler: ${outcome.summary}` }),
+      : isAborted(outcome.summary)
+        ? { role: "system" as const, content: ABORTED_CHAT_MESSAGE }
+        : isRateLimit(outcome.summary)
+          ? { role: "system" as const, content: RATE_LIMIT_CHAT_MESSAGE }
+          : { role: "system" as const, content: `Fehler: ${outcome.summary}` }),
     createdAt: now().toISOString(),
   });
 

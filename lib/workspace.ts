@@ -71,6 +71,13 @@ export type RunOptions = {
    * {@link TREE_KILL_GRACE_MS}.
    */
   killGraceMs?: number;
+  /**
+   * Bricht den Lauf von aussen ab (bug-030: der Stopp-Knopf im Chat). Behandelt
+   * wie ein Timeout, nur ausgeloest durch den Aufrufer statt durch die Uhr:
+   * derselbe Prozessbaum-Kill, dieselbe Gnadenfrist, und das Ergebnis traegt
+   * {@link ABORT_EXIT_CODE} statt eines echten Exit-Codes.
+   */
+  signal?: AbortSignal;
 };
 
 /** Seam so the git calls below can be observed in tests without a real repo. */
@@ -128,6 +135,14 @@ export type PrepareDeps = WorkspaceDeps & {
  * Ausgabe-Pipe offen, weshalb `close` nie kommt.
  */
 export const TREE_KILL_GRACE_MS = 5_000;
+
+/**
+ * Der Code, den ein Lauf traegt, den `signal` von aussen abgebrochen hat
+ * (bug-030) — unterscheidbar von einem echten Exit-Code UND vom
+ * Timeout-Code 124, weil beide Faelle unterschiedlich behandelt werden
+ * muessen (ein Timeout ist ein echter Fehler, ein Abbruch nicht).
+ */
+export const ABORT_EXIT_CODE = 130;
 
 /**
  * Die Prozessgruppen der Kinder, deren Aufruf gerade laeuft (bug-023). Damit
@@ -258,6 +273,7 @@ export function run(
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let aborted = false;
     let settled = false;
     let timer: NodeJS.Timeout | null = null;
     let hardTimer: NodeJS.Timeout | null = null;
@@ -269,13 +285,31 @@ export function run(
       stdout,
       stderr: stderr + "\n[timeout]",
     });
+    // bug-030: derselbe Baum-Kill wie ein Timeout, nur vom Aufrufer statt von
+    // der Uhr ausgeloest — der Stopp-Knopf im Chat hat keinen anderen Griff auf
+    // den laufenden Prozess als den, den diese Funktion schon fuer Timeouts hat.
+    const abortResult = (): RunResult => ({
+      ok: false,
+      code: ABORT_EXIT_CODE,
+      stdout,
+      stderr: stderr + "\n[aborted]",
+    });
     const exitResult = (
       code: number | null,
       signal: NodeJS.Signals | null,
     ): RunResult =>
       timedOut
         ? timeoutResult()
-        : { ok: code === 0, code: code ?? 1, stdout, stderr, signal };
+        : aborted
+          ? abortResult()
+          : { ok: code === 0, code: code ?? 1, stdout, stderr, signal };
+
+    const onAbort = () => {
+      aborted = true;
+      if (pid === undefined) return;
+      killProcessTree(pid, "SIGTERM");
+      hardTimer = setTimeout(() => settle(abortResult()), graceMs);
+    };
 
     /**
      * Den Aufruf genau einmal beantworten — und dabei den Prozessbaum
@@ -288,12 +322,24 @@ export function run(
       if (timer) clearTimeout(timer);
       if (hardTimer) clearTimeout(hardTimer);
       if (drainTimer) clearTimeout(drainTimer);
+      // Der Listener muss weg, sobald der Aufruf beantwortet ist — sonst
+      // koennte ein spaeteres abort() noch diese PID treffen, die inzwischen
+      // an einen voellig anderen Prozess neu vergeben sein kann.
+      opts.signal?.removeEventListener("abort", onAbort);
       if (pid !== undefined) {
         killProcessGroup(pid, "SIGKILL");
         liveGroups.delete(pid);
       }
       resolve(result);
     };
+
+    if (opts.signal?.aborted) {
+      // Schon abgebrochen, bevor der Prozess ueberhaupt antworten konnte —
+      // kein Fall fuer onAbort, der auf das "abort"-Ereignis wartet.
+      settle(abortResult());
+      return;
+    }
+    opts.signal?.addEventListener("abort", onAbort);
 
     timer = opts.timeoutMs
       ? setTimeout(() => {

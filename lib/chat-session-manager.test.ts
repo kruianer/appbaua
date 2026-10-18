@@ -5,10 +5,13 @@ import {
   isChatTurnRunning,
   activeSessionRepoIds,
   resetActiveSessionsForTests,
+  cancelChatTurn,
+  ABORTED_CHAT_MESSAGE,
   NO_TOKEN_MESSAGE,
   RATE_LIMIT_CHAT_MESSAGE,
   SESSION_LOST_MESSAGE,
 } from "./chat-session-manager";
+import { ABORTED_MESSAGE } from "./claude-runner";
 import { createMemoryChatSessionStore } from "./chat-session-store";
 import type { Repo } from "./repos";
 
@@ -461,5 +464,101 @@ describe("startChatTurn (req-040 AC5/AC6)", () => {
     const aMessages = await storeA.listMessages(repo.id);
     expect(aMessages.map((m) => m.role)).toEqual(["user", "assistant"]);
     expect(aMessages[1].content).toBe("Antwort A");
+  });
+});
+
+// bug-030: der Stopp-Knopf im Chat braucht einen Weg, GENAU DEN laufenden
+// Claude-Aufruf eines Repos zu beenden — ohne das bisherige Gespräch anzurühren.
+describe("cancelChatTurn (bug-030)", () => {
+  it("meldet false, wenn für das Repo gerade nichts läuft", () => {
+    expect(cancelChatTurn("kein-laufendes-repo")).toBe(false);
+  });
+
+  it("beendet den laufenden Lauf: die Antwort wird 'Abgebrochen.', das Gespräch bleibt sonst stehen", async () => {
+    const store = createMemoryChatSessionStore();
+    const signalSeen = deferred<AbortSignal>();
+    const turn = startChatTurn(repo, "Frage, dann Stopp", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (_dir, _prompt, opts: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          signalSeen.resolve(opts.signal!);
+          opts.signal!.addEventListener("abort", () =>
+            resolve({ ok: false, summary: ABORTED_MESSAGE, report: "" }),
+          );
+        }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    await signalSeen.promise; // der Lauf steht und wartet auf den Abbruch
+    expect(cancelChatTurn(repo.id)).toBe(true);
+    await turn;
+
+    const messages = await store.listMessages(repo.id);
+    expect(messages.map((m) => [m.role, m.content])).toEqual([
+      ["user", "Frage, dann Stopp"],
+      ["system", ABORTED_CHAT_MESSAGE],
+    ]);
+    expect(isChatTurnRunning(repo.id)).toBe(false);
+  });
+
+  it("trifft nur das eigene Repo — ein anderes laufendes Repo bleibt unberührt", async () => {
+    const storeA = createMemoryChatSessionStore();
+    const storeB = createMemoryChatSessionStore();
+    const signalSeenA = deferred<AbortSignal>();
+    const gateB = deferred<void>();
+
+    const turnA = startChatTurn(repo, "Frage an CellarVoice", {
+      store: storeA,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (_dir, _prompt, opts: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          signalSeenA.resolve(opts.signal!);
+          opts.signal!.addEventListener("abort", () =>
+            resolve({ ok: false, summary: ABORTED_MESSAGE, report: "" }),
+          );
+        }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    const turnB = startChatTurn(wellarita, "Frage an Wellarita", {
+      store: storeB,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r2", branch: "dev" }),
+      runClaude: async () => {
+        await gateB.promise;
+        return { ok: true, summary: "ok", report: "Antwort B" };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    await signalSeenA.promise;
+    expect(cancelChatTurn(repo.id)).toBe(true);
+    await turnA;
+
+    // Wellarita lief die ganze Zeit unbeeinflusst weiter.
+    expect(isChatTurnRunning(wellarita.id)).toBe(true);
+    gateB.resolve();
+    await turnB;
+    const bMessages = await storeB.listMessages(wellarita.id);
+    expect(bMessages[1]).toMatchObject({ role: "assistant", content: "Antwort B" });
+  });
+
+  it("ein zweiter Abbruch nach Ende des Laufs meldet false — es läuft dann nichts mehr", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({ ok: true, summary: "ok", report: "fertig" }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+    expect(cancelChatTurn(repo.id)).toBe(false);
   });
 });
