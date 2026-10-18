@@ -32,7 +32,7 @@ weiter wie bisher.
 
 # Acceptance Criteria
 
-- [ ] Given ich öffne den Menüpunkt "Repos", when ich ein Repo
+- [x] Given ich öffne den Menüpunkt "Repos", when ich ein Repo
       aufklappe, then kann ich dort ein Wochenbudget eintragen.
 - [ ] Given für ein Repo ist kein Wochenbudget eingetragen, when der
       Worker läuft, then arbeitet er dort unbegrenzt viele Pakete ab.

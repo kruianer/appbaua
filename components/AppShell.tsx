@@ -263,6 +263,24 @@ export function AppShell({
     }
   }, []);
 
+  // req-044: how many Bugs+Requirements the worker may work off here per
+  // week; null removes the limit. Optimistic update already happened in the
+  // input's onChange — this just persists it on blur.
+  const setWeeklyBudget = useCallback(
+    async (id: string, weeklyBudget: number | null) => {
+      const res = await fetch(`/api/repos/${id}/weekly-budget`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weeklyBudget }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRepos(data.repos);
+      }
+    },
+    [],
+  );
+
   const doRemove = useCallback(async () => {
     if (!confirmId) return;
     const id = confirmId;
@@ -703,6 +721,55 @@ export function AppShell({
                                 </option>
                               ))}
                             </select>
+                            {/* req-044: wie viele Bugs+Requirements der
+                                Worker hier pro Woche höchstens abarbeitet;
+                                leer = unbegrenzt. */}
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "var(--space-2)",
+                                flex: "none",
+                                fontSize: 12,
+                                color: muted(70),
+                              }}
+                            >
+                              Wochenbudget
+                              <input
+                                type="number"
+                                min={1}
+                                inputMode="numeric"
+                                aria-label={`${r.name}: Wochenbudget`}
+                                value={r.weeklyBudget ?? ""}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const parsed =
+                                    raw === "" ? null : Number(raw);
+                                  setRepos((prev) =>
+                                    prev.map((x) =>
+                                      x.id === r.id
+                                        ? { ...x, weeklyBudget: parsed }
+                                        : x,
+                                    ),
+                                  );
+                                }}
+                                onBlur={() =>
+                                  setWeeklyBudget(r.id, r.weeklyBudget ?? null)
+                                }
+                                placeholder="unbegrenzt"
+                                style={{
+                                  width: 60,
+                                  flex: "none",
+                                  fontSize: 12,
+                                  padding: "5px 8px",
+                                  borderRadius: "var(--radius-sm, 6px)",
+                                  background: "var(--color-surface)",
+                                  color: "var(--color-text)",
+                                  border:
+                                    "1px solid color-mix(in srgb, var(--color-text) 20%, transparent)",
+                                }}
+                              />
+                            </span>
                             {/* req-032: überwachen — eigener Schalter, eigene
                                 Bedeutung. Eine App kann überwacht werden, ohne
                                 dass der Worker an ihr arbeitet, und umgekehrt. */}

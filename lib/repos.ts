@@ -37,6 +37,13 @@ export type Repo = {
    * something the operator switches on, not something a new repo inherits.
    */
   monitored: boolean;
+  /**
+   * How many Bugs+Requirements the worker may work off for this repo per
+   * week (req-044) — a shared budget, so this protects the Claude
+   * subscription from one repo using it all up. `null`/unset means no
+   * limit — existing repos keep running unbounded, as before.
+   */
+  weeklyBudget?: number | null;
 };
 
 /**

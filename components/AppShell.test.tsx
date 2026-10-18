@@ -132,6 +132,16 @@ beforeEach(() => {
       );
       return jsonResponse({ repos: serverRepos });
     }
+    // Mirrors PATCH /api/repos/:id/weekly-budget (req-044).
+    const repoBudgetMatch = /^\/api\/repos\/([^/]+)\/weekly-budget$/.exec(url);
+    if (repoBudgetMatch && init?.method === "PATCH") {
+      const id = repoBudgetMatch[1];
+      const body = JSON.parse(String(init.body));
+      serverRepos = serverRepos.map((r) =>
+        r.id === id ? { ...r, weeklyBudget: body.weeklyBudget } : r,
+      );
+      return jsonResponse({ repos: serverRepos });
+    }
     // Mirrors POST /api/repos/:id/appbaua (req-012).
     if (/^\/api\/repos\/[^/]+\/appbaua$/.test(url) && init?.method === "POST") {
       return jsonResponse({ message: "Umstellung abgeschlossen." });
@@ -848,6 +858,23 @@ describe("Repo-Zeile — aufklappbar (req-030)", () => {
     await waitFor(() => expect(watch).toHaveAttribute("aria-checked", "true"));
     // Der andere Schalter hat sich dabei nicht bewegt.
     expect(active).toHaveAttribute("aria-checked", "true");
+  });
+
+  // req-044 AC1: im aufgeklappten Bereich steht ein Eingabefeld für das
+  // Wochenbudget.
+  it("req-044: im aufgeklappten Bereich kann ich ein Wochenbudget eintragen", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+    await user.click(nameToggle(document.body, "r1"));
+
+    const budgetInput = screen.getByLabelText("appbaua: Wochenbudget");
+    expect(budgetInput).toHaveValue(null); // Vorgabe: kein Budget gesetzt
+
+    await user.type(budgetInput, "3");
+    await user.tab(); // onBlur committet
+
+    await waitFor(() => expect(budgetInput).toHaveValue(3));
+    expect(serverRepos.find((r) => r.id === "r1")?.weeklyBudget).toBe(3);
   });
 
   it("AC: nach ausgelöster Umstellung bleibt der Bereich mit der Ergebnismeldung offen", async () => {

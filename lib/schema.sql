@@ -22,6 +22,11 @@ ALTER TABLE repos ADD COLUMN IF NOT EXISTS model TEXT;
 -- FALSE: watching reaches into a live system and is switched on deliberately.
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Added with req-044: how many Bugs+Requirements the worker may work off for
+-- this repo per week. NULL means no limit — existing repos keep running
+-- unbounded, as before.
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS weekly_budget INTEGER;
+
 -- Task types (req-002). Predefined types, seeded on first use; the user only
 -- edits priority (position), active and the per-weekday schedule (JSONB:
 -- { mon: {enabled, start, end}, ... }). New types are added via code/seed.

@@ -125,8 +125,9 @@ export function createPgStore(): RepoStore {
         active: boolean;
         model: string | null;
         monitored: boolean | null;
+        weekly_budget: number | null;
       }>(
-        "SELECT id, name, url, active, model, monitored FROM repos ORDER BY position ASC",
+        "SELECT id, name, url, active, model, monitored, weekly_budget FROM repos ORDER BY position ASC",
       );
       return res.rows.map((r) => ({
         id: r.id,
@@ -137,6 +138,8 @@ export function createPgStore(): RepoStore {
         model: (r.model as Repo["model"]) || DEFAULT_REPO_MODEL,
         // Same for req-032's switch: a row from before it is not watched.
         monitored: r.monitored ?? false,
+        // req-044: NULL (unset, or a row from before it existed) means no limit.
+        weeklyBudget: r.weekly_budget ?? null,
       }));
     },
 
@@ -149,8 +152,8 @@ export function createPgStore(): RepoStore {
         for (let i = 0; i < repos.length; i++) {
           const r = repos[i];
           await client.query(
-            "INSERT INTO repos (id, name, url, active, position, model, monitored) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            [r.id, r.name, r.url, r.active, i, r.model, r.monitored],
+            "INSERT INTO repos (id, name, url, active, position, model, monitored, weekly_budget) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+            [r.id, r.name, r.url, r.active, i, r.model, r.monitored, r.weeklyBudget ?? null],
           );
         }
         await client.query("COMMIT");

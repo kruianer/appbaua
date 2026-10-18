@@ -96,6 +96,19 @@ export async function setRepoModel(
   return getStore().replace(next);
 }
 
+/**
+ * Set how many Bugs+Requirements the worker may work off for this repo per
+ * week (req-044). `null` removes the limit.
+ */
+export async function setRepoWeeklyBudget(
+  id: string,
+  weeklyBudget: number | null,
+): Promise<Repo[]> {
+  const repos = await getStore().list();
+  const next = repos.map((r) => (r.id === id ? { ...r, weeklyBudget } : r));
+  return getStore().replace(next);
+}
+
 export async function removeRepo(id: string): Promise<Repo[]> {
   const repos = await getStore().list();
   const next = repos.filter((r) => r.id !== id);
