@@ -69,6 +69,19 @@ deployt werden. Screenshots werden nur gegen dev gemacht, nie gegen prod.
 Ein fehlgeschlagener Screenshot bricht den Doku-Lauf NICHT ab: die Doku
 entsteht ohne dieses Bild, und der Verlauf vermerkt die betroffene Seite.
 
+## Feedback
+
+Der Betreiber hinterlässt Eindrücke zu dieser App als .md-Datei in
+`delivery/feedback/ready/` (Task-Typ "Feedback", req-043). Ein Feedback
+ist freier Text: Es schildert einen Eindruck, schreibt aber NICHT vor,
+was zu tun ist.
+
+Der Worker liest es und entscheidet selbst, was daraus wird — ein
+Requirement, ein Bug, eine Ergänzung der Vision, eine Notiz oder
+nichts. Er ändert dabei keinen Code: Ein Feedback erzeugt höchstens
+Arbeit für später. Danach wandert die Datei nach
+`delivery/feedback/done/`.
+
 ## Areas
 
 Geschäftsfunktions-Bereiche der App, zur Einordnung von Requirements.
