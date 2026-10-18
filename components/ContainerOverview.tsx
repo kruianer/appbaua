@@ -45,6 +45,13 @@ export function ContainerOverview() {
     return () => clearInterval(id);
   }, [load]);
 
+  // Bezugswert der Balken (bug-027): der größte Container über ALLE Gruppen
+  // hinweg, nicht je Gruppe — der Vergleich untereinander ist die Auskunft,
+  // die diese Ansicht geben soll ("wer frisst den Speicher?").
+  const allContainers = (groups ?? []).flatMap((g) => g.containers);
+  const maxMemoryBytes = Math.max(0, ...allContainers.map((c) => c.memoryBytes ?? 0));
+  const maxCpuPercent = Math.max(0, ...allContainers.map((c) => c.cpuPercent ?? 0));
+
   const doRestart = useCallback(async () => {
     if (!pending || restarting) return;
     setRestarting(true);
@@ -115,31 +122,76 @@ export function ContainerOverview() {
         </div>
       )}
 
-      {(groups ?? []).map((g) => (
-        <div key={g.key} className="card elev-sm" style={{ gap: "var(--space-2)" }}>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              justifyContent: "space-between",
-              gap: "var(--space-2)",
-              flexWrap: "wrap",
-            }}
-          >
-            <span style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflowWrap: "anywhere" }}>
-              {g.label}
-            </span>
-            <span style={{ fontSize: 12, color: "var(--color-text-muted, inherit)" }}>
-              {formatMemory(g.memoryBytesTotal)}
-            </span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {g.containers.map((c) => (
-              <ContainerRowView key={c.id} c={c} onRestart={() => setPending({ id: c.id, name: c.name })} />
-            ))}
-          </div>
+      {groups && groups.length > 0 && (
+        <div
+          className="card elev-sm"
+          data-total-summary
+          style={{
+            display: "flex",
+            alignItems: "baseline",
+            justifyContent: "space-between",
+            gap: "var(--space-2)",
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ fontWeight: 700, fontSize: 15 }}>Gesamt</span>
+          <span style={{ fontWeight: 700, fontSize: 15 }}>
+            {formatMemory(sumMemoryBytes(groups))} Speicher ·{" "}
+            {formatCpuPercent(sumCpuPercent(groups))} CPU
+          </span>
         </div>
-      ))}
+      )}
+
+      <div
+        data-groups-grid
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          gap: "var(--space-2)",
+        }}
+      >
+        {(groups ?? []).map((g) => {
+          const cpuTotal = sumCpuPercent([g]);
+          return (
+            <div
+              key={g.key}
+              className="card elev-sm"
+              data-group-key={g.key}
+              style={{ gap: "var(--space-2)" }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  justifyContent: "space-between",
+                  gap: "var(--space-2)",
+                  flexWrap: "wrap",
+                }}
+              >
+                <span
+                  style={{ fontWeight: 600, fontSize: 16, minWidth: 0, overflowWrap: "anywhere" }}
+                >
+                  {g.label}
+                </span>
+                <span data-group-summary style={{ fontSize: 13, fontWeight: 600 }}>
+                  {formatMemory(g.memoryBytesTotal)} Speicher · {formatCpuPercent(cpuTotal)} CPU
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {g.containers.map((c) => (
+                  <ContainerRowView
+                    key={c.id}
+                    c={c}
+                    maxMemoryBytes={maxMemoryBytes}
+                    maxCpuPercent={maxCpuPercent}
+                    onRestart={() => setPending({ id: c.id, name: c.name })}
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
 
       {pending && (
         <div
@@ -195,35 +247,105 @@ export function ContainerOverview() {
   );
 }
 
-function ContainerRowView({ c, onRestart }: { c: ContainerRow; onRestart: () => void }) {
+function sumMemoryBytes(groups: ContainerGroup[]): number {
+  return groups.reduce((sum, g) => sum + g.memoryBytesTotal, 0);
+}
+
+function sumCpuPercent(groups: ContainerGroup[]): number {
+  return groups.reduce(
+    (sum, g) => sum + g.containers.reduce((s, c) => s + (c.cpuPercent ?? 0), 0),
+    0,
+  );
+}
+
+function ContainerRowView({
+  c,
+  maxMemoryBytes,
+  maxCpuPercent,
+  onRestart,
+}: {
+  c: ContainerRow;
+  maxMemoryBytes: number;
+  maxCpuPercent: number;
+  onRestart: () => void;
+}) {
   const since = containerSince(c.status);
   return (
     <div
-      style={{
-        display: "flex",
-        flexWrap: "wrap",
-        alignItems: "baseline",
-        gap: "var(--space-2)",
-        fontSize: 13,
-      }}
+      data-container-id={c.id}
+      style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}
     >
-      {/* bug-021: Container-Namen haben Bindestriche, aber keine Leerzeichen —
-          overflowWrap: "anywhere" bricht auch dort, wordBreak allein reicht in
-          Safari nicht (req-042, AC11). */}
-      <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{c.name}</span>
-      <span style={{ overflowWrap: "anywhere" }}>
-        {containerStateLabel(c.state)}
-        {since ? ` · ${since}` : ""}
-      </span>
-      {c.memoryBytes !== null && <span>{formatMemory(c.memoryBytes)}</span>}
-      {c.cpuPercent !== null && <span>{formatCpuPercent(c.cpuPercent)}</span>}
-      <button
-        className="btn btn-secondary"
-        onClick={onRestart}
-        style={{ fontSize: 12, padding: "4px 8px", marginLeft: "auto", overflowWrap: "anywhere" }}
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: "var(--space-2)" }}>
+        {/* bug-021: Container-Namen haben Bindestriche, aber keine Leerzeichen —
+            overflowWrap: "anywhere" bricht auch dort, wordBreak allein reicht in
+            Safari nicht (req-042, AC11). */}
+        <span style={{ fontWeight: 600, overflowWrap: "anywhere" }}>{c.name}</span>
+        <span style={{ overflowWrap: "anywhere" }}>
+          {containerStateLabel(c.state)}
+          {since ? ` · ${since}` : ""}
+        </span>
+        <button
+          className="btn btn-icon btn-secondary"
+          aria-label={`${c.name} neu starten`}
+          onClick={onRestart}
+          style={{ width: 28, height: 28, marginLeft: "auto", flex: "none" }}
+        >
+          <Icon name="sync" size={14} />
+        </button>
+      </div>
+      {(c.memoryBytes !== null || c.cpuPercent !== null) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-3)" }}>
+          {c.memoryBytes !== null && (
+            <MetricBar kind="memory" label={formatMemory(c.memoryBytes)} value={c.memoryBytes} max={maxMemoryBytes} />
+          )}
+          {c.cpuPercent !== null && (
+            <MetricBar kind="cpu" label={formatCpuPercent(c.cpuPercent)} value={c.cpuPercent} max={maxCpuPercent} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Ein Balken, dessen Länge im Verhältnis zum größten Wert über alle Container steht (bug-027). */
+function MetricBar({
+  kind,
+  label,
+  value,
+  max,
+}: {
+  kind: "memory" | "cpu";
+  label: string;
+  value: number;
+  max: number;
+}) {
+  const pct = max > 0 ? Math.min((value / max) * 100, 100) : 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, flex: "1 1 140px", minWidth: 120 }}>
+      <div
+        aria-hidden="true"
+        style={{
+          flex: 1,
+          height: 6,
+          borderRadius: "var(--radius-md)",
+          background: "color-mix(in srgb, var(--color-text) 12%, transparent)",
+          overflow: "hidden",
+        }}
       >
-        <Icon name="sync" size={14} /> {c.name} neu starten
-      </button>
+        <div
+          data-bar={kind}
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            borderRadius: "var(--radius-md)",
+            background:
+              kind === "memory"
+                ? "var(--color-accent)"
+                : "color-mix(in srgb, var(--color-text) 55%, transparent)",
+          }}
+        />
+      </div>
+      <span style={{ fontSize: 12, flex: "none", minWidth: 44, textAlign: "right" }}>{label}</span>
     </div>
   );
 }
