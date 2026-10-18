@@ -21,6 +21,7 @@ describe("req-002 acceptance criteria", () => {
     expect(types.map((t) => t.label)).toEqual([
       "Bugs",
       "Requirements",
+      "Feedback",
       "Code-Review",
       "Security",
       "Doku",

@@ -34,7 +34,7 @@ Ordnern wie Bugs und Requirements.
 
 # Acceptance Criteria
 
-- [ ] Given ich öffne den Menüpunkt "Tasks", when ich die Liste ansehe,
+- [x] Given ich öffne den Menüpunkt "Tasks", when ich die Liste ansehe,
       then steht dort eine Task-Art "Feedback".
 - [ ] Given in einem Repo liegt `delivery/feedback/ready/fb-001-farben.md`
       und die Task-Art ist aktiv, when der Worker das Repo an die Reihe

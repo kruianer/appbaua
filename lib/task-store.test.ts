@@ -21,6 +21,7 @@ describe("seedMissingDefaults", () => {
     expect(types.map((t) => t.id)).toEqual([
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
@@ -58,7 +59,7 @@ describe("seedMissingDefaults", () => {
       },
     };
     const types = await seedMissingDefaults(counting).list();
-    expect(types).toHaveLength(6);
+    expect(types).toHaveLength(7);
     expect(writes).toBe(0);
   });
 

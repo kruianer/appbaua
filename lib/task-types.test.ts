@@ -17,6 +17,7 @@ describe("defaultTaskTypes", () => {
     expect(defaultTaskTypes().map((t) => t.label)).toEqual([
       "Bugs",
       "Requirements",
+      "Feedback",
       "Code-Review",
       "Security",
       "Doku",
@@ -30,8 +31,8 @@ describe("defaultTaskTypes", () => {
       expect(Object.values(t.schedule).every((d) => !d.enabled)).toBe(true);
     }
   });
-  it("has exactly six predefined types", () => {
-    expect(DEFAULT_TASK_TYPES).toHaveLength(6);
+  it("has exactly seven predefined types", () => {
+    expect(DEFAULT_TASK_TYPES).toHaveLength(7);
   });
 });
 
@@ -51,6 +52,7 @@ describe("withMissingDefaults", () => {
     expect(ids).toEqual([
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
@@ -72,6 +74,7 @@ describe("withMissingDefaults", () => {
       "ideen",
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
@@ -86,6 +89,7 @@ describe("withMissingDefaults", () => {
     expect(withMissingDefaults(only).map((t) => t.id)).toEqual([
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
