@@ -877,6 +877,34 @@ describe("Repo-Zeile — aufklappbar (req-030)", () => {
     expect(serverRepos.find((r) => r.id === "r1")?.weeklyBudget).toBe(3);
   });
 
+  // req-044 AC10: wie viel vom Wochenbudget schon verbraucht ist.
+  it("req-044: zeigt den Verbrauch des Wochenbudgets, wenn eines gesetzt ist", async () => {
+    const budgeted: Repo[] = [{ ...repos[0], weeklyBudget: 3 }, repos[1]];
+    const user = userEvent.setup();
+    render(
+      <AppShell
+        initialRepos={budgeted}
+        initialTaskTypes={defaultTaskTypes()}
+        initialWorkerEnabled
+        initialWeeklyUsage={{ r1: 2 }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Repos" }));
+    await screen.findByText("github.com/kruianer/appbaua");
+
+    await user.click(nameToggle(document.body, "r1"));
+
+    expect(screen.getByText("2/3 diese Woche")).toBeInTheDocument();
+  });
+
+  it("req-044: ohne Budget wird kein Verbrauch angezeigt", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+    await user.click(nameToggle(document.body, "r1"));
+
+    expect(screen.queryByText(/diese Woche/)).not.toBeInTheDocument();
+  });
+
   it("AC: nach ausgelöster Umstellung bleibt der Bereich mit der Ergebnismeldung offen", async () => {
     const user = userEvent.setup();
     await openRepos(user);

@@ -90,12 +90,18 @@ export function AppShell({
   initialRepos,
   initialTaskTypes,
   initialWorkerEnabled,
+  initialWeeklyUsage,
 }: {
   initialRepos: Repo[];
   initialTaskTypes: TaskType[];
   initialWorkerEnabled: boolean;
+  /** req-044: wie viel vom Wochenbudget jedes Repo bereits verbraucht hat. */
+  initialWeeklyUsage?: Record<string, number>;
 }) {
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
+  const [weeklyUsage, setWeeklyUsage] = useState<Record<string, number>>(
+    initialWeeklyUsage ?? {},
+  );
   // Lifted here (not owned by TaskControl) so the state survives the
   // remount TaskControl goes through when the tab bar switches away and
   // back — see bug-009. Mirrors the existing `repos` pattern above.
@@ -769,6 +775,15 @@ export function AppShell({
                                     "1px solid color-mix(in srgb, var(--color-text) 20%, transparent)",
                                 }}
                               />
+                              {/* req-044 AC10: wie viel vom Wochenbudget
+                                  schon verbraucht ist — nur sichtbar, wenn
+                                  überhaupt eines eingetragen ist. */}
+                              {r.weeklyBudget != null && (
+                                <span>
+                                  {weeklyUsage[r.id] ?? 0}/{r.weeklyBudget}{" "}
+                                  diese Woche
+                                </span>
+                              )}
                             </span>
                             {/* req-032: überwachen — eigener Schalter, eigene
                                 Bedeutung. Eine App kann überwacht werden, ohne

@@ -10,7 +10,13 @@ import {
   setRepoWeeklyBudget,
   toggleRepo,
   toggleRepoMonitored,
+  weeklyUsageByRepo,
 } from "./repo-service";
+import {
+  setRunLogStore,
+  createMemoryRunLogStore,
+  getRunLogStore,
+} from "./run-log-store";
 import type { ReachabilityResult } from "./reachability";
 import type { ConvertResult } from "./appbaua-standard";
 
@@ -20,6 +26,7 @@ const unreachable = () =>
 
 beforeEach(() => {
   setStore(createMemoryStore());
+  setRunLogStore(createMemoryRunLogStore());
 });
 
 // Each test maps to an acceptance criterion in req-001.
@@ -192,6 +199,32 @@ describe("req-001 acceptance criteria", () => {
 
     const after = await getStore().list();
     expect(after.find((r) => r.id === forschung.id)?.weeklyBudget).toBeNull();
+  });
+
+  it("req-044 AC10: weeklyUsageByRepo counts only budgeted repos", async () => {
+    await addRepo(
+      { url: "github.com/kruianer/forschung", name: "Forschung" },
+      { checkReachable: reachable },
+    );
+    await addRepo(
+      { url: "github.com/kruianer/appbaua", name: "appbaua" },
+      { checkReachable: reachable },
+    );
+    const [forschung, appbaua] = await listRepos();
+    await setRepoWeeklyBudget(forschung.id, 3);
+    const now = new Date(2026, 6, 22, 18, 0);
+    await getRunLogStore().append({
+      startedAt: new Date(2026, 6, 21, 10, 0).toISOString(),
+      endedAt: new Date(2026, 6, 21, 10, 0).toISOString(),
+      repo: "Forschung",
+      taskType: "Bugs",
+      status: "success",
+      message: "ok",
+    });
+
+    const usage = await weeklyUsageByRepo(await listRepos(), now);
+    expect(usage).toEqual({ [forschung.id]: 1 }); // appbaua hat kein Budget
+    expect(usage[appbaua.id]).toBeUndefined();
   });
 
   it("AC: removing a repo deletes exactly that repo", async () => {

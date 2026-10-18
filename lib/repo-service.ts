@@ -13,6 +13,8 @@ import {
   type ConvertSummary,
   queueAppbauaStandard,
 } from "./appbaua-standard";
+import { BUDGET_TASK_LABELS, startOfWeek } from "./budget";
+import { getRunLogStore } from "./run-log-store";
 
 // Application service: the operations req-001 exposes. Routes stay thin and
 // call these; tests exercise them directly. Reachability is injected so tests
@@ -107,6 +109,25 @@ export async function setRepoWeeklyBudget(
   const repos = await getStore().list();
   const next = repos.map((r) => (r.id === id ? { ...r, weeklyBudget } : r));
   return getStore().replace(next);
+}
+
+/**
+ * How many Bugs+Requirements each budgeted repo has worked off since the
+ * start of this week (req-044 AC10) — keyed by repo id, only for repos that
+ * have a weekly budget set (the number has no meaning without one).
+ */
+export async function weeklyUsageByRepo(
+  repos: Repo[],
+  now: Date,
+): Promise<Record<string, number>> {
+  const log = getRunLogStore();
+  const sinceIso = startOfWeek(now).toISOString();
+  const usage: Record<string, number> = {};
+  for (const r of repos) {
+    if (r.weeklyBudget == null) continue;
+    usage[r.id] = await log.countSuccessSince(r.name, BUDGET_TASK_LABELS, sinceIso);
+  }
+  return usage;
 }
 
 export async function removeRepo(id: string): Promise<Repo[]> {

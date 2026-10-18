@@ -56,7 +56,7 @@ weiter wie bisher.
       wiederkehrenden Aufgaben zählen nicht zum Budget.
 - [x] Given eine neue Woche beginnt, when der Worker das Repo an die
       Reihe nimmt, then arbeitet er dort wieder Pakete ab.
-- [ ] Given das Budget ist aufgebraucht, when ich im Menüpunkt "Repos"
+- [x] Given das Budget ist aufgebraucht, when ich im Menüpunkt "Repos"
       nachsehe, then erkenne ich, wie viel von dieser Woche verbraucht
       ist.
 
