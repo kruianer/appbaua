@@ -26,11 +26,25 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # the target repo from inside the app and pushes to the target's dev branch — or
 # to its default branch when it has no dev (req-013).
 #
+# bash: Claude Code runs every shell command of its Bash tool through bash, and
+# Alpine ships only busybox sh (same pattern as bug-016 in Dockerfile.worker).
+# Without it the chat (req-040) can read a file whose path it already knows but
+# can't search, list, or run anything (bug-035).
+#
+# SHELL=/bin/bash: the CLI refuses to run commands without SHELL set, even with
+# bash installed — Alpine leaves it unset (bug-035).
+#
+# rg (ripgrep) deliberately NOT added: the CLI binary bundles its own ripgrep
+# (confirmed via `strings` on the installed claude binary — it embeds
+# `@vscode/ripgrep`) and never shells out to a system `rg`, so the package
+# would only cost image size without changing search behaviour.
+#
 # The Claude Code CLI: the chat (req-040) runs in this container and calls the
 # same runClaude as the worker. Without it every message answered "Claude-Code-
 # CLI nicht verfügbar" (bug-028).
-RUN apk add --no-cache git \
+RUN apk add --no-cache git bash \
   && npm install -g @anthropic-ai/claude-code
+ENV SHELL=/bin/bash
 
 # Where that rollout clones repos (must be writable by the app user).
 ENV WORKER_WORKDIR=/work

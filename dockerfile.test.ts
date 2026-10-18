@@ -41,6 +41,16 @@ describe("Dockerfile — Chat-Arbeitskopie ueberlebt einen Deploy (bug-029)", ()
   });
 });
 
+describe("Dockerfile — Chat kann im Repo arbeiten, nicht nur bekannte Dateien lesen (bug-035)", () => {
+  it("AC: bash ist installiert — die CLI fuehrt jeden Bash-Befehl ueber bash aus, Alpine hat nur busybox sh", () => {
+    expect(DOCKERFILE).toMatch(/apk add --no-cache[^\n]*\bbash\b/);
+  });
+
+  it("AC: SHELL ist gesetzt — ohne das bricht jeder Bash-Aufruf ab, selbst mit installierter bash", () => {
+    expect(DOCKERFILE).toContain("ENV SHELL=/bin/bash");
+  });
+});
+
 describe("Dockerfile — Chat-Sitzungen koennen gespeichert werden (bug-032)", () => {
   // docker-compose.yml mountet ein eigenes, schreibbares Volume genau auf
   // /claude-home/.claude/projects (Unterpfad des nur lesenden claude-home-
