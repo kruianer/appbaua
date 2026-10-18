@@ -1,5 +1,5 @@
 import type { Repo } from "./repos";
-import type { TaskType } from "./task-types";
+import { SELF_ASSIGN_TASK_ID, type TaskType } from "./task-types";
 import type { RunLogEntry } from "./run-log";
 import { listRepos } from "./repo-service";
 import { listTaskTypes } from "./task-service";
@@ -214,6 +214,30 @@ export async function runOnce(
           md: null,
         });
         logged += 1; // this pass had a reason, not nothing to do (req-020)
+        continue;
+      }
+    }
+
+    // req-047 AC: Selbstauftrag reads the SAME weekly budget (still only
+    // Bugs+Requirements usage, via BUDGET_TASK_LABELS) to decide whether to
+    // author a new Requirement at all — a repo that cannot work off what it
+    // already has this week does not need another one piling up. This is
+    // deliberately a SEPARATE check from the one above: Selbstauftrag's own
+    // successes must never count AGAINST that budget (its label is not in
+    // BUDGET_TASK_LABELS), only read it. Silent, like the due-ness check
+    // above — unlike the Bugs/Requirements skip, there is no "used up" row to
+    // show, since the day is simply not spent yet and the step tries again
+    // on the next pass.
+    if (
+      step.taskType.id === SELF_ASSIGN_TASK_ID &&
+      step.repo.weeklyBudget != null
+    ) {
+      const usedThisWeek = await log.countSuccessSince(
+        step.repo.name,
+        BUDGET_TASK_LABELS,
+        startOfWeek(deps.now()).toISOString(),
+      );
+      if (isBudgetExhausted(step.repo.weeklyBudget, usedThisWeek)) {
         continue;
       }
     }

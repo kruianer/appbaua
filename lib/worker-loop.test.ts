@@ -900,4 +900,43 @@ describe("worker loop — Wochenbudget je Repo (req-044)", () => {
 
     expect(done.succeeded).toBe(2); // beide Repos liefen — das Budget ist wieder frei
   });
+
+  // req-047 AC11: Selbstauftrag liest dasselbe Wochenbudget, legt aber selbst
+  // kein Requirement an, solange es aufgebraucht ist.
+  it("req-047: aufgebrauchtes Wochenbudget verhindert auch den Selbstauftrag", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes())); // Bugs + alle übrigen
+    setStore(
+      createMemoryStore([{ ...repos[0], weeklyBudget: 1, selfAssign: true }]),
+    );
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, 0));
+
+    let calledFor: string[] = [];
+    const runStep = async (
+      _repo: Repo,
+      taskType: { label: string },
+    ): Promise<StepDecision> => {
+      calledFor.push(taskType.label);
+      return { kind: "success", message: "ok" };
+    };
+    await runOnce({ n: 0 }, deps({ runStep }));
+
+    expect(calledFor).not.toContain("Bugs"); // Budget schon aufgebraucht
+    expect(calledFor).not.toContain("Selbstauftrag"); // dieselbe Bremse
+    expect(calledFor).toContain("Security"); // wiederkehrende Aufgaben laufen weiter
+  });
+
+  // req-047: die beiden Bremsen bleiben unabhängig — ein erfolgreicher
+  // Selbstauftrag-Lauf selbst darf das Bugs/Requirements-Budget NICHT
+  // verbrauchen, sonst liefen beide nicht mehr unabhängig voneinander.
+  it("req-047: ein erfolgreicher Selbstauftrag zählt NICHT gegen das Wochenbudget", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    setStore(
+      createMemoryStore([{ ...repos[0], weeklyBudget: 1, selfAssign: true }]),
+    );
+    await seedSuccess("appbaua", "Selbstauftrag", new Date(2026, 6, 21, 10, 0));
+
+    const done = await runOnce({ n: 0 }, deps()); // Bugs noch gar nicht abgearbeitet
+
+    expect(done.succeeded).toBe(1); // der Bug lief trotzdem — Budget war noch frei
+  });
 });

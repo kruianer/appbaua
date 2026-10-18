@@ -59,7 +59,7 @@ gemeinsam. Ohne Einschalten läuft er nirgends.
       Requirement schreibt, then verstößt es NICHT dagegen.
 - [x] Given er findet nichts, was sinnvoll als Nächstes käme, when der
       Lauf endet, then entsteht KEINE Datei und der Verlauf sagt das.
-- [ ] Given das Wochenbudget des Repos ist aufgebraucht (req-044), when
+- [x] Given das Wochenbudget des Repos ist aufgebraucht (req-044), when
       der Worker den Selbstauftrag ausführen würde, then legt er KEIN
       Requirement an.
 - [x] Given die Task-Art ist aktiv, when der Worker läuft, then ändert
