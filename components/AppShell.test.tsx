@@ -349,7 +349,7 @@ describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
     expect(screen.getByRole("button", { name: "Mehr" })).toBeInTheDocument();
   });
 
-  it("AC: die Seitenleiste listet von oben nach unten Aktivität, Verlauf, Chat, Repos, Zustand, Release-Infos, Tasks, Einstellungen", async () => {
+  it("AC: die Seitenleiste listet von oben nach unten Aktivität, Verlauf, Chat, Repos, Tasks, Zustand, Release-Infos, Einstellungen", async () => {
     setWindowWidth(1280);
     renderShell();
     await screen.findByText("Leerlauf — nichts zu tun");
@@ -366,9 +366,9 @@ describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
       "Verlauf",
       "Chat",
       "Repos",
+      "Tasks",
       "Zustand",
       "Release-Infos",
-      "Tasks",
       "Einstellungen",
     ]);
   });

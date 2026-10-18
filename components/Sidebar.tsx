@@ -12,9 +12,9 @@ const NAV_ITEMS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "verlauf", label: "Verlauf", icon: "clock" },
   { key: "chat", label: "Chat", icon: "chat" },
   { key: "repos", label: "Repos", icon: "gitbranch" },
+  { key: "settings", label: "Tasks", icon: "list" },
   { key: "zustand", label: "Zustand", icon: "heart" },
   { key: "releaseinfo", label: "Release-Infos", icon: "megaphone" },
-  { key: "settings", label: "Tasks", icon: "list" },
 ];
 
 const muted = (pct: number) =>
