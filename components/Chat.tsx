@@ -33,6 +33,19 @@ export const POLL_MS = 1500;
  */
 export const MAX_COMPOSER_HEIGHT_PX = 220;
 
+/**
+ * "seit 2:14" statt eines stehenden Textes (bug-033 AC4): das Lebenszeichen
+ * darf nicht davon abhängen, ob der Ereignisstrom (Schritte) gerade etwas zu
+ * zeigen hat — eine verstrichene Zeit bewegt sich auch dann, wenn Claude
+ * lange nachdenkt, ohne ein Werkzeug zu benutzen.
+ */
+export function formatElapsed(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(s / 60);
+  const seconds = s % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
 // req-041 AC11-13: ab 744px zweispaltig — links die Repo-Liste (ständig
 // sichtbar statt der Auswahl von req-040), rechts das Gespräch, mit einer
 // lesbaren Höchstbreite statt voll ausgezogenem Text. Am iPhone (split=false,
@@ -43,11 +56,15 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   const [messagesByRepo, setMessagesByRepo] = useState<Record<string, ChatMessage[]>>({});
   const [pendingByRepo, setPendingByRepo] = useState<Record<string, boolean>>({});
   const [stepsByRepo, setStepsByRepo] = useState<Record<string, string | null>>({});
+  // bug-033 AC4: wann der aktuell laufende Zug dieses Repos begonnen hat —
+  // die Grundlage für "seit 2:14" statt eines stehenden Textes.
+  const [sendingSinceByRepo, setSendingSinceByRepo] = useState<Record<string, number>>({});
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const messages = messagesByRepo[repoId] ?? [];
   const sending = pendingByRepo[repoId] ?? false;
   const steps = stepsByRepo[repoId] ?? null;
+  const sendingSince = sendingSinceByRepo[repoId] ?? null;
 
   // bug-030: das Feld wächst mit dem Text, bis MAX_COMPOSER_HEIGHT_PX erreicht
   // ist — danach rollt sein Inhalt statt weiter zu wachsen. "auto" vor der
@@ -161,6 +178,7 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
       [targetRepoId]: [...(prev[targetRepoId] ?? []), optimistic],
     }));
     setPendingByRepo((prev) => ({ ...prev, [targetRepoId]: true }));
+    setSendingSinceByRepo((prev) => ({ ...prev, [targetRepoId]: Date.now() }));
     try {
       await fetch(`/api/chat/${targetRepoId}/messages`, {
         method: "POST",
@@ -210,20 +228,24 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
 
   const activeRepo = repos.find((r) => r.id === repoId) ?? null;
 
-  // req-041 AC13: im Split lesbar schmal statt voll ausgezogen — ab etwa
-  // 90 Zeichen je Zeile wird Lesen mühsam, darum eine Höchstbreite statt der
-  // vollen Spaltenbreite.
+  // bug-033 AC1: der Gesprächsbereich selbst nutzt die volle Breite der
+  // Spalte — die Lesebreite aus req-041 AC13 gehört an die einzelne
+  // Nachricht (unten), nicht an den ganzen Bereich. AC3: ein spürbarer
+  // Zuschlag am unteren Rand, damit die letzte Nachricht nicht am
+  // Eingabefeld klebt.
   const messagesList = (
     <div
       data-chat-messages
       style={{
         flex: 1,
         overflowY: "auto",
-        padding: split ? 16 : "0 20px",
+        paddingTop: split ? 16 : 0,
+        paddingLeft: split ? 16 : 20,
+        paddingRight: split ? 16 : 20,
+        paddingBottom: split ? 28 : 24,
         display: "flex",
         flexDirection: "column",
         gap: "var(--space-2)",
-        ...(split ? { maxWidth: 760, width: "100%", alignSelf: "center" } : {}),
       }}
     >
       {messages.map((m) => (
@@ -234,7 +256,10 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
             flexDirection: "column",
             gap: 2,
             alignSelf: m.role === "user" ? "flex-end" : "stretch",
-            maxWidth: "88%",
+            // req-041 AC13: im Split lesbar schmal statt voll ausgezogen — ab
+            // etwa 90 Zeichen je Zeile wird Lesen mühsam. Gilt für die
+            // einzelne Nachricht, nicht für den ganzen Bereich (bug-033 AC1).
+            maxWidth: split ? "min(760px, 88%)" : "88%",
           }}
         >
           <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
@@ -270,7 +295,16 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
       ))}
       {sending && (
         <>
-          <div style={{ fontSize: 12, color: muted(55) }}>Claude schreibt …</div>
+          {/* bug-033 AC4: ein Lebenszeichen, das sich sichtbar verändert — auch
+              wenn der Ereignisstrom (Schritte unten) gerade schweigt, etwa weil
+              Claude lange nachdenkt. Eine verstrichene Zeit ist dafür
+              belastbarer als ein stehender Text. */}
+          <div data-chat-life-sign style={{ fontSize: 12, color: muted(55) }}>
+            <span>Claude schreibt …</span>
+            {sendingSince !== null && (
+              <span> (seit {formatElapsed((Date.now() - sendingSince) / 1000)})</span>
+            )}
+          </div>
           {steps && (
             <div
               data-chat-steps

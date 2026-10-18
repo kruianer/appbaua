@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Chat, MAX_COMPOSER_HEIGHT_PX } from "./Chat";
+import { Chat, MAX_COMPOSER_HEIGHT_PX, formatElapsed } from "./Chat";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 
@@ -305,12 +305,58 @@ describe("Chat zweispaltig (req-041 AC11-13)", () => {
     );
   });
 
-  it("AC13: das Gespräch bleibt lesbar schmal statt über die volle Breite gezogen", async () => {
+  it("AC13: eine einzelne Nachricht bleibt lesbar schmal statt über die volle Breite gezogen", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} split />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await user.click(screen.getByRole("button", { name: "CellarVoice" }));
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("Frage")).toBeInTheDocument());
+
+    // Zeile -> Sprechblase -> der äußere Wrapper, der die Lesebreite trägt.
+    const bubbleWrapper = screen.getByText("Frage").parentElement?.parentElement as HTMLElement;
+    expect(bubbleWrapper.style.maxWidth).toBe("min(760px, 88%)");
+  });
+});
+
+// bug-033: fünf Darstellungsmängel des Chats — die Breite des
+// Gesprächsbereichs selbst (statt der einzelnen Nachricht), der Abstand zum
+// Eingabefeld und ein Lebenszeichen, das nicht vom Ereignisstrom abhängt.
+describe("Darstellung (bug-033)", () => {
+  it("AC1: der Gesprächsbereich selbst nutzt die volle Breite statt einer festen Höchstbreite", async () => {
     render(<Chat repos={repos} split />);
     await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
 
     const messages = document.querySelector("[data-chat-messages]") as HTMLElement;
-    expect(messages.style.maxWidth).toBe("760px");
+    expect(messages.style.maxWidth).toBe("");
+    expect(messages.style.width).toBe("");
+  });
+
+  it("AC3: am unteren Rand des Gesprächsbereichs bleibt Luft zum Eingabefeld", async () => {
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+
+    const messages = document.querySelector("[data-chat-messages]") as HTMLElement;
+    expect(Number.parseInt(messages.style.paddingBottom, 10)).toBeGreaterThan(0);
+  });
+
+  it("AC4: solange eine Antwort läuft, zeigt das Lebenszeichen eine verstrichene Zeit statt stehenzubleiben", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+
+    const lifeSign = () => document.querySelector("[data-chat-life-sign]") as HTMLElement;
+    await waitFor(() => expect(lifeSign().textContent).toMatch(/seit 0:0\d/));
+
+    const first = lifeSign().textContent;
+    await waitFor(() => expect(lifeSign().textContent).not.toBe(first), { timeout: 3000 });
   });
 });
 
@@ -550,5 +596,19 @@ describe("sichtbare Schritte (req-048)", () => {
     await user.click(screen.getByText("Schritte"));
     expect(details.open).toBe(true);
     expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument();
+  });
+});
+
+describe("formatElapsed (bug-033 AC4)", () => {
+  it("formatiert unter einer Minute als 0:ss", () => {
+    expect(formatElapsed(14)).toBe("0:14");
+  });
+
+  it("formatiert Minuten und Sekunden wie im Hinweis ('seit 2:14')", () => {
+    expect(formatElapsed(134)).toBe("2:14");
+  });
+
+  it("rundet ab statt aufzurunden", () => {
+    expect(formatElapsed(14.9)).toBe("0:14");
   });
 });

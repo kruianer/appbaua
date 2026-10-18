@@ -106,6 +106,19 @@ describe("describeEvent — tool activity", () => {
   it("skips empty text blocks", () => {
     expect(describeEvent(assistant([{ type: "text", text: "  \n " }]))).toEqual([]);
   });
+
+  // bug-033: Opus denkt vor einer Antwort oft lange nach, bevor ein Werkzeug
+  // oder ein Textblock kommt — ohne diese Zeile blieb der Ereignisstrom für
+  // genau diese Zeit vollkommen leer ("steht still").
+  it("shows a thinking block, so a long reasoning stretch is not silent", () => {
+    expect(
+      describeEvent(assistant([{ type: "thinking", thinking: "Lass mich das prüfen." }])),
+    ).toEqual(["Lass mich das prüfen."]);
+  });
+
+  it("skips empty thinking blocks", () => {
+    expect(describeEvent(assistant([{ type: "thinking", thinking: "  \n " }]))).toEqual([]);
+  });
 });
 
 describe("describeEvent — session and results", () => {
