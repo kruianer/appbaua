@@ -46,13 +46,13 @@ sortiert, neueste zuerst.
       steht dort, was.
 - [x] Given ich lese eine Release-Info, when ich sie durchgehe, then
       stehen dort KEINE Dateinamen und KEINE Testzahlen.
-- [ ] Given ich öffne die Release-Infos in appbaua, when sie erscheinen,
+- [x] Given ich öffne die Release-Infos in appbaua, when sie erscheinen,
       then sehe ich die Einträge aller Repos, neueste zuerst.
-- [ ] Given ich sehe die Liste, when ich einen Eintrag ansehe, then
+- [x] Given ich sehe die Liste, when ich einen Eintrag ansehe, then
       erkenne ich, zu welchem Repo und zu welchem Paket er gehört.
 - [x] Given ein Paket wurde abgebrochen oder ist fehlgeschlagen, when
       ich ins Repo sehe, then entsteht dafür KEINE Release-Info.
-- [ ] Given ich lese die Release-Infos auf dem iPhone, when ich sie
+- [x] Given ich lese die Release-Infos auf dem iPhone, when ich sie
       durchgehe, then muss ich nicht seitlich schieben.
 
 # Constraints

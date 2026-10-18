@@ -13,6 +13,7 @@ const NAV_ITEMS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "chat", label: "Chat", icon: "chat" },
   { key: "repos", label: "Repos", icon: "gitbranch" },
   { key: "zustand", label: "Zustand", icon: "heart" },
+  { key: "releaseinfo", label: "Release-Infos", icon: "megaphone" },
   { key: "settings", label: "Tasks", icon: "list" },
 ];
 

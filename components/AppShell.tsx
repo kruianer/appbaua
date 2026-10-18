@@ -26,6 +26,7 @@ import { WorkerDashboard } from "./WorkerDashboard";
 import { HealthOverview } from "./HealthOverview";
 import { Chat } from "./Chat";
 import { Sidebar } from "./Sidebar";
+import { ReleaseInfo } from "./ReleaseInfo";
 
 // req-041: ab dieser Fensterbreite wandert die Navigation von der unteren
 // Leiste in die Seitenleiste am linken Rand.
@@ -46,6 +47,7 @@ const SIDEBAR_COLLAPSED_KEY = "appbaua.sidebar-collapsed";
 // historisch den Tasks-Tab; "einstellungen" ist die Einstellungsseite.
 const MORE_ITEMS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "zustand", label: "Zustand", icon: "heart" },
+  { key: "releaseinfo", label: "Release-Infos", icon: "megaphone" },
   { key: "settings", label: "Tasks", icon: "list" },
   { key: "einstellungen", label: "Einstellungen", icon: "settings" },
 ];
@@ -59,6 +61,7 @@ const MODULE_TITLE: Record<Tab, string> = {
   repos: "Repo-Verwaltung",
   settings: "Task-Steuerung",
   einstellungen: "Einstellungen",
+  releaseinfo: "Release-Infos",
 };
 
 const muted = (pct: number) =>
@@ -478,6 +481,11 @@ export function AppShell({
       {tab === "einstellungen" && (
         <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
           Wartung und Optionen der App.
+        </div>
+      )}
+      {tab === "releaseinfo" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Was sich für dich geändert hat — aus allen Repos.
         </div>
       )}
     </div>
@@ -910,6 +918,8 @@ export function AppShell({
         />
       ) : tab === "einstellungen" ? (
         <Settings />
+      ) : tab === "releaseinfo" ? (
+        <ReleaseInfo />
       ) : (
         <RunLog />
       );

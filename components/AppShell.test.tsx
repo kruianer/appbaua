@@ -244,7 +244,7 @@ describe("Untere Navigation — fünf Plätze (req-039)", () => {
     );
   });
 
-  it('AC: "Mehr" öffnet eine Liste mit genau drei Einträgen', async () => {
+  it('AC: "Mehr" öffnet eine Liste mit den ausgelagerten Menüpunkten', async () => {
     const user = userEvent.setup();
     renderShell();
     await screen.findByText("Leerlauf — nichts zu tun");
@@ -255,7 +255,8 @@ describe("Untere Navigation — fünf Plätze (req-039)", () => {
     const items = within(menu)
       .getAllByRole("menuitem")
       .map((b) => b.textContent);
-    expect(items).toEqual(["Zustand", "Tasks", "Einstellungen"]);
+    // req-046 fügt "Release-Infos" als vierten Eintrag hinzu.
+    expect(items).toEqual(["Zustand", "Release-Infos", "Tasks", "Einstellungen"]);
   });
 
   it('AC: ein Tipp auf "Zustand" in der Liste zeigt die Zustandsübersicht und schließt die Liste', async () => {
@@ -332,8 +333,8 @@ describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
     await screen.findByText("Leerlauf — nichts zu tun");
 
     expect(screen.queryByRole("button", { name: "Mehr" })).not.toBeInTheDocument();
-    // Die untere Leiste hatte fünf gleichartige Plätze; die Seitenleiste hat
-    // sieben (sechs oben + Einstellungen unten) — ein verlässlicher Unterschied.
+    // Die untere Leiste hat fünf gleichartige Plätze; die Seitenleiste hat
+    // mehr (oben + Einstellungen unten) — ein verlässlicher Unterschied.
     const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
     expect(within(nav).getAllByRole("button").length).toBeGreaterThan(5);
   });
@@ -348,7 +349,7 @@ describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
     expect(screen.getByRole("button", { name: "Mehr" })).toBeInTheDocument();
   });
 
-  it("AC: die Seitenleiste listet von oben nach unten Aktivität, Verlauf, Chat, Repos, Zustand, Tasks, Einstellungen", async () => {
+  it("AC: die Seitenleiste listet von oben nach unten Aktivität, Verlauf, Chat, Repos, Zustand, Release-Infos, Tasks, Einstellungen", async () => {
     setWindowWidth(1280);
     renderShell();
     await screen.findByText("Leerlauf — nichts zu tun");
@@ -359,12 +360,14 @@ describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
       .map((b) => b.getAttribute("aria-label"))
       // Der Ein-/Ausklapp-Knopf gehört nicht zu den Menüpunkten (eigene AC).
       .filter((l) => l !== "Seitenleiste einklappen" && l !== "Seitenleiste aufklappen");
+    // req-046 fügt "Release-Infos" als eigenen Platz hinzu.
     expect(labels).toEqual([
       "Aktivität",
       "Verlauf",
       "Chat",
       "Repos",
       "Zustand",
+      "Release-Infos",
       "Tasks",
       "Einstellungen",
     ]);

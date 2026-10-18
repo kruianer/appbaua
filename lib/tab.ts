@@ -8,4 +8,5 @@ export type Tab =
   | "chat"
   | "repos"
   | "settings"
-  | "einstellungen";
+  | "einstellungen"
+  | "releaseinfo";
