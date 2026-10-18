@@ -61,6 +61,8 @@ export async function addRepo(
     model: DEFAULT_REPO_MODEL,
     // req-032: watching an app reaches into a live system, so it starts off.
     monitored: false,
+    // req-047: a repo never self-assigns until someone switches it on for it.
+    selfAssign: false,
   };
   const next = [...repos, repo]; // append = lowest priority
   await getStore().replace(next);
@@ -84,6 +86,19 @@ export async function toggleRepoMonitored(id: string): Promise<Repo[]> {
   const repos = await getStore().list();
   const next = repos.map((r) =>
     r.id === id ? { ...r, monitored: !r.monitored } : r,
+  );
+  return getStore().replace(next);
+}
+
+/**
+ * Flip the "Selbstauftrag" switch of one repo (req-047). Its own operation,
+ * same shape as toggleRepoMonitored: the switch belongs to this ONE repo, so
+ * turning it on here must never affect any other repo's setting.
+ */
+export async function toggleRepoSelfAssign(id: string): Promise<Repo[]> {
+  const repos = await getStore().list();
+  const next = repos.map((r) =>
+    r.id === id ? { ...r, selfAssign: !r.selfAssign } : r,
   );
   return getStore().replace(next);
 }

@@ -126,8 +126,9 @@ export function createPgStore(): RepoStore {
         model: string | null;
         monitored: boolean | null;
         weekly_budget: number | null;
+        self_assign: boolean | null;
       }>(
-        "SELECT id, name, url, active, model, monitored, weekly_budget FROM repos ORDER BY position ASC",
+        "SELECT id, name, url, active, model, monitored, weekly_budget, self_assign FROM repos ORDER BY position ASC",
       );
       return res.rows.map((r) => ({
         id: r.id,
@@ -140,6 +141,8 @@ export function createPgStore(): RepoStore {
         monitored: r.monitored ?? false,
         // req-044: NULL (unset, or a row from before it existed) means no limit.
         weeklyBudget: r.weekly_budget ?? null,
+        // req-047: a row from before the switch existed never self-assigns.
+        selfAssign: r.self_assign ?? false,
       }));
     },
 
@@ -152,8 +155,18 @@ export function createPgStore(): RepoStore {
         for (let i = 0; i < repos.length; i++) {
           const r = repos[i];
           await client.query(
-            "INSERT INTO repos (id, name, url, active, position, model, monitored, weekly_budget) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
-            [r.id, r.name, r.url, r.active, i, r.model, r.monitored, r.weeklyBudget ?? null],
+            "INSERT INTO repos (id, name, url, active, position, model, monitored, weekly_budget, self_assign) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            [
+              r.id,
+              r.name,
+              r.url,
+              r.active,
+              i,
+              r.model,
+              r.monitored,
+              r.weeklyBudget ?? null,
+              r.selfAssign ?? false,
+            ],
           );
         }
         await client.query("COMMIT");

@@ -44,6 +44,15 @@ export type Repo = {
    * limit — existing repos keep running unbounded, as before.
    */
   weeklyBudget?: number | null;
+  /**
+   * Whether the Selbstauftrag task (req-047) may write new requirements into
+   * THIS repo. The switch belongs to the repo, not to the task type — unlike
+   * every other task type, which is a single on/off for all repos — because
+   * accidentally running it everywhere is exactly what it must not do.
+   * `undefined`/unset means off: a new repo never self-assigns until someone
+   * turns it on for that repo deliberately.
+   */
+  selfAssign?: boolean;
 };
 
 /**

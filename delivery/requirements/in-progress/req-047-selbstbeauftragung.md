@@ -37,9 +37,9 @@ gemeinsam. Ohne Einschalten läuft er nirgends.
 
 - [x] Given ich öffne den Menüpunkt "Tasks", when ich die Liste ansehe,
       then steht dort eine Task-Art "Selbstauftrag".
-- [ ] Given ein Repo wurde neu eingetragen, when ich es ansehe, then
+- [x] Given ein Repo wurde neu eingetragen, when ich es ansehe, then
       ist der Selbstauftrag dort NICHT eingeschaltet.
-- [ ] Given ich schalte den Selbstauftrag für "Furtgoh" ein, when ich
+- [x] Given ich schalte den Selbstauftrag für "Furtgoh" ein, when ich
       ein anderes Repo ansehe, then ist er dort NICHT eingeschaltet.
 - [ ] Given der Selbstauftrag ist nur für "Furtgoh" eingeschaltet, when
       der Worker alle Repos durchgeht, then schreibt er NUR dort ein

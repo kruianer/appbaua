@@ -27,6 +27,13 @@ ALTER TABLE repos ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT FA
 -- unbounded, as before.
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS weekly_budget INTEGER;
 
+-- Added with req-047: whether the Selbstauftrag task may write new
+-- requirements into this repo. The switch belongs to the repo (like model
+-- and weekly_budget above), not to task_types, which has no repo column and
+-- would otherwise turn it on everywhere at once. Existing rows default to
+-- FALSE: a repo never self-assigns until someone switches it on.
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS self_assign BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Task types (req-002). Predefined types, seeded on first use; the user only
 -- edits priority (position), active and the per-weekday schedule (JSONB:
 -- { mon: {enabled, start, end}, ... }). New types are added via code/seed.

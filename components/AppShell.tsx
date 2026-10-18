@@ -258,6 +258,19 @@ export function AppShell({
     }
   }, []);
 
+  // req-047: der Schalter "Selbstauftrag" — gehört zum Repo, nicht zur
+  // Task-Art, damit er nicht versehentlich überall läuft.
+  const toggleSelfAssign = useCallback(async (id: string) => {
+    setRepos((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, selfAssign: !r.selfAssign } : r)),
+    );
+    const res = await fetch(`/api/repos/${id}/self-assign`, { method: "PATCH" });
+    if (res.ok) {
+      const data = await res.json();
+      setRepos(data.repos);
+    }
+  }, []);
+
   const setModel = useCallback(async (id: string, model: RepoModel) => {
     // optimistic (req-028)
     setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, model } : r)));
@@ -825,6 +838,54 @@ export function AppShell({
                                     ? "flex-end"
                                     : "flex-start",
                                   background: r.monitored
+                                    ? "var(--color-accent)"
+                                    : "color-mix(in srgb, var(--color-text) 22%, transparent)",
+                                  transition: "background .15s ease",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: 999,
+                                    background: "var(--color-bg)",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,.4)",
+                                  }}
+                                />
+                              </button>
+                            </span>
+                            {/* req-047: Selbstauftrag — gehört dem Repo, nicht
+                                der Task-Art; eigener Schalter je Repo, aus bis
+                                jemand ihn bewusst einschaltet. */}
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "var(--space-2)",
+                                flex: "none",
+                                fontSize: 12,
+                                color: muted(70),
+                              }}
+                            >
+                              Selbstauftrag
+                              <button
+                                role="switch"
+                                aria-checked={Boolean(r.selfAssign)}
+                                aria-label={`${r.name} Selbstauftrag`}
+                                onClick={() => toggleSelfAssign(r.id)}
+                                style={{
+                                  flex: "none",
+                                  width: 40,
+                                  height: 24,
+                                  borderRadius: 999,
+                                  border: "none",
+                                  padding: 3,
+                                  display: "flex",
+                                  cursor: "pointer",
+                                  justifyContent: r.selfAssign
+                                    ? "flex-end"
+                                    : "flex-start",
+                                  background: r.selfAssign
                                     ? "var(--color-accent)"
                                     : "color-mix(in srgb, var(--color-text) 22%, transparent)",
                                   transition: "background .15s ease",

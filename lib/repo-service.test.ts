@@ -10,6 +10,7 @@ import {
   setRepoWeeklyBudget,
   toggleRepo,
   toggleRepoMonitored,
+  toggleRepoSelfAssign,
   weeklyUsageByRepo,
 } from "./repo-service";
 import {
@@ -143,6 +144,31 @@ describe("req-001 acceptance criteria", () => {
     const afterOff = await toggleRepoMonitored(lgt.id);
     expect(afterOff[0].monitored).toBe(false);
     expect(afterOff[0].active).toBe(false);
+  });
+
+  it("req-047: a newly added repo does NOT self-assign — switched on deliberately, per repo", async () => {
+    const res = await addRepo(
+      { url: "github.com/kruianer/appbaua" },
+      { checkReachable: reachable },
+    );
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.repo.selfAssign).toBe(false);
+  });
+
+  it("req-047: turning Selbstauftrag on for one repo leaves every other repo untouched", async () => {
+    await addRepo(
+      { url: "github.com/kruianer/furtgoh", name: "Furtgoh" },
+      { checkReachable: reachable },
+    );
+    await addRepo(
+      { url: "github.com/kruianer/appbaua", name: "appbaua" },
+      { checkReachable: reachable },
+    );
+    const [furtgoh, appbaua] = await listRepos();
+
+    const after = await toggleRepoSelfAssign(furtgoh.id);
+    expect(after.find((r) => r.id === furtgoh.id)!.selfAssign).toBe(true);
+    expect(after.find((r) => r.id === appbaua.id)!.selfAssign).toBe(false);
   });
 
   it("req-028: setting a repo's model persists it and leaves other repos alone", async () => {

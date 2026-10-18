@@ -142,6 +142,15 @@ beforeEach(() => {
       );
       return jsonResponse({ repos: serverRepos });
     }
+    // Mirrors PATCH /api/repos/:id/self-assign (req-047).
+    const selfAssignMatch = /^\/api\/repos\/([^/]+)\/self-assign$/.exec(url);
+    if (selfAssignMatch && init?.method === "PATCH") {
+      const id = selfAssignMatch[1];
+      serverRepos = serverRepos.map((r) =>
+        r.id === id ? { ...r, selfAssign: !r.selfAssign } : r,
+      );
+      return jsonResponse({ repos: serverRepos });
+    }
     // Mirrors POST /api/repos/:id/appbaua (req-012).
     if (/^\/api\/repos\/[^/]+\/appbaua$/.test(url) && init?.method === "POST") {
       return jsonResponse({ message: "Umstellung abgeschlossen." });
@@ -861,6 +870,31 @@ describe("Repo-Zeile — aufklappbar (req-030)", () => {
     await waitFor(() => expect(watch).toHaveAttribute("aria-checked", "true"));
     // Der andere Schalter hat sich dabei nicht bewegt.
     expect(active).toHaveAttribute("aria-checked", "true");
+  });
+
+  // req-047 AC2/AC3: der Schalter "Selbstauftrag" ist aus, bis er für genau
+  // dieses Repo bewusst eingeschaltet wird — ein anderes Repo bleibt unberührt.
+  it("req-047: der Selbstauftrag-Schalter ist aus und wirkt nur auf das eigene Repo", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+    await user.click(nameToggle(document.body, "r1"));
+
+    const selfAssignR1 = screen.getByRole("switch", {
+      name: "appbaua Selbstauftrag",
+    });
+    expect(selfAssignR1).toHaveAttribute("aria-checked", "false"); // Vorgabe: aus
+
+    await user.click(selfAssignR1);
+    await waitFor(() =>
+      expect(selfAssignR1).toHaveAttribute("aria-checked", "true"),
+    );
+
+    // Das andere Repo sieht davon nichts (öffnen schließt r1 automatisch).
+    await user.click(nameToggle(document.body, "r2"));
+    const selfAssignR2 = screen.getByRole("switch", {
+      name: "beta Selbstauftrag",
+    });
+    expect(selfAssignR2).toHaveAttribute("aria-checked", "false");
   });
 
   // req-044 AC1: im aufgeklappten Bereich steht ein Eingabefeld für das
