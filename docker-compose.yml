@@ -69,6 +69,9 @@ services:
       # passkey registered on one would silently not work on the other.
       APP_ORIGIN: ${APP_ORIGIN}
       NODE_ENV: production
+      # Claude Code authenticates via the subscription login in the
+      # claude-home volume (bug-028), shared with the worker (req-040).
+      HOME: /claude-home
       # System-Kacheln (req-009): wo die Host-Werte im Container liegen.
       HOST_PROC: /host/proc
       # Freier Speicherplatz: statfs auf dem EIGENEN Wurzel-Dateisystem des
@@ -105,6 +108,11 @@ services:
       # ein statfs im Lesebereich des einzigen internetzugewandten Prozesses —
       # samt ~/appbaua-env/*.env mit GITHUB_TOKEN und DB-Passwort (bug-005).
       - /proc:/host/proc:ro
+      # Claude-Code-Anmeldung fuer den Chat (req-040), nur lesend: der
+      # App-Container muss sie lesen, schreiben darf nur `claude login` im
+      # Worker-Container. Ein Fehler im Chat kann die Anmeldung so nicht
+      # beschaedigen (bug-028).
+      - claude-home:/claude-home:ro
     ports:
       - "${APP_PORT}:3000"
 

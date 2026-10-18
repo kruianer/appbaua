@@ -25,10 +25,20 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # git at runtime: "Auf appbaua umstellen" (req-012) clones the appbaua source and
 # the target repo from inside the app and pushes to the target's dev branch — or
 # to its default branch when it has no dev (req-013).
-RUN apk add --no-cache git
+#
+# The Claude Code CLI: the chat (req-040) runs in this container and calls the
+# same runClaude as the worker. Without it every message answered "Claude-Code-
+# CLI nicht verfügbar" (bug-028).
+RUN apk add --no-cache git \
+  && npm install -g @anthropic-ai/claude-code
 
 # Where that rollout clones repos (must be writable by the app user).
 ENV WORKER_WORKDIR=/work
+
+# Claude Code auth lives here too (claude-home volume, mounted read-only — see
+# docker-compose.yml). Without this HOME points at /home/nextjs and the CLI
+# never finds the subscription login (bug-028).
+ENV HOME=/claude-home
 
 # Run as non-root.
 RUN addgroup --system --gid 1001 nodejs \

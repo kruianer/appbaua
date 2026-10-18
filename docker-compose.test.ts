@@ -169,6 +169,28 @@ describe("docker-compose.yml — Speicherlimit fuer den Worker (bug-026)", () =>
   });
 });
 
+describe("docker-compose.yml — Claude-Code-Anmeldung im App-Container (bug-028)", () => {
+  // Der Chat (req-040) laeuft im App-Container und braucht dieselbe
+  // Abo-Anmeldung wie der Worker, die im Volume claude-home unter /claude-home
+  // liegt. Entschieden: nur lesend eingehaengt, damit ein Fehler im Chat die
+  // Anmeldung nicht beschaedigen kann — schreiben darf nur `claude login` im
+  // Worker-Container.
+
+  it("AC: das claude-home-Volume ist im App-Container eingehaengt, und zwar nur lesend", () => {
+    const app = serviceBlock("app");
+    expect(app).toMatch(/^\s*-\s*claude-home:\/claude-home:ro\s*$/m);
+  });
+
+  it("der App-Container haengt das Volume NICHT schreibend ein", () => {
+    const app = serviceBlock("app");
+    expect(app).not.toMatch(/^\s*-\s*claude-home:\/claude-home\s*$/m);
+  });
+
+  it("AC: HOME des App-Containers zeigt auf /claude-home, nicht auf /home/nextjs", () => {
+    expect(serviceBlock("app")).toContain("HOME: /claude-home");
+  });
+});
+
 describe("docker-compose.yml — Arbeitskopien ueberleben einen Deploy (req-062-Verlust)", () => {
   function serviceBlockLocal(name: string): string {
     const lines = COMPOSE.split("\n");
