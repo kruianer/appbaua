@@ -30,15 +30,20 @@ Nicht-Ziele der Vision sind dabei eine Grenze, keine Anregung.
 Findet er nichts Sinnvolles, legt er nichts an. Das ist ein gültiges
 Ergebnis, kein Fehler.
 
-Die Task-Art ist standardmäßig **inaktiv**. Sie wird je Repo bewusst
-eingeschaltet.
+Der Selbstauftrag wird **je Repo** eingeschaltet, nicht für alle
+gemeinsam. Ohne Einschalten läuft er nirgends.
 
 # Acceptance Criteria
 
 - [ ] Given ich öffne den Menüpunkt "Tasks", when ich die Liste ansehe,
       then steht dort eine Task-Art "Selbstauftrag".
-- [ ] Given ein Repo wurde neu eingetragen, when ich seine Task-Arten
-      ansehe, then ist "Selbstauftrag" NICHT aktiv.
+- [ ] Given ein Repo wurde neu eingetragen, when ich es ansehe, then
+      ist der Selbstauftrag dort NICHT eingeschaltet.
+- [ ] Given ich schalte den Selbstauftrag für "Furtgoh" ein, when ich
+      ein anderes Repo ansehe, then ist er dort NICHT eingeschaltet.
+- [ ] Given der Selbstauftrag ist nur für "Furtgoh" eingeschaltet, when
+      der Worker alle Repos durchgeht, then schreibt er NUR dort ein
+      Requirement.
 - [ ] Given die Task-Art ist für ein Repo aktiv und sie lief heute noch
       nicht, when der Worker das Repo an die Reihe nimmt, then legt er
       dort höchstens ein neues Requirement in `ready/` ab.
@@ -67,8 +72,19 @@ eingeschaltet.
   Wochenbudget aus req-044, das zählt, was abgearbeitet wird.
 - Die Vision des Repos ist bindend, insbesondere ihre Nicht-Ziele. Sie
   steht über dem, was der Worker für sinnvoll hält.
-- Standardmäßig inaktiv. Ein Repo, das sich nicht selbst beauftragen
-  soll, bleibt davon unberührt, ohne dass jemand etwas abschalten muss.
+- **Der Schalter gehört zum Repo, nicht zur Task-Art.** Das ist der
+  Unterschied zu allen bisherigen Task-Arten: Die Tabelle `task_types`
+  kennt heute nur `active` ohne Repo-Bezug, ein Schalter dort gilt also
+  für alle Repos gemeinsam. Für den Selbstauftrag reicht das nicht —
+  er darf nicht versehentlich überall laufen.
+
+  Wie das umgesetzt wird, ist offen: eine Einstellung am Repo (wie das
+  Wochenbudget aus req-044 und das Modell aus req-028) oder ein
+  Repo-Bezug in den Task-Arten. Ersteres erscheint näher an dem, was
+  schon da ist.
+- Ohne Einschalten läuft der Selbstauftrag nirgends. Ein Repo, das
+  sich nicht selbst beauftragen soll, bleibt unberührt, ohne dass
+  jemand etwas abschalten muss.
 
 # Out of Scope
 
