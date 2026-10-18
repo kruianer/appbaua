@@ -224,6 +224,42 @@ describe("Chat (req-040)", () => {
   });
 });
 
+describe("Kopierfeld für Befehle (bug-031)", () => {
+  it("zeigt einen im Nachrichtentext enthaltenen Befehl als eigenes Kopierfeld mit Knopf", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    messagesByRepo.r2 = [
+      {
+        id: 1,
+        repoId: "r2",
+        role: "system",
+        content:
+          "Anmeldung abgelaufen. Im Worker-Container dieser Umgebung neu anmelden:\n\n```\ndocker exec -it appbaua-dev-worker-1 claude login\n```",
+        createdAt: "t",
+      },
+    ];
+
+    render(<Chat repos={repos} />);
+
+    await waitFor(() =>
+      expect(screen.getByText("docker exec -it appbaua-dev-worker-1 claude login")).toBeInTheDocument(),
+    );
+    expect(
+      screen.getByText("Anmeldung abgelaufen. Im Worker-Container dieser Umgebung neu anmelden:"),
+    ).toBeInTheDocument();
+
+    const copyButton = screen.getByRole("button", { name: "Befehl kopieren" });
+    await userEvent.click(copyButton);
+    expect(writeText).toHaveBeenCalledWith(
+      "docker exec -it appbaua-dev-worker-1 claude login",
+    );
+    expect(screen.getByRole("button", { name: "Befehl kopieren" })).toHaveTextContent("Kopiert");
+  });
+});
+
 // req-041 AC11-13: ab 744px wird die Repo-Auswahl zur ständig sichtbaren
 // linken Spalte, rechts steht das Gespräch — über die Prop `split`, die
 // AppShell ab dieser Breite setzt.

@@ -13,6 +13,7 @@ import {
 } from "./chat-session-manager";
 import { ABORTED_MESSAGE } from "./claude-runner";
 import { createMemoryChatSessionStore } from "./chat-session-store";
+import { authExpiredChatMessage } from "./auth-expired";
 import type { Repo } from "./repos";
 
 /** A promise plus the functions that settle it, for controlling timing in tests. */
@@ -224,6 +225,52 @@ describe("Abo-Limit (req-040 AC13)", () => {
 
     const [, errorMessage] = await store.listMessages(repo.id);
     expect(errorMessage).toMatchObject({ role: "system", content: "Fehler: irgendein anderer Fehler" });
+  });
+});
+
+describe("abgelaufene Anmeldung (bug-031)", () => {
+  it("zeigt statt des rohen OAuth-Texts den Befehl für den Worker-Container der laufenden Umgebung", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      env: { APP_ORIGIN: "https://dev.appbaua.com" },
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({
+        ok: false,
+        summary: "Claude-Lauf fehlgeschlagen: Failed to authenticate: OAuth session expired and could not be refreshed",
+        report: "",
+      }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    const [, authMessage] = await store.listMessages(repo.id);
+    expect(authMessage).toMatchObject({
+      role: "system",
+      content: authExpiredChatMessage({ APP_ORIGIN: "https://dev.appbaua.com" }),
+    });
+    expect(authMessage.content).toContain("appbaua-dev-worker-1");
+  });
+
+  it("nennt auf der prod-Umgebung den prod-Worker-Container, nicht den von dev", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      env: { APP_ORIGIN: "https://app.appbaua.com" },
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => ({
+        ok: false,
+        summary: "Failed to authenticate",
+        report: "",
+      }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    const [, authMessage] = await store.listMessages(repo.id);
+    expect(authMessage.content).toContain("appbaua-prod-worker-1");
   });
 });
 

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
+import { parseChatContentBlocks } from "@/lib/chat-message-blocks";
+import { CopyCommand } from "./CopyCommand";
 
 // Chat-Tab (req-040): oben die Repo-Auswahl, darunter das Gespräch mit
 // Claude. Jedes Repo hat sein eigenes Gespräch UND seine eigene Claude-
@@ -233,10 +235,20 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
               color: m.role === "user" ? "var(--color-bg)" : "var(--color-text)",
               fontSize: 14,
               lineHeight: 1.4,
-              whiteSpace: "pre-wrap",
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-2)",
             }}
           >
-            {m.content}
+            {parseChatContentBlocks(m.content).map((block, i) =>
+              block.type === "command" ? (
+                <CopyCommand key={i} command={block.command} />
+              ) : (
+                <div key={i} style={{ whiteSpace: "pre-wrap" }}>
+                  {block.text}
+                </div>
+              ),
+            )}
           </div>
         </div>
       ))}

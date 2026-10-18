@@ -10,6 +10,7 @@ import { type ClaudeOutcome, isAborted, runClaude } from "./claude-runner";
 import { touchActiveSession, pruneIdleSessions } from "./chat-session-lru";
 import { isRateLimit } from "./rate-limit";
 import { isSessionNotFound } from "./chat-session-lost";
+import { isAuthExpired, authExpiredChatMessage } from "./auth-expired";
 
 // Orchestrates one chat turn (req-040): append the user's message, make sure
 // the repo has a working copy of its OWN (chat-workspace.ts, AC15), run
@@ -33,6 +34,8 @@ export type SendMessageDeps = {
   token?: string;
   /** Which repo is currently open in the Chat tab (req-040 AC8/AC9). */
   getActiveRepoId?: () => Promise<string | null>;
+  /** Welche Umgebung gerade läuft (bug-031 AUTH_EXPIRED_CHAT_MESSAGE) — nur zum Testen. */
+  env?: Record<string, string | undefined>;
 };
 
 /** What a chat turn says when no push credential is configured at all. */
@@ -95,6 +98,7 @@ export async function sendChatMessage(
   const token = deps.token ?? process.env.GITHUB_TOKEN;
   const getActiveRepoId =
     deps.getActiveRepoId ?? (() => getChatUiStateStore().getActiveRepoId());
+  const env = deps.env ?? process.env;
 
   // req-040 AC10/AC11/AC12: höchstens fünf Sitzungen gleichzeitig; eine
   // sechste verdrängt die am längsten unbenutzte, und eine Sitzung ohne
@@ -199,9 +203,14 @@ export async function sendChatMessage(
       ? { role: "assistant" as const, content: outcome.report || outcome.summary }
       : isAborted(outcome.summary)
         ? { role: "system" as const, content: ABORTED_CHAT_MESSAGE }
-        : isRateLimit(outcome.summary)
-          ? { role: "system" as const, content: RATE_LIMIT_CHAT_MESSAGE }
-          : { role: "system" as const, content: `Fehler: ${outcome.summary}` }),
+        // bug-031: vor Rate-Limit geprüft, da sich die beiden Muster nicht
+        // überschneiden (siehe execute-step.ts) — ein abgelaufenes Login
+        // bekommt den Befehl zum Neu-Anmelden statt des rohen OAuth-Texts.
+        : isAuthExpired(outcome.summary)
+          ? { role: "system" as const, content: authExpiredChatMessage(env) }
+          : isRateLimit(outcome.summary)
+            ? { role: "system" as const, content: RATE_LIMIT_CHAT_MESSAGE }
+            : { role: "system" as const, content: `Fehler: ${outcome.summary}` }),
     createdAt: now().toISOString(),
   });
 
