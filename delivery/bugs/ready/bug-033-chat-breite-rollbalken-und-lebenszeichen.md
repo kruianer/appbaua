@@ -18,8 +18,9 @@ Fünf Dinge an der Chat-Ansicht, das letzte ist das wichtigste:
    von Hand nachrollen, um sie zu Ende zu lesen.
 4. **Kein Lebenszeichen.** Während Claude arbeitet, sehe ich keinen
    Hinweis, dass es noch läuft und nicht abgestürzt ist.
-5. **Die Schritte erscheinen nicht fortlaufend**, obwohl req-048 sie
-   bringen sollte.
+5. **Die Schritte erscheinen erst im Nachhinein.** Während des Laufs
+   ist nichts zu sehen; erst wenn die Antwort da ist, lassen sie sich
+   unter "Schritte" aufklappen. Genau dann braucht man sie nicht mehr.
 
 # Expected
 
@@ -52,16 +53,32 @@ Die Lesebreite gehört an den Text, nicht an den Bereich.
 Geschwister ohne Abstand dazwischen; es gibt keinen Zuschlag am unteren
 Ende des Rollbereichs.
 
-**Zu 4 und 5 — das Wesentliche:** Der Code dafür existiert und sieht
-richtig aus. `lib/chat-session-manager.ts` reicht `onOutput` an
-`runClaude` durch (Zeile 178/189), `components/Chat.tsx` fragt alle
-1,5 Sekunden `/api/chat/<repo>/steps` ab (Zeile 100 ff.) und zeigt das
-Ergebnis während des Laufs an (Zeile 272 ff.).
+**Zu 4 und 5 — das Wesentliche:** Die Schritte werden erfasst (am Ende
+sind sie ja da), sie kommen nur während des Laufs nicht bei der
+Oberfläche an.
 
-Dass trotzdem nichts erscheint, heißt: `steps` bleibt leer. Zu prüfen
-ist, wo die Kette reißt — ob `onOutput` nie feuert, ob der Tail nicht
-gespeichert wird oder ob die Abfrage nichts zurückgibt. Bitte an der
-laufenden dev-Umgebung messen, nicht aus dem Code schließen.
+Der Weg: `lib/chat-session-manager.ts` legt den Tail in
+`const currentSteps = new Map<string, string>()` (Zeile 97) ab,
+`getChatSteps` liest daraus, und
+`app/api/chat/[repoId]/steps/route.ts` gibt ihn zurück. Die Oberfläche
+fragt alle 1,5 Sekunden nach (Zeile 100 ff.) und zeigt das Ergebnis
+während des Laufs an (Zeile 272 ff.).
+
+**Der Verdacht gilt der Map im Arbeitsspeicher.** Sie lebt in der
+Node-Instanz, die den Lauf gestartet hat. Ob eine parallel
+hereinkommende GET-Anfrage dieselbe Instanz und denselben Stand sieht,
+ist nicht garantiert — und der Lauf hält seinen Aufruf die ganze Zeit
+in einem `await` fest. Dass am Ende alles da ist, passt dazu: Erst
+nach dem Lauf fragt die Oberfläche in einem Zustand ab, in dem sie den
+fertigen Stand bekommt.
+
+Bitte an der laufenden dev-Umgebung messen, nicht aus dem Code
+schließen: Liefert `/api/chat/<repo>/steps` WÄHREND eines Laufs etwas?
+Davon hängt ab, ob es an der Map liegt oder an etwas anderem.
+
+Zu bedenken, falls es die Map ist: Der Verlauf des Workers löst
+dasselbe Problem über die Datenbank (req-008 schreibt den Tail dorthin).
+Das wäre der erprobte Weg.
 
 Richtung für den Fix — bitte selbst abwägen:
 
