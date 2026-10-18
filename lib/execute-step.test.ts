@@ -34,7 +34,7 @@ import {
   networkAbortKey,
 } from "./network-abort";
 import type { NetworkAbortCounts } from "./network-abort-store";
-import { OOM_KILL_MESSAGE } from "./claude-runner";
+import { NO_FEEDBACK_ACTION_MESSAGE, OOM_KILL_MESSAGE } from "./claude-runner";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
@@ -42,6 +42,7 @@ const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
 const security = defaultTaskTypes().find((t) => t.id === "security")!;
 const doku = defaultTaskTypes().find((t) => t.id === "doku")!;
+const feedback = defaultTaskTypes().find((t) => t.id === "feedback")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
 
 /**
@@ -1594,6 +1595,178 @@ describe("executeStep — Security-Task (req-014)", () => {
     if (d.kind !== "success") return;
     expect(d.message).not.toContain(long);
     expect(d.message.length).toBeLessThan(500);
+  });
+});
+
+// req-043: the Feedback task. A ready/in-progress/done/failed queue like
+// Bug/Requirement, but the .md is freeform text that names no task — Claude
+// decides on its own what, if anything, it becomes, and it never changes
+// application code.
+describe("executeStep — Feedback-Task (req-043)", () => {
+  it("AC: empty ready/ -> skip (no Verlauf entry)", async () => {
+    const d = await executeStep(repo, feedback, [], deps({ listReady: folders() }));
+    expect(d.kind).toBe("skip");
+  });
+
+  it("AC: claims the oldest feedback into in-progress/", async () => {
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-002-b.md", "fb-001-farben.md"] }),
+        moveMd,
+        setCurrentMd,
+      }),
+    );
+    expect(moveMd).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/feedback/ready/fb-001-farben.md",
+      "delivery/feedback/in-progress/fb-001-farben.md",
+    );
+    expect(setCurrentMd).toHaveBeenCalledWith("fb-001-farben.md");
+  });
+
+  it("AC: a processed feedback is moved to done/ and pushed", async () => {
+    const moveMd = vi.fn(async () => {});
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "auf dev gepusht" }));
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Requirement req-050-dunkelmodus.md angelegt",
+          report: "",
+        })),
+        moveMd,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/feedback/in-progress/fb-001-farben.md",
+      "delivery/feedback/done/fb-001-farben.md",
+    );
+    expect(commitAndPush).toHaveBeenCalled();
+  });
+
+  it("AC: the Verlauf names the feedback file and what became of it", async () => {
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Bug bug-030-startseite-unruhig.md angelegt",
+          report: "",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.md).toBe("fb-001-farben.md"); // req-015: names the file
+    expect(d.message).toContain("Bug bug-030-startseite-unruhig.md angelegt");
+  });
+
+  it("AC: a feedback without consequence still files normally", async () => {
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: NO_FEEDBACK_ACTION_MESSAGE,
+          report: "",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(NO_FEEDBACK_ACTION_MESSAGE);
+  });
+
+  it("AC: changes no code — skips the test gate entirely, even when it would be red", async () => {
+    const runTestGate = vi.fn(async () => red("2 Tests rot"));
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runTestGate,
+      }),
+    );
+    expect(d.kind).toBe("success"); // a red suite elsewhere must not block Feedback
+    expect(runTestGate).not.toHaveBeenCalled();
+  });
+
+  it("AC: the prompt forbids code changes and names the destinations Claude may use", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: NO_FEEDBACK_ACTION_MESSAGE, report: "" };
+    });
+    await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({ listReady: folders({ ready: ["fb-001-farben.md"] }), runClaude }),
+    );
+    expect(seenPrompt).toContain("delivery/feedback/in-progress/fb-001-farben.md");
+    expect(seenPrompt).toContain("delivery/requirements/ready/");
+    expect(seenPrompt).toContain("delivery/bugs/ready/");
+    expect(seenPrompt).toContain("KEINEN Code");
+  });
+
+  it("a failed Claude run parks the feedback under failed/, like a bug", async () => {
+    const moveMd = vi.fn(async () => {});
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+        moveMd,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/feedback/ready/fb-001-farben.md",
+      "delivery/feedback/failed/fb-001-farben.md",
+    );
+  });
+
+  it("a queue with files waiting is never skipped as 'already ran today'", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        repo: "appbaua",
+        taskType: "Feedback",
+        status: "success",
+        message: "ok",
+      },
+    ];
+    const d = await executeStep(
+      repo,
+      feedback,
+      ranToday,
+      deps({ listReady: folders({ ready: ["fb-001-farben.md"] }) }),
+    );
+    expect(d.kind).not.toBe("skip");
   });
 });
 

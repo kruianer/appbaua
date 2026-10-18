@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   IDEA_DIR,
+  isQueueDriven,
   newMdFiles,
   oldestMd,
   ranTodayForRepo,
@@ -46,16 +47,40 @@ describe("sourceFor", () => {
   it("maps security to its own kind, without a work-item folder", () => {
     expect(sourceFor("security")).toEqual({ base: null, kind: "security" });
   });
+
+  // req-043: Feedback has its own queue, separate from Bug/Requirement, because
+  // a feedback does not describe work to carry out — Claude decides what (if
+  // anything) it becomes.
+  it("maps feedback to its own folder and kind", () => {
+    expect(sourceFor("feedback")).toEqual({
+      base: "delivery/feedback",
+      kind: "feedback",
+    });
+  });
 });
 
 describe("runsOncePerDay", () => {
-  it("is true for recurring, idea, security and doc types, false for file-driven ones", () => {
+  it("is true for recurring, idea, security and doc types, false for queue-driven ones", () => {
     expect(runsOncePerDay(sourceFor("ideen"))).toBe(true);
     expect(runsOncePerDay(sourceFor("code-review"))).toBe(true);
     expect(runsOncePerDay(sourceFor("security"))).toBe(true);
     expect(runsOncePerDay(sourceFor("doku"))).toBe(true);
     expect(runsOncePerDay(sourceFor("bug"))).toBe(false);
     expect(runsOncePerDay(sourceFor("requirement"))).toBe(false);
+    // req-043: Feedback has a ready/ queue too, so a day with files waiting
+    // must not be skipped the way a once-per-day type would be.
+    expect(runsOncePerDay(sourceFor("feedback"))).toBe(false);
+  });
+});
+
+describe("isQueueDriven", () => {
+  it("is true for file and feedback, false for everything else", () => {
+    expect(isQueueDriven("file")).toBe(true);
+    expect(isQueueDriven("feedback")).toBe(true);
+    expect(isQueueDriven("recurring")).toBe(false);
+    expect(isQueueDriven("idea")).toBe(false);
+    expect(isQueueDriven("security")).toBe(false);
+    expect(isQueueDriven("doc")).toBe(false);
   });
 });
 

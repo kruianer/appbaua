@@ -268,6 +268,47 @@ export function securityPrompt(paths: { policyFile: string }): string {
 }
 
 /**
+ * What the worker logs — and what Claude is asked to answer — when a
+ * feedback warranted no follow-up at all (req-043).
+ */
+export const NO_FEEDBACK_ACTION_MESSAGE = "keine Maßnahme nötig";
+
+/**
+ * The prompt for the Feedback task (req-043). A feedback is freeform text, not
+ * a work order — it does not say what to do, so this prompt is the only place
+ * that can hand Claude the decision the requirement reserves for it: turn it
+ * into a Requirement, a Bug, a change to the vision, a note, or nothing.
+ *
+ * The one rule this prompt must never relax: a feedback changes no application
+ * code. It may only add work for later — a new .md elsewhere in the repo's own
+ * delivery/ folders, or a change to delivery/vision.md — which is why it names
+ * those destinations explicitly instead of leaving "wohin" to Claude.
+ */
+export function feedbackPrompt(paths: {
+  feedbackPath: string;
+  bugsReadyDir: string;
+  requirementsReadyDir: string;
+  visionFile: string;
+}): string {
+  return [
+    `Lies das Feedback in ${paths.feedbackPath} — es ist freier Text, der`,
+    `einen Eindruck schildert, aber NICHT vorschreibt, was zu tun ist.`,
+    `Entscheide selbst, was daraus wird: ein neues Requirement (neue .md in`,
+    `${paths.requirementsReadyDir}/), ein neuer Bug (neue .md in`,
+    `${paths.bugsReadyDir}/), eine Ergänzung von ${paths.visionFile}, eine`,
+    `kurze Notiz — oder nichts, wenn das Feedback keine Konsequenz hat.`,
+    `Ändere dabei KEINEN Code und keine bestehende Konfiguration der App —`,
+    `ein Feedback erzeugt höchstens Arbeit für später, niemals direkt Code.`,
+    `Lass ${paths.feedbackPath} selbst unverändert; der Worker verschiebt es.`,
+    `Halte dich an die CLAUDE.md dieses Repos. Beende deine Antwort mit genau`,
+    `einem Satz, was du entschieden hast (z. B. "Requirement`,
+    `req-050-dunkelmodus.md angelegt" oder "${NO_FEEDBACK_ACTION_MESSAGE}").`,
+    `Committe/pushe NICHT selbst — das übernimmt der Worker.`,
+    `Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
  * The prompt for the Doku task (req-016). Its result is neither code nor a
  * report but a multi-page user documentation under `docsDir`, so this prompt is
  * the only place that can pin the three things req-016 asks for and nothing else

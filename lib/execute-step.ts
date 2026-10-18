@@ -6,6 +6,7 @@ import {
   doneDir,
   failedDir,
   inProgressDir,
+  isQueueDriven,
   newMdFiles,
   oldestMd,
   ranTodayForRepo,
@@ -29,6 +30,7 @@ import {
 import {
   NO_IDEA_MESSAGE,
   docPrompt,
+  feedbackPrompt,
   fileTaskPrompt,
   ideaPrompt,
   recurringPrompt,
@@ -138,6 +140,13 @@ import {
 // loop pauses instead of retrying minutes apart — a login does not come back on
 // its own, so the pause is long and the Verlauf names what to do (`claude
 // login`) instead of the raw OAuth error text.
+//
+// req-043 adds the Feedback task: a ready/in-progress/done/failed queue like
+// Bug and Requirement, but the .md is freeform text that names no task — Claude
+// reads it and decides on its own whether it becomes a Requirement, a Bug, a
+// change to the vision, a note, or nothing. It never changes application code,
+// so it skips the test gate entirely (that gate only ever runs for "file"), and
+// its own .md is left untouched and simply moved to done/ once Claude answers.
 //
 // req-020 takes two decisions away from this file. WHICH branch a step commits
 // on is no longer `dev` by definition — prepareRepoOnConvention reads it from
@@ -305,12 +314,12 @@ export async function executeStep(
   let mdRel: string | null = null;
   /**
    * What this run should be filed under in the Verlauf (req-015): the claimed
-   * .md for a file-driven type, the recurring marker for every other type, and
-   * null while a file-driven step has not claimed anything yet — an aborted
-   * step names no file, because it worked on none.
+   * .md for a queue-driven type (file, feedback), the recurring marker for
+   * every other type, and null while a queue-driven step has not claimed
+   * anything yet — an aborted step names no file, because it worked on none.
    */
   const runMd = (): string | null =>
-    src.kind === "file" ? mdName : RECURRING_MD;
+    isQueueDriven(src.kind) ? mdName : RECURRING_MD;
 
   if (!d.token) {
     return {
@@ -392,7 +401,9 @@ export async function executeStep(
   }
 
   // Pick the work item and claim it by moving it into in-progress/ (req-008).
-  if (src.kind === "file" && src.base) {
+  // Feedback shares this claim with "file" (req-043): same queue, different
+  // prompt and no test gate, both wired in below.
+  if (isQueueDriven(src.kind) && src.base) {
     await requeueStale(d, dir, src.base);
 
     const files = await d.listReady(dir, readyDir(src.base));
@@ -421,6 +432,13 @@ export async function executeStep(
   let prompt: string;
   if (src.kind === "file" && mdRel) {
     prompt = fileTaskPrompt(mdRel);
+  } else if (src.kind === "feedback" && mdRel) {
+    prompt = feedbackPrompt({
+      feedbackPath: mdRel,
+      bugsReadyDir: readyDir("delivery/bugs"),
+      requirementsReadyDir: readyDir("delivery/requirements"),
+      visionFile: "delivery/vision.md",
+    });
   } else if (src.kind === "idea" && src.base) {
     prompt = ideaPrompt({
       ideaDir: src.base,

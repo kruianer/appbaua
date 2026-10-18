@@ -16,7 +16,24 @@ import type { RunLogEntry } from "./run-log";
 // but its result is a multi-page user documentation under site/user-docs/ — and
 // it only runs at all when the repo points it at a design template.
 
-export type TaskKind = "file" | "recurring" | "idea" | "security" | "doc";
+// req-043 adds the sixth shape, "feedback": a queue like the file-driven types
+// (ready/in-progress/done/failed, oldest first), but Claude decides on its own
+// what — if anything — the feedback becomes, and it never touches app code; see
+// FEEDBACK_KINDS below for where that decision is shared with "file".
+
+export type TaskKind = "file" | "recurring" | "idea" | "security" | "doc" | "feedback";
+
+/**
+ * The kinds that claim a .md from a ready/ queue (requeue stale claims, pick
+ * the oldest, move it through in-progress/ to done/ or failed/). "file" works
+ * the .md itself (code changes, test gate); "feedback" only reads it and
+ * decides — but both share the same queue mechanics (req-043).
+ */
+export const QUEUE_DRIVEN_KINDS: TaskKind[] = ["file", "feedback"];
+
+export function isQueueDriven(kind: TaskKind): boolean {
+  return QUEUE_DRIVEN_KINDS.includes(kind);
+}
 
 export type TaskTypeSource = {
   /**
@@ -48,6 +65,8 @@ export const TASK_SOURCES: Record<string, TaskTypeSource> = {
   // No work-item folder: the Security task reads the repo and writes at most a
   // report into SECURITY_REPORT_DIR (req-014).
   security: { base: null, kind: "security" },
+  // Queue like bug/requirement, but Claude only reads and decides (req-043).
+  feedback: { base: "delivery/feedback", kind: "feedback" },
 };
 
 export function sourceFor(taskId: string): TaskTypeSource {
@@ -58,10 +77,11 @@ export function sourceFor(taskId: string): TaskTypeSource {
  * Does this type run at most once per repo and calendar day? Everything that is
  * not driven by a queue of .md files does — there is no work item that would
  * tell it apart from the run it already did today (req-006, req-011, req-014,
- * req-016).
+ * req-016). Feedback has such a queue too (req-043), so it is exempt the same
+ * way "file" is.
  */
 export function runsOncePerDay(src: TaskTypeSource): boolean {
-  return src.kind !== "file";
+  return !isQueueDriven(src.kind);
 }
 
 export function readyDir(base: string): string {

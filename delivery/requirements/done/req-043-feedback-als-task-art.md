@@ -36,22 +36,22 @@ Ordnern wie Bugs und Requirements.
 
 - [x] Given ich öffne den Menüpunkt "Tasks", when ich die Liste ansehe,
       then steht dort eine Task-Art "Feedback".
-- [ ] Given in einem Repo liegt `delivery/feedback/ready/fb-001-farben.md`
+- [x] Given in einem Repo liegt `delivery/feedback/ready/fb-001-farben.md`
       und die Task-Art ist aktiv, when der Worker das Repo an die Reihe
       nimmt, then bearbeitet er diese Datei.
-- [ ] Given der Worker hat ein Feedback bearbeitet, when ich den Verlauf
+- [x] Given der Worker hat ein Feedback bearbeitet, when ich den Verlauf
       ansehe, then steht dort der Dateiname des Feedbacks.
-- [ ] Given der Worker hat ein Feedback bearbeitet, when ich seinen
+- [x] Given der Worker hat ein Feedback bearbeitet, when ich seinen
       Verlaufseintrag lese, then steht dort, was er daraus gemacht hat.
-- [ ] Given der Worker hat ein Feedback bearbeitet, when ich ins Repo
+- [x] Given der Worker hat ein Feedback bearbeitet, when ich ins Repo
       sehe, then liegt die Datei in `delivery/feedback/done/`.
-- [ ] Given `delivery/feedback/ready/` ist leer, when der Worker das
+- [x] Given `delivery/feedback/ready/` ist leer, when der Worker das
       Repo an die Reihe nimmt, then entsteht KEIN Verlaufseintrag für
       Feedback.
-- [ ] Given ein Feedback lautet nur "Die Startseite wirkt unruhig",
+- [x] Given ein Feedback lautet nur "Die Startseite wirkt unruhig",
       when der Worker es bearbeitet, then entsteht daraus KEIN Code —
       sondern höchstens ein Requirement oder ein Bug für später.
-- [ ] Given die Task-Art "Feedback" ist auf inaktiv gestellt, when der
+- [x] Given die Task-Art "Feedback" ist auf inaktiv gestellt, when der
       Worker läuft, then bearbeitet er keine Feedbacks.
 
 # Constraints

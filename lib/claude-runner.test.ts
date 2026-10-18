@@ -5,12 +5,14 @@ import {
   createActivityStream,
   createLiveTail,
   docPrompt,
+  feedbackPrompt,
   ideaPrompt,
   lastLines,
   recurringPrompt,
   runClaude,
   securityPrompt,
   LIVE_TAIL_LINES,
+  NO_FEEDBACK_ACTION_MESSAGE,
   NO_IDEA_MESSAGE,
   OOM_KILL_MESSAGE,
 } from "./claude-runner";
@@ -250,6 +252,48 @@ describe("securityPrompt (req-014)", () => {
   it("changes nothing and leaves committing to the worker", () => {
     expect(p).toContain("Ändere NICHTS im Repo");
     expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+});
+
+// req-043: a feedback is freeform text, not a work order. This prompt is the
+// only place that can hand Claude the decision the requirement reserves for
+// it (Requirement, Bug, Vision, note, or nothing) while pinning the one rule
+// that must never bend: no application code changes.
+describe("feedbackPrompt (req-043)", () => {
+  const p = feedbackPrompt({
+    feedbackPath: "delivery/feedback/in-progress/fb-001-farben.md",
+    bugsReadyDir: "delivery/bugs/ready",
+    requirementsReadyDir: "delivery/requirements/ready",
+    visionFile: "delivery/vision.md",
+  });
+
+  it("AC: reads the feedback as an impression, not an instruction", () => {
+    expect(p).toContain("delivery/feedback/in-progress/fb-001-farben.md");
+    expect(p).toContain("NICHT vor");
+  });
+
+  it("AC: names every outcome Claude may choose, including nothing", () => {
+    expect(p).toContain("delivery/requirements/ready/");
+    expect(p).toContain("delivery/bugs/ready/");
+    expect(p).toContain("delivery/vision.md");
+    expect(p).toContain("oder nichts");
+  });
+
+  it("AC: changes no code — a feedback creates work for later, never code", () => {
+    expect(p).toContain("KEINEN Code");
+    expect(p).toContain("niemals direkt Code");
+  });
+
+  it("leaves the feedback file itself untouched — the worker moves it", () => {
+    expect(p).toContain("unverändert");
+  });
+
+  it("AC: ends with one sentence the Verlauf can show", () => {
+    expect(p).toContain(NO_FEEDBACK_ACTION_MESSAGE);
+  });
+
+  it("leaves committing and pushing to the worker", () => {
+    expect(p).toContain("Committe/pushe NICHT selbst");
   });
 });
 
