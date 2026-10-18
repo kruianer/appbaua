@@ -308,6 +308,9 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
             // etwa 90 Zeichen je Zeile wird Lesen mühsam. Gilt für die
             // einzelne Nachricht, nicht für den ganzen Bereich (bug-033 AC1).
             maxWidth: split ? "min(760px, 88%)" : "88%",
+            // bug-036: Flex-Kind des Gesprächsbereichs — nicht schrumpfen,
+            // sonst drückt Flexbox die Nachrichten statt zu rollen.
+            flexShrink: 0,
           }}
         >
           <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
@@ -347,7 +350,10 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
               wenn der Ereignisstrom (Schritte unten) gerade schweigt, etwa weil
               Claude lange nachdenkt. Eine verstrichene Zeit ist dafür
               belastbarer als ein stehender Text. */}
-          <div data-chat-life-sign style={{ fontSize: 12, color: muted(55) }}>
+          <div
+            data-chat-life-sign
+            style={{ fontSize: 12, color: muted(55), flexShrink: 0 }}
+          >
             <span>Claude schreibt …</span>
             {sendingSince !== null && (
               <span> (seit {formatElapsed((Date.now() - sendingSince) / 1000)})</span>
@@ -362,6 +368,11 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
                 color: muted(55),
                 fontFamily: "ui-monospace, Menlo, monospace",
                 whiteSpace: "pre-wrap",
+                // bug-036: ohne flexShrink: 0 drückt Flexbox dieses Feld
+                // zusammen, sobald das Gespräch darüber länger wird —
+                // maxHeight begrenzt nur nach oben, nicht nach unten.
+                flexShrink: 0,
+                minHeight: 64,
                 maxHeight: 160,
                 overflowY: "auto",
                 padding: "6px 8px",
@@ -378,7 +389,10 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
           bleiben lesbar, aber eingeklappt, damit sie auf dem iPhone nicht die
           Antworten aus dem Bild drängen. */}
       {!sending && steps && (
-        <details data-chat-steps style={{ fontSize: 11.5, color: muted(55) }}>
+        <details
+          data-chat-steps
+          style={{ fontSize: 11.5, color: muted(55), flexShrink: 0 }}
+        >
           <summary style={{ cursor: "pointer", userSelect: "none" }}>Schritte</summary>
           <div
             style={{

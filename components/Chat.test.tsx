@@ -699,6 +699,58 @@ describe("Darstellung (bug-034)", () => {
   });
 });
 
+// bug-036: das Schritte-Feld ist ein direktes Flex-Kind des (mitrollenden)
+// Gesprächsbereichs und wurde dort zusammengedrückt, statt dass das
+// Gespräch darüber rollt. flexShrink: 0 und eine Mindesthöhe stellen sicher,
+// dass es lesbar bleibt.
+describe("Darstellung (bug-036)", () => {
+  it("AC: das Schritte-Feld schrumpft nicht und behält eine Mindesthöhe für mehrere Zeilen", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    const steps = document.querySelector("[data-chat-steps]") as HTMLElement;
+    expect(steps.style.flexShrink).toBe("0");
+    expect(Number.parseInt(steps.style.minHeight, 10)).toBeGreaterThan(0);
+  });
+
+  it("AC: das Lebenszeichen schrumpft nicht, wenn das Gespräch darüber wächst", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+
+    const lifeSign = document.querySelector("[data-chat-life-sign]") as HTMLElement;
+    await waitFor(() => expect(lifeSign.style.flexShrink).toBe("0"));
+  });
+
+  it("AC: die einzelnen Nachrichten schrumpfen nicht — das Gespräch rollt stattdessen", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Hallo{Enter}");
+    await waitFor(() => expect(screen.getByText("Antwort auf: Hallo")).toBeInTheDocument());
+
+    // "Hallo" steckt im Textblock, dessen Elternelement die Bubble ist und
+    // deren Elternelement wiederum das äußere Nachrichten-Flex-Kind.
+    const messageEl = screen.getByText("Hallo").parentElement?.parentElement as HTMLElement;
+    expect(messageEl.style.flexShrink).toBe("0");
+  });
+});
+
 describe("formatElapsed (bug-033 AC4)", () => {
   it("formatiert unter einer Minute als 0:ss", () => {
     expect(formatElapsed(14)).toBe("0:14");
