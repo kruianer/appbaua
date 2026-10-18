@@ -13,7 +13,7 @@ import {
   LOG_MAX_AGE_DAYS,
   LOG_MAX_ROWS,
 } from "./run-log";
-import { type RunLogStore, isIdleSummary } from "./run-log-store";
+import { type RunLogStore, isIdleSummary, isBudgetSkipSummary } from "./run-log-store";
 import {
   type WorkerStatus,
   type WorkerStatusStore,
@@ -378,6 +378,37 @@ export function createPgRunLogStore(): RunLogStore {
          FROM run_log WHERE status = 'error' ORDER BY id DESC LIMIT 1`,
       );
       return res.rows.length ? toEntry(res.rows[0]) : null;
+    },
+    async countSuccessSince(
+      repoName: string,
+      taskTypeLabels: string[],
+      sinceIso: string,
+    ): Promise<number> {
+      await ensureSchema();
+      const res = await getPool().query<{ c: string }>(
+        `SELECT COUNT(*)::text AS c FROM run_log
+         WHERE repo = $1 AND task_type = ANY($2) AND status = 'success'
+           AND started_at >= $3`,
+        [repoName, taskTypeLabels, sinceIso],
+      );
+      return Number(res.rows[0].c);
+    },
+    async upsertBudgetSkip(entry: NewRunLogEntry): Promise<RunLogEntry> {
+      await ensureSchema();
+      const newest = await getPool().query<Row>(
+        `SELECT ${COLUMNS} FROM run_log WHERE repo = $1 ORDER BY id DESC LIMIT 1`,
+        [entry.repo],
+      );
+      const last = newest.rows[0] ? toEntry(newest.rows[0]) : null;
+      if (last && isBudgetSkipSummary(last)) {
+        const upd = await getPool().query<Row>(
+          `UPDATE run_log SET ended_at = $1, message = $2 WHERE id = $3
+           RETURNING ${COLUMNS}`,
+          [entry.endedAt, entry.message, last.id],
+        );
+        return toEntry(upd.rows[0]);
+      }
+      return this.append(entry);
     },
     async clear(): Promise<void> {
       await ensureSchema();

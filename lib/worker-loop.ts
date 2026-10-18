@@ -6,6 +6,13 @@ import { listTaskTypes } from "./task-service";
 import { getWorkerState } from "./worker-state";
 import { getRunLogStore, isIdleSummary } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
+import {
+  BUDGET_SKIP_PREFIX,
+  BUDGET_TASK_LABELS,
+  isBudgetExhausted,
+  isBudgetGoverned,
+  startOfWeek,
+} from "./budget";
 import { executeStep, type StepDecision } from "./execute-step";
 import { errorKindOf } from "./error-kind";
 import { redact } from "./redact";
@@ -181,6 +188,34 @@ export async function runOnce(
     const typeNow = freshTypes.find((t) => t.id === step.taskType.id);
     if (!repoActive || !typeNow || !isTaskDue(typeNow, deps.now())) {
       continue;
+    }
+
+    // req-044: a repo's weekly budget covers Bugs+Requirements together. Once
+    // it is used up, this repo's bug/requirement steps are skipped for the
+    // rest of the week — other repos, and this repo's recurring task types,
+    // are untouched (isBudgetGoverned only matches "bug"/"requirement").
+    if (isBudgetGoverned(step.taskType.id) && step.repo.weeklyBudget != null) {
+      const usedThisWeek = await log.countSuccessSince(
+        step.repo.name,
+        BUDGET_TASK_LABELS,
+        startOfWeek(deps.now()).toISOString(),
+      );
+      if (isBudgetExhausted(step.repo.weeklyBudget, usedThisWeek)) {
+        const at = deps.now().toISOString();
+        await log.upsertBudgetSkip({
+          startedAt: at,
+          endedAt: at,
+          repo: step.repo.name,
+          taskType: null,
+          status: "idle", // not "error": nothing failed, the budget just ran out
+          message:
+            `${BUDGET_SKIP_PREFIX} (${usedThisWeek}/${step.repo.weeklyBudget}) — ` +
+            "Bugs und Requirements werden übersprungen, bis die Woche vorbei ist.",
+          md: null,
+        });
+        logged += 1; // this pass had a reason, not nothing to do (req-020)
+        continue;
+      }
     }
 
     const startedAt = deps.now().toISOString();

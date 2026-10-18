@@ -767,3 +767,137 @@ describe("worker loop — kein wortloses Pausieren (req-020)", () => {
     expect(rows.every((r) => r.status === "error")).toBe(true);
   });
 });
+
+// req-044: ein Wochenbudget für Bugs+Requirements je Repo, damit ein Repo
+// nicht allein das ganze Claude-Abo aufbraucht.
+describe("worker loop — Wochenbudget je Repo (req-044)", () => {
+  async function seedSuccess(
+    repoName: string,
+    taskLabel: string,
+    at: Date,
+  ) {
+    await logStore.append({
+      startedAt: at.toISOString(),
+      endedAt: at.toISOString(),
+      repo: repoName,
+      taskType: taskLabel,
+      status: "success",
+      message: "ok",
+    });
+  }
+
+  it("AC: ohne gesetztes Budget arbeitet der Worker unbegrenzt viele Pakete ab", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    for (let i = 0; i < 5; i++) {
+      await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, i));
+    }
+    const done = await runOnce({ n: 0 }, deps());
+    expect(done.succeeded).toBe(2); // beide Repos (kein Budget gesetzt)
+  });
+
+  it("AC: Budget 3, bereits 2 abgearbeitet -> das dritte wird noch bearbeitet", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    setStore(createMemoryStore([{ ...repos[0], weeklyBudget: 3 }, repos[1]]));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, 0));
+    await seedSuccess("appbaua", "Requirements", new Date(2026, 6, 21, 11, 0));
+
+    const done = await runOnce({ n: 0 }, deps());
+    expect(done.succeeded).toBe(2); // appbaua UND worker liefen
+  });
+
+  it("AC: Budget 3, bereits 3 abgearbeitet -> das vierte wird NICHT bearbeitet", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    setStore(createMemoryStore([{ ...repos[0], weeklyBudget: 3 }, repos[1]]));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, 0));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 11, 0));
+    await seedSuccess("appbaua", "Requirements", new Date(2026, 6, 21, 12, 0));
+
+    let calledFor: string[] = [];
+    const runStep = async (repo: Repo): Promise<StepDecision> => {
+      calledFor.push(repo.name);
+      return { kind: "success", message: "ok" };
+    };
+    const done = await runOnce({ n: 0 }, deps({ runStep }));
+
+    expect(calledFor).toEqual(["worker"]); // appbaua gar nicht erst aufgerufen
+    expect(done.succeeded).toBe(1);
+  });
+
+  it("AC: Bugs und Requirements teilen sich das Budget — 2 Bugs + 1 Requirement zählen zusammen", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    setStore(createMemoryStore([{ ...repos[0], weeklyBudget: 3 }]));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, 0));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 11, 0));
+    await seedSuccess("appbaua", "Requirements", new Date(2026, 6, 21, 12, 0));
+
+    const runStep = async (): Promise<StepDecision> => ({
+      kind: "success",
+      message: "ok",
+    });
+    const done = await runOnce({ n: 0 }, deps({ runStep }));
+
+    expect(done.succeeded).toBe(0); // weiterer Bug wird nicht bearbeitet
+  });
+
+  it("AC: ist das Budget eines Repos aufgebraucht, läuft ein anderes Repo normal weiter", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    setStore(createMemoryStore([{ ...repos[0], weeklyBudget: 1 }, repos[1]]));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, 0));
+
+    let calledFor: string[] = [];
+    const runStep = async (repo: Repo): Promise<StepDecision> => {
+      calledFor.push(repo.name);
+      return { kind: "success", message: "ok" };
+    };
+    const done = await runOnce({ n: 0 }, deps({ runStep }));
+
+    expect(calledFor).toEqual(["worker"]);
+    expect(done.succeeded).toBe(1);
+  });
+
+  it("AC: ein aufgebrauchtes Budget steht im Verlauf — mit Repo und Grund", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    setStore(createMemoryStore([{ ...repos[0], weeklyBudget: 1 }, repos[1]]));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, 0));
+
+    await runOnce({ n: 0 }, deps());
+
+    const rows = await logStore.list(0, 10);
+    const skipRow = rows.find((r) => r.repo === "appbaua" && r.status === "idle");
+    expect(skipRow).toBeDefined();
+    expect(skipRow!.message).toContain("Wochenbudget aufgebraucht");
+    expect(skipRow!.message).toContain("1/1");
+  });
+
+  it("AC: wiederkehrende Aufgaben laufen trotz aufgebrauchtem Budget weiter", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes())); // Bugs + alle übrigen
+    setStore(createMemoryStore([{ ...repos[0], weeklyBudget: 1 }]));
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 21, 10, 0));
+
+    let calledFor: string[] = [];
+    const runStep = async (
+      repo: Repo,
+      taskType: { label: string },
+    ): Promise<StepDecision> => {
+      calledFor.push(taskType.label);
+      return { kind: "success", message: "ok" };
+    };
+    await runOnce({ n: 0 }, deps({ runStep }));
+
+    // Bugs wurde übersprungen, die übrigen Task-Typen liefen ganz normal.
+    expect(calledFor).not.toContain("Bugs");
+    expect(calledFor).toContain("Security");
+    expect(calledFor).toContain("Code-Review");
+  });
+
+  it("AC: eine neue Woche setzt den Zähler zurück", async () => {
+    setTaskStore(createMemoryTaskStore(defaultTaskTypes().slice(0, 1))); // Bugs
+    setStore(createMemoryStore([{ ...repos[0], weeklyBudget: 1 }, repos[1]]));
+    // Vorige Woche schon einmal abgearbeitet — zählt nicht mehr mit.
+    await seedSuccess("appbaua", "Bugs", new Date(2026, 6, 13, 10, 0)); // Montag davor
+
+    const done = await runOnce({ n: 0 }, deps()); // WED_18 = 22.07.2026, neue Woche
+
+    expect(done.succeeded).toBe(2); // beide Repos liefen — das Budget ist wieder frei
+  });
+});

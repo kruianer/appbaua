@@ -34,27 +34,27 @@ weiter wie bisher.
 
 - [x] Given ich öffne den Menüpunkt "Repos", when ich ein Repo
       aufklappe, then kann ich dort ein Wochenbudget eintragen.
-- [ ] Given für ein Repo ist kein Wochenbudget eingetragen, when der
+- [x] Given für ein Repo ist kein Wochenbudget eingetragen, when der
       Worker läuft, then arbeitet er dort unbegrenzt viele Pakete ab.
-- [ ] Given für "Forschung" ist das Budget 3 und der Worker hat diese
+- [x] Given für "Forschung" ist das Budget 3 und der Worker hat diese
       Woche dort 2 Pakete abgearbeitet, when ein drittes in `ready/`
       liegt, then bearbeitet er es.
-- [ ] Given für "Forschung" ist das Budget 3 und der Worker hat diese
+- [x] Given für "Forschung" ist das Budget 3 und der Worker hat diese
       Woche dort 3 Pakete abgearbeitet, when ein viertes in `ready/`
       liegt, then bearbeitet er es NICHT.
 - [ ] Given das Budget eines Repos ist aufgebraucht, when ich den
       Verlauf ansehe, then ist erkennbar, dass das Repo wegen des
       Budgets übersprungen wurde.
-- [ ] Given das Budget von "Forschung" ist aufgebraucht, when ein
+- [x] Given das Budget von "Forschung" ist aufgebraucht, when ein
       anderes Repo Pakete in `ready/` hat, then arbeitet der Worker
       dieses andere Repo normal ab.
-- [ ] Given das Budget ist mit 2 Bugs und 1 Requirement aufgebraucht,
+- [x] Given das Budget ist mit 2 Bugs und 1 Requirement aufgebraucht,
       when ein weiterer Bug in `ready/` liegt, then bearbeitet er ihn
       NICHT — Bugs und Requirements teilen sich ein Budget.
-- [ ] Given das Budget eines Repos ist aufgebraucht, when der Worker
+- [x] Given das Budget eines Repos ist aufgebraucht, when der Worker
       dort einen Security-Lauf machen würde, then macht er ihn — die
       wiederkehrenden Aufgaben zählen nicht zum Budget.
-- [ ] Given eine neue Woche beginnt, when der Worker das Repo an die
+- [x] Given eine neue Woche beginnt, when der Worker das Repo an die
       Reihe nimmt, then arbeitet er dort wieder Pakete ab.
 - [ ] Given das Budget ist aufgebraucht, when ich im Menüpunkt "Repos"
       nachsehe, then erkenne ich, wie viel von dieser Woche verbraucht

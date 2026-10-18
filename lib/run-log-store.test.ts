@@ -170,3 +170,80 @@ describe("memory run-log store", () => {
     expect(e?.message).toBe("boom");
   });
 });
+
+// req-044: der Wochenbudget-Zähler.
+describe("countSuccessSince (req-044)", () => {
+  const mk = (repo: string, taskType: string, status: "success" | "error", h: number) => ({
+    startedAt: new Date(2026, 6, 24, h, 0).toISOString(),
+    endedAt: new Date(2026, 6, 24, h, 0).toISOString(),
+    repo,
+    taskType,
+    status,
+    message: "",
+  });
+
+  it("counts only success rows for the given repo and labels, after the cutoff", async () => {
+    const store = createMemoryRunLogStore();
+    await store.append(mk("appbaua", "Bugs", "success", 8)); // before cutoff
+    await store.append(mk("appbaua", "Bugs", "success", 11));
+    await store.append(mk("appbaua", "Requirements", "success", 12));
+    await store.append(mk("appbaua", "Requirements", "error", 13)); // not success
+    await store.append(mk("appbaua", "Security", "success", 14)); // not a budget label
+    await store.append(mk("worker", "Bugs", "success", 15)); // other repo
+
+    const since = new Date(2026, 6, 24, 10, 0).toISOString();
+    const used = await store.countSuccessSince(
+      "appbaua",
+      ["Bugs", "Requirements"],
+      since,
+    );
+    expect(used).toBe(2);
+  });
+});
+
+describe("upsertBudgetSkip (req-044)", () => {
+  const skip = (repo: string, min: number) => ({
+    startedAt: new Date(2026, 6, 24, 12, 0).toISOString(),
+    endedAt: new Date(2026, 6, 24, 12, min).toISOString(),
+    repo,
+    taskType: null,
+    status: "idle" as const,
+    message: `Wochenbudget aufgebraucht (3/3) — Stand ${min}`,
+    md: null,
+  });
+
+  it("collapses consecutive budget-skip notes for the same repo into one growing row", async () => {
+    const store = createMemoryRunLogStore();
+    await store.upsertBudgetSkip(skip("appbaua", 0));
+    await store.upsertBudgetSkip(skip("appbaua", 5));
+    expect(await store.count()).toBe(1);
+    const [row] = await store.list(0, 1);
+    expect(row.startedAt).toBe(skip("appbaua", 0).startedAt);
+    expect(row.message).toBe("Wochenbudget aufgebraucht (3/3) — Stand 5");
+  });
+
+  it("keeps separate rows for different repos, even interleaved", async () => {
+    const store = createMemoryRunLogStore();
+    await store.upsertBudgetSkip(skip("appbaua", 0));
+    await store.upsertBudgetSkip(skip("worker", 0));
+    await store.upsertBudgetSkip(skip("appbaua", 5));
+    expect(await store.count()).toBe(2);
+    const rows = await store.list(0, 2);
+    expect(rows.map((r) => r.repo).sort()).toEqual(["appbaua", "worker"]);
+  });
+
+  it("real work for the repo in between breaks the summary — a new one starts", async () => {
+    const store = createMemoryRunLogStore();
+    await store.upsertBudgetSkip(skip("appbaua", 0));
+    await store.append({
+      startedAt: new Date(2026, 6, 24, 12, 2).toISOString(),
+      endedAt: new Date(2026, 6, 24, 12, 2).toISOString(),
+      repo: "appbaua",
+      taskType: "Security",
+      status: "success",
+      message: "ok",
+    });
+    await store.upsertBudgetSkip(skip("appbaua", 5));
+    expect(await store.count()).toBe(3);
+  });
+});
