@@ -93,8 +93,17 @@ export function cancelChatTurn(repoId: string): boolean {
  * Wird bei jedem Update überschrieben und erst geleert, wenn fuer dasselbe
  * Repo ein NEUER Zug beginnt — ein beendeter oder gestoppter Zug behält also
  * genau den Stand, den er zuletzt zeigte, statt zu verschwinden (bug-030).
+ *
+ * req-049: anders als der Worker braucht der Chat die VOLLSTÄNDIGE Historie
+ * eines Zugs, nicht nur dessen letzte ~50 Zeilen — sie wird am Ende des
+ * Zugs an der Antwort gespeichert (siehe `steps` unten), damit auch eine
+ * frühere Frage ihre Schritte beim Zurückrollen noch zeigt (AC9). Deshalb
+ * läuft der Chat-Aufruf mit `CHAT_STEPS_TAIL_LINES` statt dem Worker-Default.
  */
 const currentSteps = new Map<string, string>();
+
+/** req-049: siehe currentSteps oben — der Chat schneidet seine Schritte nicht ab. */
+export const CHAT_STEPS_TAIL_LINES = Number.POSITIVE_INFINITY;
 
 export function getChatSteps(repoId: string): string | null {
   return currentSteps.get(repoId) ?? null;
@@ -187,6 +196,7 @@ export async function sendChatMessage(
       model: CHAT_MODEL,
       signal: controller.signal,
       onOutput,
+      tailLines: CHAT_STEPS_TAIL_LINES,
       ...(session ? { resume: sessionId } : { sessionId }),
     });
 
@@ -201,6 +211,7 @@ export async function sendChatMessage(
         model: CHAT_MODEL,
         signal: controller.signal,
         onOutput,
+        tailLines: CHAT_STEPS_TAIL_LINES,
         sessionId: finalSessionId,
       });
     }
@@ -228,6 +239,10 @@ export async function sendChatMessage(
 
   await store.appendMessage({
     repoId: repo.id,
+    // req-049 AC9: die Schritte dieses Zugs bleiben dauerhaft an SEINER
+    // Antwort hängen — so zeigt auch eine ältere Frage ihre eigenen Schritte
+    // beim Zurückrollen, statt nur den zuletzt gelaufenen Zug des Repos.
+    steps: currentSteps.get(repo.id),
     ...(outcome.ok
       ? { role: "assistant" as const, content: outcome.report || outcome.summary }
       : isAborted(outcome.summary)

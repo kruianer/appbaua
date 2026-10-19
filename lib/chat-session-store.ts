@@ -17,6 +17,14 @@ export type ChatMessage = {
   role: ChatRole;
   content: string;
   createdAt: string; // ISO
+  /**
+   * req-049: die Schritte des Zugs, der zu DIESER Nachricht geführt hat —
+   * nur bei der Antwort eines Zugs gesetzt (assistant/system), nie bei der
+   * Nachricht des Nutzers selbst. So zeigt auch eine ältere Frage beim
+   * Zurückrollen noch ihre eigenen Schritte, nicht nur die des zuletzt
+   * gelaufenen Zugs.
+   */
+  steps?: string;
 };
 
 /**

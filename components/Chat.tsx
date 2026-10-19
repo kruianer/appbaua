@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 import { parseChatContentBlocks } from "@/lib/chat-message-blocks";
@@ -51,6 +51,43 @@ export function formatElapsed(totalSeconds: number): string {
   const minutes = Math.floor(s / 60);
   const seconds = s % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+/**
+ * Die Schritte eines Zugs (req-049) — jede Zeile des Ereignisstroms als
+ * eigener Block, untereinander wie die Nachrichten selbst: normale
+ * Schriftgröße (AC1), KEIN eigener Rollbalken (AC2), keine Höchsthöhe — der
+ * Gesprächsbereich darüber rollt, nicht dieser Block (AC3). Das ersetzt die
+ * frühere Anzeige aus req-048 (schmaler Kasten, danach unter "Schritte"
+ * eingeklappt) komplett; es gibt keine zweite Anzeige daneben.
+ */
+function StepList({ text }: { text: string }) {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+  return (
+    <div
+      data-chat-steps
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        fontSize: 14,
+        lineHeight: 1.4,
+        color: muted(55),
+        fontFamily: "ui-monospace, Menlo, monospace",
+        // bug-036: kein Flex-Kind darf schrumpfen, sonst drückt das wachsende
+        // Gespräch diesen Block zusammen statt über ihn hinweg zu rollen.
+        flexShrink: 0,
+        padding: "2px 2px",
+      }}
+    >
+      {lines.map((line, i) => (
+        <div key={i} style={{ whiteSpace: "pre-wrap" }}>
+          {line}
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // req-041 AC11-13: ab 744px zweispaltig — links die Repo-Liste (ständig
@@ -297,52 +334,59 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
       }}
     >
       {messages.map((m) => (
-        <div
-          key={m.id}
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            gap: 2,
-            alignSelf: m.role === "user" ? "flex-end" : "stretch",
-            // req-041 AC13: im Split lesbar schmal statt voll ausgezogen — ab
-            // etwa 90 Zeichen je Zeile wird Lesen mühsam. Gilt für die
-            // einzelne Nachricht, nicht für den ganzen Bereich (bug-033 AC1).
-            maxWidth: split ? "min(760px, 88%)" : "88%",
-            // bug-036: Flex-Kind des Gesprächsbereichs — nicht schrumpfen,
-            // sonst drückt Flexbox die Nachrichten statt zu rollen.
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
+        <Fragment key={m.id}>
+          {/* req-049: die Schritte des Zugs, der zu DIESER Antwort führte —
+              zwischen der Frage davor und der Antwort selbst (Constraint),
+              nie bei der Nutzer-Nachricht. Bleiben stehen, auch nachdem die
+              Antwort da ist (AC6), und rollen mit dem Gespräch hoch (AC9) —
+              deshalb kein eigener Wrapper mit Höchstbreite oder -höhe. */}
+          {m.role !== "user" && m.steps && <StepList text={m.steps} />}
           <div
             style={{
-              padding: "8px 10px",
-              borderRadius: "var(--radius-md)",
-              background:
-                m.role === "user"
-                  ? "var(--color-accent)"
-                  : m.role === "system"
-                    ? "color-mix(in srgb, var(--color-accent) 14%, transparent)"
-                    : "var(--color-surface)",
-              color: m.role === "user" ? "var(--color-bg)" : "var(--color-text)",
-              fontSize: 14,
-              lineHeight: 1.4,
               display: "flex",
               flexDirection: "column",
-              gap: "var(--space-2)",
+              gap: 2,
+              alignSelf: m.role === "user" ? "flex-end" : "stretch",
+              // req-041 AC13: im Split lesbar schmal statt voll ausgezogen — ab
+              // etwa 90 Zeichen je Zeile wird Lesen mühsam. Gilt für die
+              // einzelne Nachricht, nicht für den ganzen Bereich (bug-033 AC1).
+              maxWidth: split ? "min(760px, 88%)" : "88%",
+              // bug-036: Flex-Kind des Gesprächsbereichs — nicht schrumpfen,
+              // sonst drückt Flexbox die Nachrichten statt zu rollen.
+              flexShrink: 0,
             }}
           >
-            {parseChatContentBlocks(m.content).map((block, i) =>
-              block.type === "command" ? (
-                <CopyCommand key={i} command={block.command} />
-              ) : (
-                <div key={i} style={{ whiteSpace: "pre-wrap" }}>
-                  {block.text}
-                </div>
-              ),
-            )}
+            <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
+            <div
+              style={{
+                padding: "8px 10px",
+                borderRadius: "var(--radius-md)",
+                background:
+                  m.role === "user"
+                    ? "var(--color-accent)"
+                    : m.role === "system"
+                      ? "color-mix(in srgb, var(--color-accent) 14%, transparent)"
+                      : "var(--color-surface)",
+                color: m.role === "user" ? "var(--color-bg)" : "var(--color-text)",
+                fontSize: 14,
+                lineHeight: 1.4,
+                display: "flex",
+                flexDirection: "column",
+                gap: "var(--space-2)",
+              }}
+            >
+              {parseChatContentBlocks(m.content).map((block, i) =>
+                block.type === "command" ? (
+                  <CopyCommand key={i} command={block.command} />
+                ) : (
+                  <div key={i} style={{ whiteSpace: "pre-wrap" }}>
+                    {block.text}
+                  </div>
+                ),
+              )}
+            </div>
           </div>
-        </div>
+        </Fragment>
       ))}
       {sending && (
         <>
@@ -359,57 +403,11 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
               <span> (seit {formatElapsed((Date.now() - sendingSince) / 1000)})</span>
             )}
           </div>
-          {steps && (
-            <div
-              data-chat-steps
-              style={{
-                fontSize: 11.5,
-                lineHeight: 1.5,
-                color: muted(55),
-                fontFamily: "ui-monospace, Menlo, monospace",
-                whiteSpace: "pre-wrap",
-                // bug-036: ohne flexShrink: 0 drückt Flexbox dieses Feld
-                // zusammen, sobald das Gespräch darüber länger wird —
-                // maxHeight begrenzt nur nach oben, nicht nach unten.
-                flexShrink: 0,
-                minHeight: 64,
-                maxHeight: 160,
-                overflowY: "auto",
-                padding: "6px 8px",
-                borderRadius: "var(--radius-md)",
-                background: "color-mix(in srgb, var(--color-text) 4%, transparent)",
-              }}
-            >
-              {steps}
-            </div>
-          )}
+          {/* req-049: der noch laufende Zug hat noch keine gespeicherte
+              Nachricht, an die seine Schritte hängen könnten — bis die Antwort
+              da ist, kommt der Stand hier über das Polling der Steps-Route. */}
+          {steps && <StepList text={steps} />}
         </>
-      )}
-      {/* req-048 AC4/AC5/AC8: fertig, tritt die Antwort hervor — die Schritte
-          bleiben lesbar, aber eingeklappt, damit sie auf dem iPhone nicht die
-          Antworten aus dem Bild drängen. */}
-      {!sending && steps && (
-        <details
-          data-chat-steps
-          style={{ fontSize: 11.5, color: muted(55), flexShrink: 0 }}
-        >
-          <summary style={{ cursor: "pointer", userSelect: "none" }}>Schritte</summary>
-          <div
-            style={{
-              whiteSpace: "pre-wrap",
-              fontFamily: "ui-monospace, Menlo, monospace",
-              lineHeight: 1.5,
-              marginTop: 4,
-              maxHeight: 160,
-              overflowY: "auto",
-              padding: "6px 8px",
-              borderRadius: "var(--radius-md)",
-              background: "color-mix(in srgb, var(--color-text) 4%, transparent)",
-            }}
-          >
-            {steps}
-          </div>
-        </details>
       )}
     </div>
   );

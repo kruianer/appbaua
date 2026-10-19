@@ -261,3 +261,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
 -- wurde, während sein Repo nicht das offene war; verschwindet, wenn es
 -- geöffnet wird.
 ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS unread BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- req-049: die Schritte des Zugs, der zu dieser Nachricht geführt hat (NULL
+-- bei einer Nutzer-Nachricht und bei jeder Zeile von vor diesem Requirement).
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS steps TEXT;

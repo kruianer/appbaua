@@ -716,3 +716,77 @@ describe("sichtbare Schritte (req-048)", () => {
     expect(await sawStepsAtStart.promise).toBeNull();
   });
 });
+
+// req-049: die Schritte eines Zugs werden dauerhaft an SEINER Antwort
+// gespeichert (nicht nur flüchtig in getChatSteps), damit eine ältere Frage
+// beim Zurückrollen im Gespräch ihre eigenen Schritte noch zeigt — und der
+// Zug läuft dafür ohne die 50-Zeilen-Kappung des Worker-Defaults.
+describe("Schritte an der Antwort (req-049)", () => {
+  it("die fertige Antwort trägt die Schritte des Zugs, der zu ihr führte", async () => {
+    const store = createMemoryChatSessionStore();
+    await sendChatMessage(repo, "Was steht in lib/foo.ts?", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
+        opts.onOutput?.("→ Read: lib/foo.ts");
+        return { ok: true, summary: "ok", report: "Steht drin." };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    const [userMsg, answerMsg] = await store.listMessages(repo.id);
+    expect(userMsg.steps).toBeUndefined();
+    expect(answerMsg.steps).toBe("→ Read: lib/foo.ts");
+  });
+
+  it("ein Abbruch trägt ebenfalls die bis dahin gezeigten Schritte", async () => {
+    const store = createMemoryChatSessionStore();
+    const signalSeen = deferred<AbortSignal>();
+    const turn = startChatTurn(repo, "Frage, dann Stopp", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (
+        _dir,
+        _prompt,
+        opts: { signal?: AbortSignal; onOutput?: (tail: string) => void },
+      ) =>
+        new Promise((resolve) => {
+          opts.onOutput?.("→ Bash: npm test");
+          signalSeen.resolve(opts.signal!);
+          opts.signal!.addEventListener("abort", () =>
+            resolve({ ok: false, summary: ABORTED_MESSAGE, report: "" }),
+          );
+        }),
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    await signalSeen.promise;
+    expect(cancelChatTurn(repo.id)).toBe(true);
+    await turn;
+
+    const [, abortMsg] = await store.listMessages(repo.id);
+    expect(abortMsg.steps).toBe("→ Bash: npm test");
+  });
+
+  it("läuft ohne die Zeilen-Kappung, die der Worker-Default verwendet (tailLines)", async () => {
+    const store = createMemoryChatSessionStore();
+    const seenTailLines: unknown[] = [];
+    await sendChatMessage(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async (_dir, _prompt, opts: { tailLines?: number }) => {
+        seenTailLines.push(opts.tailLines);
+        return { ok: true, summary: "ok", report: "Antwort" };
+      },
+      now: () => new Date(),
+      getActiveRepoId: async () => null,
+    });
+
+    expect(seenTailLines).toEqual([Number.POSITIVE_INFINITY]);
+  });
+});

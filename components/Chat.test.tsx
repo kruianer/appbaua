@@ -78,13 +78,15 @@ beforeEach(() => {
       const repoId = cancelMatch[1];
       cancelCalls.push(repoId);
       // Simuliert, was sendChatMessage nach einem Abbruch selbst ins Gespräch
-      // schreibt: eine Systemnachricht statt der (nie gekommenen) Antwort.
+      // schreibt: eine Systemnachricht statt der (nie gekommenen) Antwort —
+      // mit den bis dahin gezeigten Schritten dran (req-049 AC6).
       const abortMsg: ChatMessage = {
         id: nextId(repoId),
         repoId,
         role: "system",
         content: "Abgebrochen.",
         createdAt: "t",
+        steps: stepsByRepo[repoId] ?? undefined,
       };
       messagesByRepo[repoId] = [...(messagesByRepo[repoId] ?? []), abortMsg];
       releaseAnswer[repoId] = true;
@@ -99,12 +101,22 @@ beforeEach(() => {
     if (messagesMatch && (!init || init.method === undefined)) {
       const repoId = messagesMatch[1];
       const list = messagesByRepo[repoId] ?? [];
+      const lastIsAnswer = list.length > 0 && list[list.length - 1].role !== "user";
       // Die Antwort (letzte Nachricht) erscheint erst, wenn freigegeben —
       // simuliert einen noch laufenden Claude-Lauf.
-      const visible =
-        releaseAnswer[repoId] || list.length === 0 || list[list.length - 1].role === "user"
-          ? list
-          : list.slice(0, -1);
+      const visible = releaseAnswer[repoId] || list.length === 0 || !lastIsAnswer
+        ? list
+        : list.slice(0, -1);
+      // req-049: wie der echte Server werden die Schritte DIESES Zugs einmalig,
+      // beim ersten Sichtbarwerden der Antwort, dauerhaft an ihr festgemacht —
+      // eine spätere Änderung von stepsByRepo darf eine schon gezeigte Antwort
+      // nicht nachträglich umschreiben (jede Frage behält ihre EIGENEN Schritte).
+      if (releaseAnswer[repoId] && lastIsAnswer) {
+        const last = list[list.length - 1];
+        if (last.steps === undefined) {
+          list[list.length - 1] = { ...last, steps: stepsByRepo[repoId] ?? undefined };
+        }
+      }
       return { ok: true, json: async () => ({ messages: visible }) };
     }
     if (messagesMatch && init?.method === "POST") {
@@ -460,6 +472,10 @@ describe("Eingabefeld und Abbrechen (bug-030)", () => {
 // req-048: während Claude arbeitet, zeigt der Chat dieselben Schritte
 // (gelesene Dateien, ausgeführte Befehle), die der Worker über
 // onOutput/describeEvent schon zeigt — hier über die neue Steps-Route.
+// req-049 liest die Schritte wie in VS Code: untereinander, in normaler
+// Schriftgröße, ohne eigenen Rollbalken — und ersetzt damit req-048s
+// schmalen Kasten/eingeklappten Zustand komplett (siehe die beiden Tests
+// weiter unten, die das alte Verhalten durch das neue ersetzen).
 describe("sichtbare Schritte (req-048)", () => {
   it("AC1: zeigt, dass Claude eine Datei liest", async () => {
     const user = userEvent.setup();
@@ -551,7 +567,7 @@ describe("sichtbare Schritte (req-048)", () => {
     expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument();
   });
 
-  it("AC4/AC8: ist die Antwort fertig, sind die Schritte eingeklappt statt die Antwort zu verdrängen", async () => {
+  it("AC6 (req-049): ist die Antwort fertig, stehen die Schritte weiterhin unverändert da statt eingeklappt zu sein", async () => {
     const user = userEvent.setup();
     releaseAnswer.r1 = false;
     stepsByRepo.r1 = "→ Read: a.ts";
@@ -569,12 +585,32 @@ describe("sichtbare Schritte (req-048)", () => {
       { timeout: 3000 },
     );
 
-    const details = document.querySelector("[data-chat-steps]") as HTMLDetailsElement;
-    expect(details).toBeInTheDocument();
-    expect(details.open).toBe(false);
+    // Kein <details> mehr — der Schritt steht direkt und ungeklickt da.
+    expect(document.querySelector("details[data-chat-steps]")).not.toBeInTheDocument();
+    expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument();
   });
 
-  it("AC5: eingeklappte Schritte lassen sich weiterhin lesen", async () => {
+  it("AC1/AC2 (req-049): die Schritte stehen in normaler Schriftgröße ohne eigenen Rollbalken", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts";
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+
+    const stepsBox = document.querySelector("[data-chat-steps]") as HTMLElement;
+    // Dieselbe Schriftgröße wie der Nachrichtentext (14px), nicht der kleine
+    // Zusatztext der Oberfläche (10-12px).
+    expect(stepsBox.style.fontSize).toBe("14px");
+    expect(stepsBox.style.overflowY).toBe("");
+    expect(stepsBox.style.maxHeight).toBe("");
+  });
+
+  it("AC7 (req-049): die Antwort hebt sich deutlicher ab als die Schritte davor", async () => {
     const user = userEvent.setup();
     releaseAnswer.r1 = false;
     stepsByRepo.r1 = "→ Read: a.ts";
@@ -592,10 +628,79 @@ describe("sichtbare Schritte (req-048)", () => {
       { timeout: 3000 },
     );
 
-    const details = document.querySelector("[data-chat-steps]") as HTMLDetailsElement;
-    await user.click(screen.getByText("Schritte"));
-    expect(details.open).toBe(true);
+    const stepsBox = document.querySelector("[data-chat-steps]") as HTMLElement;
+    const answerBubble = screen.getByText(/Antwort auf: Frage/).parentElement as HTMLElement;
+    // Die Antwort hat einen eigenen Hintergrund und den vollen Textton, die
+    // Schritte bleiben ohne Hintergrund und gedämpft — ein klarer Unterschied.
+    expect(answerBubble.style.background).not.toBe("");
+    expect(answerBubble.style.color).toBe("var(--color-text)");
+    expect(stepsBox.style.background).toBe("");
+    expect(stepsBox.style.color).not.toBe("var(--color-text)");
+  });
+
+  it("AC8 (req-049): rolle ich zu einer früheren Frage, finde ich auch deren eigene Schritte", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    stepsByRepo.r1 = "→ Read: erste.ts";
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Erste Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: erste.ts")).toBeInTheDocument());
+    releaseAnswer.r1 = true;
+    await waitFor(
+      () => expect(screen.getByText("Antwort auf: Erste Frage")).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: zweite.ts";
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Zweite Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Read: zweite.ts")).toBeInTheDocument());
+    releaseAnswer.r1 = true;
+    await waitFor(
+      () => expect(screen.getByText("Antwort auf: Zweite Frage")).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+
+    // Die Schritte der ERSTEN Frage stehen weiterhin an ihrem eigenen Platz —
+    // unverändert durch die inzwischen gelaufene zweite Frage.
+    expect(screen.getByText("→ Read: erste.ts")).toBeInTheDocument();
+    expect(screen.getByText("→ Read: zweite.ts")).toBeInTheDocument();
+  });
+
+  it("AC9 (req-049): auf dem iPhone (kein Split) stehen Schritte und Antwort gleichzeitig im Gespräch", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
+    // split=false ist der Default — genau die Darstellung am iPhone.
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument());
+
+    releaseAnswer.r1 = true;
+    await waitFor(
+      () => expect(screen.getByText("Antwort auf: Frage")).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+
+    // Beide stehen zugleich im Gespräch — die Schritte haben die Antwort
+    // nicht verdrängt, und der Gesprächsbereich (nicht die Schritte selbst)
+    // trägt den einzigen Rollbalken.
     expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument();
+    expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument();
+    expect(screen.getByText("Antwort auf: Frage")).toBeInTheDocument();
+    const messagesEl = document.querySelector("[data-chat-messages]") as HTMLElement;
+    expect(messagesEl.style.overflowY).toBe("auto");
+    const stepsBox = document.querySelector("[data-chat-steps]") as HTMLElement;
+    expect(stepsBox.style.overflowY).toBe("");
   });
 });
 
@@ -701,10 +806,11 @@ describe("Darstellung (bug-034)", () => {
 
 // bug-036: das Schritte-Feld ist ein direktes Flex-Kind des (mitrollenden)
 // Gesprächsbereichs und wurde dort zusammengedrückt, statt dass das
-// Gespräch darüber rollt. flexShrink: 0 und eine Mindesthöhe stellen sicher,
-// dass es lesbar bleibt.
+// Gespräch darüber rollt. flexShrink: 0 stellt sicher, dass es lesbar bleibt
+// (req-049 ersetzt die frühere Mindesthöhe/Höchsthöhe-Box durch Zeilen ohne
+// eigene Größenbeschränkung — siehe die Tests zu req-049 oben).
 describe("Darstellung (bug-036)", () => {
-  it("AC: das Schritte-Feld schrumpft nicht und behält eine Mindesthöhe für mehrere Zeilen", async () => {
+  it("AC: das Schritte-Feld schrumpft nicht, wenn das Gespräch darüber wächst", async () => {
     const user = userEvent.setup();
     releaseAnswer.r1 = false;
     stepsByRepo.r1 = "→ Read: a.ts";
@@ -718,7 +824,6 @@ describe("Darstellung (bug-036)", () => {
 
     const steps = document.querySelector("[data-chat-steps]") as HTMLElement;
     expect(steps.style.flexShrink).toBe("0");
-    expect(Number.parseInt(steps.style.minHeight, 10)).toBeGreaterThan(0);
   });
 
   it("AC: das Lebenszeichen schrumpft nicht, wenn das Gespräch darüber wächst", async () => {

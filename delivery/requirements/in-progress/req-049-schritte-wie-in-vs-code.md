@@ -36,26 +36,26 @@ Anzeige daneben.
 
 # Acceptance Criteria
 
-- [ ] Given Claude arbeitet, when ich die Schritte ansehe, then kann
+- [x] Given Claude arbeitet, when ich die Schritte ansehe, then kann
       ich sie in der normalen Schriftgröße des Gesprächs lesen.
-- [ ] Given Claude arbeitet, when ich die Schritte ansehe, then haben
+- [x] Given Claude arbeitet, when ich die Schritte ansehe, then haben
       sie KEINEN eigenen Rollbalken.
-- [ ] Given mehrere Schritte sind aufgelaufen, when ich sie ansehe,
+- [x] Given mehrere Schritte sind aufgelaufen, when ich sie ansehe,
       then stehen sie untereinander und ich sehe die letzten ohne zu
       rollen.
-- [ ] Given Claude liest eine Datei, when der Schritt erscheint, then
+- [x] Given Claude liest eine Datei, when der Schritt erscheint, then
       erkenne ich daran, welche Datei gelesen wurde.
-- [ ] Given Claude führt einen Befehl aus, when der Schritt erscheint,
+- [x] Given Claude führt einen Befehl aus, when der Schritt erscheint,
       then erkenne ich den Befehl.
-- [ ] Given die Antwort ist eingetroffen, when ich das Gespräch
+- [x] Given die Antwort ist eingetroffen, when ich das Gespräch
       ansehe, then stehen die Schritte weiterhin da und sind NICHT
       verschwunden.
-- [ ] Given die Antwort ist eingetroffen, when ich das Gespräch
+- [x] Given die Antwort ist eingetroffen, when ich das Gespräch
       ansehe, then ist die Antwort deutlicher hervorgehoben als die
       Schritte davor.
-- [ ] Given ich rolle im Gespräch nach oben zu einer früheren Frage,
+- [x] Given ich rolle im Gespräch nach oben zu einer früheren Frage,
       when ich hinsehe, then finde ich auch deren Schritte.
-- [ ] Given ich lese das Gespräch auf dem iPhone, when Schritte und
+- [x] Given ich lese das Gespräch auf dem iPhone, when Schritte und
       Antworten untereinander stehen, then drängen die Schritte die
       Antworten nicht aus dem Bild.
 

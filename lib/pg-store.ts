@@ -561,6 +561,7 @@ export function createPgChatSessionStore(): ChatSessionStore {
     role: ChatRole;
     content: string;
     created_at: Date;
+    steps: string | null;
   };
   type ChatRole = ChatMessage["role"];
   const toMessage = (r: Row): ChatMessage => ({
@@ -569,12 +570,14 @@ export function createPgChatSessionStore(): ChatSessionStore {
     role: r.role,
     content: r.content,
     createdAt: new Date(r.created_at).toISOString(),
+    // req-049: NULL bei einer Nutzer-Nachricht und bei jeder Zeile von davor.
+    steps: r.steps ?? undefined,
   });
   return {
     async listMessages(repoId: string): Promise<ChatMessage[]> {
       await ensureSchema();
       const res = await getPool().query<Row>(
-        `SELECT id, repo_id, role, content, created_at FROM chat_messages
+        `SELECT id, repo_id, role, content, created_at, steps FROM chat_messages
          WHERE repo_id = $1 ORDER BY id ASC`,
         [repoId],
       );
@@ -583,10 +586,10 @@ export function createPgChatSessionStore(): ChatSessionStore {
     async appendMessage(msg: Omit<ChatMessage, "id">): Promise<ChatMessage> {
       await ensureSchema();
       const res = await getPool().query<Row>(
-        `INSERT INTO chat_messages (repo_id, role, content, created_at)
-         VALUES ($1, $2, $3, $4)
-         RETURNING id, repo_id, role, content, created_at`,
-        [msg.repoId, msg.role, msg.content, msg.createdAt],
+        `INSERT INTO chat_messages (repo_id, role, content, created_at, steps)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, repo_id, role, content, created_at, steps`,
+        [msg.repoId, msg.role, msg.content, msg.createdAt, msg.steps ?? null],
       );
       return toMessage(res.rows[0]);
     },

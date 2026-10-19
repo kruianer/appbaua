@@ -106,6 +106,28 @@ describe("runClaude live output", () => {
     expect(seen).toEqual(["Zeile 1\n", "Zeile 1\nZeile 2\n"]);
   });
 
+  it("req-049: caps onOutput at LIVE_TAIL_LINES by default, but a caller can lift the cap via tailLines", async () => {
+    const lineCount = LIVE_TAIL_LINES + 20;
+    const manyLines = `${Array.from({ length: lineCount }, (_, i) => `Zeile ${i}`).join("\n")}\n`;
+    const runImpl: typeof run = async (_cmd, _args, opts = {}) => {
+      opts.onData?.(manyLines);
+      return { ok: true, code: 0, stdout: manyLines, stderr: "" };
+    };
+
+    let capped = "";
+    await runClaude("/repo", "prompt", { runImpl, onOutput: (tail) => (capped = tail) });
+    expect(capped.trim().split("\n").length).toBeLessThanOrEqual(LIVE_TAIL_LINES);
+    expect(capped).not.toContain("Zeile 0\n");
+
+    let uncapped = "";
+    await runClaude("/repo", "prompt", {
+      runImpl,
+      onOutput: (tail) => (uncapped = tail),
+      tailLines: Number.POSITIVE_INFINITY,
+    });
+    expect(uncapped.trim().split("\n")).toHaveLength(lineCount);
+  });
+
   it("passes no stream listener when nobody wants the live output", async () => {
     let sawListener = true;
     const runImpl: typeof run = async (_cmd, _args, opts = {}) => {

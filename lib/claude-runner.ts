@@ -479,6 +479,14 @@ export async function runClaude(
      */
     onOutput?: (tail: string) => void;
     /**
+     * How many of the most recent activity lines `onOutput` receives
+     * (defaults to `LIVE_TAIL_LINES`). The Chat turn (req-049) passes
+     * `Infinity` here: its tail becomes the permanent record of that turn's
+     * steps once the turn ends, so it must never lose the earlier ones the
+     * way the worker's short live preview may.
+     */
+    tailLines?: number;
+    /**
      * Fires once with the model the run's own "init" event names (req-027) —
      * the model actually used, read from the event stream rather than assumed
      * from the --model flag handed in. Never fires again after the first call.
@@ -514,7 +522,7 @@ export async function runClaude(
   const onOutput = deps?.onOutput;
   const onModel = deps?.onModel;
   const activityData = onOutput
-    ? createActivityStream(onOutput, { now: deps?.now })
+    ? createActivityStream(onOutput, { now: deps?.now, lines: deps?.tailLines })
     : undefined;
   // A second, independent look at the same raw lines for the model (req-027):
   // this must never depend on onOutput being set, and must never throw into the
