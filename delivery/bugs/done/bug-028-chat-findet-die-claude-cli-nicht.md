@@ -94,3 +94,23 @@ dasselbe Abo (Constraint in req-040).
   Modellwahl). Hier geht es darum, dass er überhaupt läuft.
 - Die Frage, ob der Chat ein eigenes Abo oder einen API-Schlüssel
   bekommen soll.
+
+# Nachtrag (bug-037)
+
+**Auflage 1 oben ist zurückgenommen:** `claude-home` ist im
+App-Container seit bug-037 wieder schreibbar eingehängt, nicht mehr
+`:ro`.
+
+Grund: Die Annahme war falsch, dass nur `claude login` die
+Anmeldedatei schreibt. Ein OAuth-Zugangstoken ist kurzlebig (Stunden)
+und wird bei **jedem** normalen Lauf per Refresh-Token erneuert, wobei
+Claude Code die Datei neu schreibt — nicht lesend möglich. Mit `:ro`
+verlangte der Chat deshalb praktisch täglich eine neue Anmeldung.
+
+Das Risiko, das die Auflage eindämmen sollte — ein beschädigter Chat
+legt auch den Worker lahm, weil beide dieselbe Anmeldung teilen —,
+besteht unverändert fort. Es bleibt aber begrenzt: dev und prod
+benutzen bereits getrennte Volumes (`appbaua-dev_claude-home` und
+`appbaua-prod_claude-home`, je eigenes Compose-Projekt), ein
+beschädigter Chat auf dev trifft den prod-Worker also so oder so
+nicht.

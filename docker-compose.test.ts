@@ -169,25 +169,31 @@ describe("docker-compose.yml — Speicherlimit fuer den Worker (bug-026)", () =>
   });
 });
 
-describe("docker-compose.yml — Claude-Code-Anmeldung im App-Container (bug-028)", () => {
+describe("docker-compose.yml — Claude-Code-Anmeldung im App-Container (bug-028, Schreibzugriff seit bug-037)", () => {
   // Der Chat (req-040) laeuft im App-Container und braucht dieselbe
   // Abo-Anmeldung wie der Worker, die im Volume claude-home unter /claude-home
-  // liegt. Entschieden: nur lesend eingehaengt, damit ein Fehler im Chat die
-  // Anmeldung nicht beschaedigen kann — schreiben darf nur `claude login` im
-  // Worker-Container.
-
-  it("AC: das claude-home-Volume ist im App-Container eingehaengt, und zwar nur lesend", () => {
-    const app = serviceBlock("app");
-    expect(app).toMatch(/^\s*-\s*claude-home:\/claude-home:ro\s*$/m);
-  });
-
-  it("der App-Container haengt das Volume NICHT schreibend ein", () => {
-    const app = serviceBlock("app");
-    expect(app).not.toMatch(/^\s*-\s*claude-home:\/claude-home\s*$/m);
-  });
+  // liegt. bug-028 hatte das Volume nur lesend eingehaengt; bug-037 hat das
+  // zurueckgenommen, siehe die Tests dort.
 
   it("AC: HOME des App-Containers zeigt auf /claude-home, nicht auf /home/nextjs", () => {
     expect(serviceBlock("app")).toContain("HOME: /claude-home");
+  });
+});
+
+describe("docker-compose.yml — Chat kann seinen Token erneuern (bug-037)", () => {
+  // Ein OAuth-Zugangstoken ist kurzlebig und wird bei jedem normalen Lauf per
+  // Refresh-Token erneuert — das schreibt die Anmeldedatei neu. Nur lesend
+  // (bug-028) verhinderte genau das im App-Container: jede Erneuerung
+  // schlug fehl, der Chat verlangte praktisch taeglich eine neue Anmeldung.
+
+  it("AC: das claude-home-Volume ist im App-Container schreibbar eingehaengt", () => {
+    const app = serviceBlock("app");
+    expect(app).toMatch(/^\s*-\s*claude-home:\/claude-home\s*$/m);
+  });
+
+  it("der App-Container haengt das Volume NICHT mehr nur lesend ein", () => {
+    const app = serviceBlock("app");
+    expect(app).not.toMatch(/^\s*-\s*claude-home:\/claude-home:ro\s*$/m);
   });
 });
 
@@ -244,13 +250,13 @@ describe("docker-compose.yml — Chat-Sitzungen koennen gespeichert werden (bug-
     expect(COMPOSE).toMatch(/^\s{2}chat-sessions:\s*$/m);
   });
 
-  it("die Anmeldung selbst bleibt nur lesend — die Auflage aus bug-028 gilt weiter", () => {
-    // Der Fix macht NICHT das ganze claude-home-Volume schreibbar, sondern
-    // nur den Sitzungs-Unterpfad; die beiden Tests fuer bug-028 oben bleiben
-    // deshalb unveraendert gueltig. Hier zusaetzlich: kein Mount hebt /claude-home
-    // selbst schreibend ein.
-    const app = serviceBlock("app");
-    expect(app).toMatch(/^\s*-\s*claude-home:\/claude-home:ro\s*$/m);
-    expect(app).not.toMatch(/^\s*-\s*claude-home:\/claude-home\s*$/m);
+  it("der Sitzungs-Unterpfad bleibt ein eigenes Volume, auch nachdem bug-037 claude-home insgesamt schreibbar gemacht hat", () => {
+    // bug-037 hat die :ro-Auflage aus bug-028 fuer das ganze claude-home-
+    // Volume aufgehoben (siehe dort). Das eigene Volume fuer den
+    // Sitzungs-Unterpfad bleibt trotzdem bestehen — es ist seither nicht
+    // mehr die einzige schreibbare Stelle, aber unveraendert vorhanden.
+    expect(serviceBlock("app")).toMatch(
+      /^\s*-\s*chat-sessions:\/claude-home\/\.claude\/projects\s*$/m,
+    );
   });
 });

@@ -108,19 +108,25 @@ services:
       # ein statfs im Lesebereich des einzigen internetzugewandten Prozesses —
       # samt ~/appbaua-env/*.env mit GITHUB_TOKEN und DB-Passwort (bug-005).
       - /proc:/host/proc:ro
-      # Claude-Code-Anmeldung fuer den Chat (req-040), nur lesend: der
-      # App-Container muss sie lesen, schreiben darf nur `claude login` im
-      # Worker-Container. Ein Fehler im Chat kann die Anmeldung so nicht
-      # beschaedigen (bug-028).
-      - claude-home:/claude-home:ro
-      # Claude legt seine Sitzungen unter $HOME/.claude/projects ab, also
-      # IM claude-home-Volume von oben — und das ist nur lesend eingehaengt.
-      # Jede Chat-Nachricht fand damit NIE eine Sitzung zum Fortsetzen, nicht
-      # erst nach einem Neustart (bug-032). Dieses zweite, eigene Volume wird
-      # ueber genau diesen Unterpfad gemountet und macht NUR ihn schreibbar;
-      # die Anmeldung selbst (.credentials.json usw.) bleibt ueber das `:ro`
-      # oben weiterhin unantastbar fuer den Chat — die Auflage aus bug-028
-      # gilt unveraendert, nur eben nicht mehr fuer das ganze Verzeichnis.
+      # Claude-Code-Anmeldung fuer den Chat (req-040). Schreibbar seit
+      # bug-037: ein OAuth-Zugangstoken ist kurzlebig und wird bei jedem
+      # normalen Lauf per Refresh-Token erneuert, nicht nur bei
+      # `claude login` — genau das schreibt die Anmeldedatei neu und konnte
+      # es nur lesend (bug-028) nicht. Die Auflage aus bug-028 ("nur lesend,
+      # damit ein Fehler im Chat die Anmeldung nicht beschaedigt") ist damit
+      # hinfaellig. Das verbleibende Risiko bleibt aber begrenzt: dev und
+      # prod haben ohnehin getrennte Volumes (appbaua-dev_claude-home /
+      # appbaua-prod_claude-home, je ueber das eigene Compose-Projekt), ein
+      # beschaedigter Chat auf dev trifft den prod-Worker also so oder so
+      # nicht.
+      - claude-home:/claude-home
+      # Claude legt seine Sitzungen unter $HOME/.claude/projects ab, also IM
+      # claude-home-Volume von oben. Als das Volume noch nur lesend
+      # eingehaengt war, fand damit NIE eine Sitzung zum Fortsetzen (bug-032);
+      # dieses zweite, eigene Volume macht seither genau diesen Unterpfad
+      # schreibbar. claude-home selbst ist seit bug-037 ebenfalls schreibbar,
+      # dieses Volume bleibt aber bestehen und fuehrt Sitzungen unveraendert
+      # an derselben Stelle weiter.
       - chat-sessions:/claude-home/.claude/projects
       # Die Chat-eigene Arbeitskopie (CHAT_WORKDIR, req-040 AC15). Als Volume,
       # aus demselben Grund wie worker-work unten (bug-029): ohne eines
