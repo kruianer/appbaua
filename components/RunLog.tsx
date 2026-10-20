@@ -114,7 +114,11 @@ export function RunLog() {
                   <span style={{ fontWeight: 600, fontSize: 15, minWidth: 0 }}>
                     {e.repo && e.taskType
                       ? `${e.taskType} × ${e.repo}`
-                      : "—"}
+                      // req-044: a budget-skip note names its repo but no
+                      // single task type (it covers Bugs+Requirements
+                      // together) — show the repo alone rather than falling
+                      // back to the idle-summary's "—".
+                      : e.repo ?? "—"}
                   </span>
                   <span
                     style={{

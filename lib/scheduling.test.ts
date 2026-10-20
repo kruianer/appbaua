@@ -168,6 +168,30 @@ describe("planRun", () => {
     const steps = planRun(repos, [bug, notDue], WED_18);
     expect(steps.every((s) => s.taskType.label === "Bugs")).toBe(true);
   });
+
+  // req-047 AC4: Selbstauftrag is active+due like any other type, but only
+  // runs for repos that have the repo-level switch on.
+  it("runs Selbstauftrag only for repos with repo.selfAssign on", () => {
+    const selbstauftrag = typeWith({
+      id: "selbstauftrag",
+      label: "Selbstauftrag",
+      always: true,
+    });
+    const onlyFurtgoh = repos.map((r) =>
+      r.name === "appbaua" ? { ...r, selfAssign: true } : r,
+    );
+    const steps = planRun(onlyFurtgoh, [selbstauftrag], WED_18);
+    expect(steps.map((s) => s.repo.name)).toEqual(["appbaua"]);
+  });
+
+  it("runs Selbstauftrag nowhere when no repo has the switch on", () => {
+    const selbstauftrag = typeWith({
+      id: "selbstauftrag",
+      label: "Selbstauftrag",
+      always: true,
+    });
+    expect(planRun(repos, [selbstauftrag], WED_18)).toEqual([]);
+  });
 });
 
 describe("nextWindowStart (req-022)", () => {
@@ -212,13 +236,13 @@ describe("planPreview (req-022)", () => {
     { id: "r2", name: "worker", url: "u2", active: true, model: "sonnet", monitored: false },
   ];
 
-  it("orders repo outer, task-type inner — same order the worker actually works", () => {
+  it("orders task-type outer, repo inner (bug-025): all repos with bugs, then all with requirements", () => {
     const [bug, req] = defaultTaskTypes();
     const entries = planPreview(repos, [bug, req], WED_18);
     expect(entries.map((e) => `${e.taskType.label}×${e.repo.name}`)).toEqual([
       "Bugs×appbaua",
-      "Requirements×appbaua",
       "Bugs×worker",
+      "Requirements×appbaua",
       "Requirements×worker",
     ]);
   });

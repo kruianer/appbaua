@@ -2,10 +2,12 @@ import type { Repo } from "./repos";
 import type { TaskType } from "./task-types";
 import { type RunLogEntry, RECURRING_MD } from "./run-log";
 import {
+  IDEA_DIR,
   IDEA_DIRECTION_FILE,
   doneDir,
   failedDir,
   inProgressDir,
+  isQueueDriven,
   newMdFiles,
   oldestMd,
   ranTodayForRepo,
@@ -28,12 +30,15 @@ import {
 } from "./workspace";
 import {
   NO_IDEA_MESSAGE,
+  NO_SELF_ASSIGN_MESSAGE,
   docPrompt,
+  feedbackPrompt,
   fileTaskPrompt,
   ideaPrompt,
   recurringPrompt,
   runClaude,
   securityPrompt,
+  selfAssignPrompt,
   testFixPrompt,
 } from "./claude-runner";
 import {
@@ -44,6 +49,11 @@ import {
   type TestGateResult,
 } from "./test-gate";
 import { REPORT_DIR, reportContent, reportPath } from "./review-report";
+import {
+  extractReleaseInfo,
+  releaseInfoContent,
+  releaseInfoPath,
+} from "./release-info";
 import {
   DOC_SITE_FILE,
   DOC_UNCHANGED_MESSAGE,
@@ -138,6 +148,13 @@ import {
 // loop pauses instead of retrying minutes apart — a login does not come back on
 // its own, so the pause is long and the Verlauf names what to do (`claude
 // login`) instead of the raw OAuth error text.
+//
+// req-043 adds the Feedback task: a ready/in-progress/done/failed queue like
+// Bug and Requirement, but the .md is freeform text that names no task — Claude
+// reads it and decides on its own whether it becomes a Requirement, a Bug, a
+// change to the vision, a note, or nothing. It never changes application code,
+// so it skips the test gate entirely (that gate only ever runs for "file"), and
+// its own .md is left untouched and simply moved to done/ once Claude answers.
 //
 // req-020 takes two decisions away from this file. WHICH branch a step commits
 // on is no longer `dev` by definition — prepareRepoOnConvention reads it from
@@ -305,12 +322,12 @@ export async function executeStep(
   let mdRel: string | null = null;
   /**
    * What this run should be filed under in the Verlauf (req-015): the claimed
-   * .md for a file-driven type, the recurring marker for every other type, and
-   * null while a file-driven step has not claimed anything yet — an aborted
-   * step names no file, because it worked on none.
+   * .md for a queue-driven type (file, feedback), the recurring marker for
+   * every other type, and null while a queue-driven step has not claimed
+   * anything yet — an aborted step names no file, because it worked on none.
    */
   const runMd = (): string | null =>
-    src.kind === "file" ? mdName : RECURRING_MD;
+    isQueueDriven(src.kind) ? mdName : RECURRING_MD;
 
   if (!d.token) {
     return {
@@ -392,7 +409,9 @@ export async function executeStep(
   }
 
   // Pick the work item and claim it by moving it into in-progress/ (req-008).
-  if (src.kind === "file" && src.base) {
+  // Feedback shares this claim with "file" (req-043): same queue, different
+  // prompt and no test gate, both wired in below.
+  if (isQueueDriven(src.kind) && src.base) {
     await requeueStale(d, dir, src.base);
 
     const files = await d.listReady(dir, readyDir(src.base));
@@ -418,14 +437,35 @@ export async function executeStep(
   const ideasBefore =
     src.kind === "idea" && src.base ? await d.listReady(dir, src.base) : [];
 
+  // Which requirements already waited in ready/ before this run, so the step
+  // can tell a genuine self-assignment from an empty-handed one (req-047) —
+  // the same trick the idea task uses: the folder decides, not the answer.
+  const selfAssignBefore =
+    src.kind === "self-assign" && src.base ? await d.listReady(dir, src.base) : [];
+
   let prompt: string;
   if (src.kind === "file" && mdRel) {
     prompt = fileTaskPrompt(mdRel);
+  } else if (src.kind === "feedback" && mdRel) {
+    prompt = feedbackPrompt({
+      feedbackPath: mdRel,
+      bugsReadyDir: readyDir("delivery/bugs"),
+      requirementsReadyDir: readyDir("delivery/requirements"),
+      visionFile: "delivery/vision.md",
+    });
   } else if (src.kind === "idea" && src.base) {
     prompt = ideaPrompt({
       ideaDir: src.base,
       doneDir: doneDir(src.base),
       directionFile: IDEA_DIRECTION_FILE,
+    });
+  } else if (src.kind === "self-assign" && src.base) {
+    prompt = selfAssignPrompt({
+      readyDir: src.base,
+      doneRequirementsDir: DONE_REQUIREMENTS_DIR,
+      ideaDir: IDEA_DIR,
+      feedbackDoneDir: doneDir("delivery/feedback"),
+      visionFile: "delivery/vision.md",
     });
   } else if (src.kind === "security") {
     prompt = securityPrompt({ policyFile: SECURITY_POLICY_FILE });
@@ -585,6 +625,31 @@ export async function executeStep(
     };
   }
 
+  // The Selbstauftrag task (req-047) is done when a new Requirement exists in
+  // ready/ — or honestly done when none does, exactly the same mechanics as
+  // the Ideen task above: the folder decides, not Claude's wording. The
+  // created file's name is carried in the message so the Verlauf names it
+  // (req-047 AC8), the same way the Ideen message already does.
+  if (src.kind === "self-assign" && src.base) {
+    const created = newMdFiles(
+      selfAssignBefore,
+      await d.listReady(dir, src.base),
+    );
+    if (created.length === 0) {
+      // Nothing was proposed, so nothing of this run belongs on dev — whatever
+      // it touched along the way is dropped rather than committed.
+      await d.discardChanges(dir).catch(() => {});
+      return { kind: "success", message: NO_SELF_ASSIGN_MESSAGE, md: runMd() };
+    }
+    const pushed = await push(`worker: Selbstauftrag ${created.join(", ")}`);
+    if (pushFailed(pushed)) return pushError(pushed);
+    return {
+      kind: "success",
+      message: `Selbstauftrag: ${created.join(", ")} — ${pushed.detail}`,
+      md: runMd(),
+    };
+  }
+
   // The Security task checks, it does not change (req-014). Whatever the run
   // touched along the way is dropped first, so the only thing that can reach
   // dev is the report written right after — and a check without findings files
@@ -680,6 +745,20 @@ export async function executeStep(
     gateNote = testGateNote(gate);
   }
 
+  // req-046: a finished Requirement/Bug gets a Release-Info in the target
+  // repo — written in THIS run, from Claude's own final answer (the one
+  // fileTaskPrompt asked to end with RELEASE_INFO_MARKER), never
+  // reconstructed afterwards from the Verlauf. Best effort, like fileReport
+  // below: a release info that cannot be written must not turn an otherwise
+  // finished package into a failed one.
+  let releaseInfoRel: string | null = null;
+  if (src.kind === "file" && mdName) {
+    const text = extractReleaseInfo(outcome.report);
+    if (text) {
+      releaseInfoRel = await fileReleaseInfo(d, dir, repo, mdName, text, d.now());
+    }
+  }
+
   // Success: for file-driven, move in-progress -> done before committing. Also
   // clears any network-abort count this package had run up (req-038) — it made
   // it through this time, so the Verlauf must not keep suggesting past trouble.
@@ -720,7 +799,9 @@ export async function executeStep(
 
   // The log stays a short message; it only names the file so the full report
   // remains findable from the Verlauf (req-010).
-  const note = reportRel ? ` (Bericht: ${reportRel})` : "";
+  const note =
+    (reportRel ? ` (Bericht: ${reportRel})` : "") +
+    (releaseInfoRel ? ` (Release-Info: ${releaseInfoRel})` : "");
   // A push that did not happen is a failed step (req-020). The .md is NOT
   // parked under failed/: the work itself was fine and nothing was committed,
   // so the next prepareRepo puts it back into ready/ and the next pass retries
@@ -883,6 +964,34 @@ async function fileReport(
       rel,
       reportContent({ ...ref, taskLabel: taskType.label, report }),
     );
+    return rel;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write a finished Requirement/Bug's Release-Info into the working copy
+ * (req-046) and return its repo-relative path. Best effort, same reasoning
+ * as fileReport above: a write that fails must not turn a finished package
+ * into a failed one.
+ */
+async function fileReleaseInfo(
+  d: ExecuteDeps,
+  dir: string,
+  repo: Repo,
+  mdName: string,
+  text: string,
+  now: Date,
+): Promise<string | null> {
+  try {
+    const ref = {
+      repoName: repo.name,
+      packageId: mdName.replace(/\.md$/i, ""),
+      now,
+    };
+    const rel = releaseInfoPath(ref);
+    await d.writeRepoFile(dir, rel, releaseInfoContent({ ...ref, text }));
     return rel;
   } catch {
     return null;

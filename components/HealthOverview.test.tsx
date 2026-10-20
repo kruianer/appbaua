@@ -227,6 +227,34 @@ describe("Zustandsseite (req-032)", () => {
     expect(screen.queryByText(/KI-Log-Analyse/)).not.toBeInTheDocument();
   });
 
+  it("AC (req-042): von der Zustandsseite aus zur Container-Übersicht wechseln", async () => {
+    const user = userEvent.setup();
+    render(<HealthOverview />);
+    const pruefungenTab = await screen.findByRole("tab", { name: "Prüfungen" });
+    expect(pruefungenTab).toHaveAttribute("aria-selected", "true");
+
+    const containerTab = screen.getByRole("tab", { name: "Container-Übersicht" });
+    await user.click(containerTab);
+
+    expect(containerTab).toHaveAttribute("aria-selected", "true");
+    expect(
+      screen.queryByRole("button", { name: /Logs analysieren/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("AC (req-042, bug-021): die Container-Übersicht scrollt vertikal, nicht seitlich", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<HealthOverview />);
+    await user.click(
+      await screen.findByRole("tab", { name: "Container-Übersicht" }),
+    );
+
+    const scroller = container.querySelector<HTMLElement>("[data-containers-scroll]");
+    expect(scroller).not.toBeNull();
+    expect(scroller!.style.overflowY).toBe("auto");
+    expect(scroller!.style.overflowX).toBe("clip");
+  });
+
   it("bricht die Rückfrage ab, ohne etwas anzufassen", async () => {
     const user = userEvent.setup();
     render(<HealthOverview />);

@@ -15,6 +15,18 @@ function cssRule(selector: string): string {
   return css.slice(start, css.indexOf("}", start));
 }
 
+describe("Rollbalken (bug-033)", () => {
+  it("färbt den Rollbalken in der Akzentfarbe statt im grauen Standard", () => {
+    expect(cssRule("html")).toMatch(/scrollbar-color:\s*var\(--color-accent\)/);
+  });
+
+  it("färbt auch den WebKit-Rollbalken (scrollbar-color wird dort ignoriert)", () => {
+    expect(cssRule("::-webkit-scrollbar-thumb")).toMatch(
+      /background:\s*var\(--color-accent\)/,
+    );
+  });
+});
+
 describe("Links (bug-013)", () => {
   it("gives unvisited links the readable text color, not the browser default", () => {
     expect(cssRule("a")).toMatch(/color:\s*var\(--color-text\)/);

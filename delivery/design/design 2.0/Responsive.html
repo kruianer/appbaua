@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>appbaua — Layout für iPad und Laptop</title>
+<link rel="stylesheet" href="styles.css">
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   design 2.0 — Layout für iPad und Laptop.
+
+   Entwurf zur Diskussion, kein Produktionscode. Die Tokens kommen
+   unverändert aus design 1.0 (styles.css): gleiche Farben, gleiche
+   Abstandsskala, gleiche Radien. Neu ist allein das LAYOUT.
+
+   Die drei Größen stehen hier untereinander in Rahmen, damit sie
+   vergleichbar sind. In der echten App entscheidet die Fensterbreite,
+   welches Layout gilt:
+
+     bis  743px   iPhone   — untere Leiste, eine Spalte
+     744–1023px   iPad     — Seitenleiste schmal (nur Symbole), zwei Spalten
+     ab  1024px   Laptop   — Seitenleiste breit (Symbol + Text), zwei Spalten
+   ══════════════════════════════════════════════════════════════════════ */
+
+body { margin: 0; padding: 32px 20px 80px; }
+
+.page-head { max-width: 1180px; margin: 0 auto 36px; }
+.page-head h1 { font-size: 30px; margin: 0 0 6px; }
+.page-head p { font-size: 14px; max-width: 70ch;
+  color: color-mix(in srgb, var(--color-text) 62%, transparent); }
+
+/* Ein Größen-Abschnitt: Beschriftung + Rahmen. */
+.size { max-width: 1180px; margin: 0 auto 52px; }
+.size-label { display: flex; align-items: baseline; gap: 10px;
+  margin: 0 0 10px; }
+.size-label strong { font-size: 17px; font-weight: 600; }
+.size-label span { font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent); }
+
+/* Der Geräterahmen. Nur Darstellung — in der App gibt es ihn nicht. */
+.frame { border: 1px solid var(--color-divider); border-radius: 18px;
+  overflow: hidden; background: var(--color-bg);
+  box-shadow: var(--shadow-md); }
+.frame-phone  { width: 390px; height: 730px; }
+.frame-tablet { width: 834px; height: 620px; }
+.frame-laptop { width: 1180px; height: 680px; }
+@media (max-width: 1240px) { .frame-laptop { width: 100%; } }
+@media (max-width: 900px)  { .frame-tablet { width: 100%; } }
+@media (max-width: 430px)  { .frame-phone  { width: 100%; } }
+
+/* ── Das App-Gerüst ────────────────────────────────────────────────── */
+
+.app { display: flex; height: 100%; }
+.app-phone { flex-direction: column; }
+
+/* Seitenleiste — ersetzt ab iPad die untere Leiste. */
+.rail { flex: none; display: flex; flex-direction: column;
+  border-right: 1px solid var(--color-divider);
+  padding: 14px 0 12px; gap: 2px; }
+.rail-narrow { width: 68px;  align-items: center; }
+.rail-wide   { width: 212px; padding-inline: 12px; }
+
+.rail-brand { display: flex; align-items: center; gap: 10px;
+  padding: 0 0 16px; }
+.rail-narrow .rail-brand { padding-inline: 0; }
+.rail-wide   .rail-brand { padding-inline: 4px; }
+.logo { flex: none; width: 36px; height: 36px; border-radius: 11px;
+  background: linear-gradient(140deg, var(--color-accent-400), var(--color-accent-700));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--color-accent) 45%, transparent),
+              inset 0 1px 0 rgba(255,255,255,.3);
+  display: grid; place-items: center;
+  color: #fff; font-size: 15px; font-weight: 700; }
+.wordmark { line-height: 1.02; }
+.wordmark b { display: block; font-size: 17px; font-weight: 700;
+  letter-spacing: -.03em; }
+.wordmark small { display: block; font-size: 8px; text-transform: uppercase;
+  letter-spacing: .16em;
+  color: color-mix(in srgb, var(--color-text) 46%, transparent); }
+
+/* Ein Eintrag der Seitenleiste. */
+.nav-item { display: flex; align-items: center; gap: 11px;
+  border: none; background: transparent; cursor: pointer;
+  color: color-mix(in srgb, var(--color-text) 52%, transparent);
+  font: inherit; font-size: 14px; border-radius: var(--radius-md);
+  padding: 9px 10px; width: 100%; text-align: left; }
+.rail-narrow .nav-item { width: 44px; height: 44px; padding: 0;
+  justify-content: center; }
+.nav-item:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  color: var(--color-text); }
+.nav-item.is-active { color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent); }
+.nav-item .ico { flex: none; width: 21px; height: 21px; display: block; }
+
+/* Der Chat — am iPhone der eingekreiste Knopf (req-039), hier der
+   hervorgehobene Eintrag: Akzentrand statt Kreis in der Mitte. */
+.nav-item.is-chat { color: var(--color-accent-300);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+  margin: 6px 0; }
+.nav-item.is-chat.is-active {
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  color: var(--color-accent-200); }
+
+.rail-spacer { flex: 1; }
+
+/* Ein-/Ausklappen. Die Seitenleiste folgt zwar der Fensterbreite, laesst
+   sich aber in jeder Groesse von Hand schmal stellen -- auf dem Laptop,
+   wenn das Gespraech mehr Platz bekommen soll. */
+.rail-toggle { display: flex; align-items: center; gap: 11px;
+  border: none; background: transparent; cursor: pointer; font: inherit;
+  font-size: 12px; border-radius: var(--radius-md); padding: 7px 10px;
+  margin-top: 4px; width: 100%;
+  color: color-mix(in srgb, var(--color-text) 40%, transparent); }
+.rail-narrow .rail-toggle { width: 44px; height: 38px; padding: 0;
+  justify-content: center; }
+.rail-toggle:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent);
+  color: var(--color-text); }
+.rail-toggle .ico { flex: none; width: 17px; height: 17px; }
+
+/* Inhaltsbereich. */
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.topbar { flex: none; display: flex; align-items: flex-end;
+  justify-content: space-between; gap: 12px;
+  padding: 16px 22px 12px; }
+.app-phone .topbar { padding: 20px 20px 10px; }
+.module { min-width: 0; }
+.module .kicker { font-size: 10px; text-transform: uppercase;
+  letter-spacing: .14em; color: var(--color-accent-300); }
+.module h2 { font-size: 25px; letter-spacing: -.02em; margin: 2px 0 0; }
+.app-phone .module h2 { font-size: 26px; }
+.topbar-actions { flex: none; display: flex; gap: var(--space-2); }
+
+/* Zwei Spalten: links eine Liste, rechts das Gewählte. */
+.split { flex: 1; display: flex; min-height: 0;
+  border-top: 1px solid var(--color-divider); }
+.col-list { flex: none; width: 300px; min-width: 0;
+  border-right: 1px solid var(--color-divider);
+  overflow-y: auto; padding: 12px; }
+.frame-tablet .col-list { width: 248px; }
+.col-detail { flex: 1; min-width: 0; display: flex; flex-direction: column;
+  overflow: hidden; }
+
+/* Eine Spalte (iPhone). */
+.single { flex: 1; overflow-y: auto; padding: 4px 20px 12px;
+  border-top: 1px solid var(--color-divider); }
+
+/* Inhalt nach oben begrenzen, statt Text über die volle Breite zu
+   ziehen — ab etwa 90 Zeichen je Zeile wird Lesen mühsam. */
+.readable { max-width: 760px; }
+
+/* ── Bausteine ─────────────────────────────────────────────────────── */
+
+.pane-head { flex: none; display: flex; align-items: center;
+  justify-content: space-between; gap: 10px;
+  padding: 10px 16px; border-bottom: 1px solid var(--color-divider); }
+.pane-head .t { font-size: 14px; font-weight: 600; }
+.pane-head .s { font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 50%, transparent); }
+
+.list-kicker { font-size: 10px; text-transform: uppercase;
+  letter-spacing: .12em; margin: 2px 4px 8px;
+  color: color-mix(in srgb, var(--color-text) 45%, transparent); }
+
+/* Ein Repo in der linken Spalte. */
+.repo-row { display: flex; align-items: center; gap: 9px;
+  padding: 9px 10px; border-radius: var(--radius-md); cursor: pointer;
+  border: 1px solid transparent; }
+.repo-row:hover { background: color-mix(in srgb, var(--color-text) 6%, transparent); }
+.repo-row.is-active { border-color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent); }
+.repo-row .pos { flex: none; width: 19px; height: 19px; border-radius: 6px;
+  display: grid; place-items: center; font-size: 10px; font-weight: 600;
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  color: color-mix(in srgb, var(--color-text) 60%, transparent); }
+.repo-row .nm { flex: 1; min-width: 0; font-size: 13.5px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.repo-row.is-off .nm { color: color-mix(in srgb, var(--color-text) 40%, transparent); }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 999px;
+  background: var(--color-accent); }
+.dot.is-off { background: color-mix(in srgb, var(--color-text) 25%, transparent); }
+
+/* Zählperle, etwa für fertige Antworten in einem anderen Repo. */
+.bead { flex: none; min-width: 17px; height: 17px; padding: 0 5px;
+  border-radius: 999px; display: grid; place-items: center;
+  font-size: 10px; font-weight: 600; color: var(--color-bg);
+  background: var(--color-accent); }
+
+/* Chat. */
+.chat-scroll { flex: 1; overflow-y: auto; padding: 16px;
+  display: flex; flex-direction: column; gap: 12px;
+  /* Nachrichten sammeln sich unten am Eingabefeld, wie man es von
+     Nachrichten-Apps kennt -- ein kurzes Gespraech laesst sonst eine
+     leere Flaeche darueber stehen. */
+  justify-content: flex-end; }
+.msg { max-width: 76%; padding: 10px 13px; border-radius: var(--radius-lg);
+  font-size: 14px; line-height: 1.5; }
+.msg-me { align-self: flex-end; background: color-mix(in srgb, var(--color-accent) 20%, var(--color-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 40%, transparent); }
+.msg-ai { align-self: flex-start; background: var(--color-surface);
+  box-shadow: var(--shadow-sm); }
+.msg .who { font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: .12em; margin-bottom: 4px;
+  color: color-mix(in srgb, var(--color-text) 48%, transparent); }
+.msg code { font-size: 12.5px; padding: 1px 5px; border-radius: 4px;
+  background: color-mix(in srgb, var(--color-text) 10%, transparent); }
+
+.composer { flex: none; display: flex; gap: var(--space-2);
+  padding: 12px 16px 14px; border-top: 1px solid var(--color-divider); }
+.composer .input { flex: 1; }
+
+.running { display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--color-accent-300); }
+.running i { width: 6px; height: 6px; border-radius: 999px;
+  background: var(--color-accent); display: block;
+  animation: wpulse 1.4s ease-in-out infinite; }
+@keyframes wpulse { 0%,100% { opacity: .35 } 50% { opacity: 1 } }
+
+/* Untere Leiste — nur am iPhone (req-039: fünf Plätze, Chat in der Mitte
+   eingekreist und größer). */
+.tabbar { flex: none; position: relative; display: flex;
+  justify-content: space-around; padding: 10px 8px 26px; }
+.tabbar::before { content: ""; position: absolute; top: 0; left: 0; right: 0;
+  height: 1px; background: linear-gradient(to right, transparent,
+    var(--color-divider) 48px, var(--color-divider) calc(100% - 48px), transparent); }
+.tab { flex: 1; display: flex; flex-direction: column; align-items: center;
+  gap: 4px; background: none; border: none; cursor: pointer; padding: 4px 0;
+  font: inherit; font-size: 10px;
+  color: color-mix(in srgb, var(--color-text) 48%, transparent); }
+.tab.is-active { color: var(--color-accent); }
+.tab-chat .ring { width: 46px; height: 46px; border-radius: 999px;
+  display: grid; place-items: center; margin-top: -11px;
+  border: 1px solid var(--color-accent); background: var(--color-bg);
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--color-accent) 30%, transparent);
+  position: relative; }
+.tab-chat .ring .ico { width: 25px; height: 25px; }
+.tab-chat .ring .bead { position: absolute; top: -2px; right: -2px; }
+
+.kpi { display: grid; gap: 10px; margin: 12px 0; }
+.kpi-3 { grid-template-columns: repeat(3, 1fr); }
+.kpi-2 { grid-template-columns: repeat(2, 1fr); }
+.tile { padding: 11px 13px; border-radius: var(--radius-lg);
+  background: var(--color-surface); box-shadow: var(--shadow-sm); }
+.tile .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em;
+  color: color-mix(in srgb, var(--color-text) 46%, transparent); }
+.tile .v { font-size: 20px; font-weight: 600; margin-top: 3px; }
+
+.note { margin: 14px 0 0; padding: 11px 13px; border-radius: var(--radius-md);
+  font-size: 12.5px; line-height: 1.5;
+  background: color-mix(in srgb, var(--color-accent) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 28%, transparent);
+  color: var(--color-accent-200); }
+.note b { color: var(--color-accent-300); }
+
+.q { max-width: 1180px; margin: 0 auto; padding: 26px 0 0;
+  border-top: 1px solid var(--color-divider); }
+.q h3 { font-size: 19px; margin: 0 0 12px; }
+.q ol { margin: 0; padding-left: 22px; font-size: 14px; line-height: 1.65;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent); }
+.q li { margin-bottom: 9px; }
+.q b { color: var(--color-text); }
+</style>
+</head>
+<body>
+
+<div class="page-head">
+  <h1>Layout für iPad und Laptop</h1>
+  <p>Entwurf zur Diskussion — gleiche Farben, Abstände und Radien wie
+  design 1.0, nur ein anderes Layout. Die drei Größen stehen hier
+  untereinander, damit sie vergleichbar sind; in der App entscheidet die
+  Fensterbreite. Die Geräterahmen sind Darstellung, kein Teil der App.</p>
+</div>
+
+<!-- ══════════════ 1 · iPhone ══════════════ -->
+<div class="size">
+  <div class="size-label">
+    <strong>iPhone</strong>
+    <span>bis 743px · untere Leiste, eine Spalte · unverändert gegenüber heute</span>
+  </div>
+  <div class="frame frame-phone">
+    <div class="app app-phone">
+      <div class="topbar">
+        <div class="module">
+          <div class="kicker">Modul</div>
+          <h2>Chat</h2>
+        </div>
+        <div class="topbar-actions">
+          <button class="btn btn-icon btn-secondary" aria-label="Theme">
+            <svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+          </button>
+        </div>
+      </div>
+      <!-- Am iPhone: die Repo-Auswahl als Zeile, weil keine Spalte daneben passt -->
+      <div class="single" style="display:flex;flex-direction:column">
+        <div class="seg" role="group" aria-label="Repo">
+          <label class="seg-opt"><input type="radio" name="r-p" checked>CellarVoice</label>
+          <label class="seg-opt"><input type="radio" name="r-p">Wellarita</label>
+          <label class="seg-opt"><input type="radio" name="r-p">Knipsa</label>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:12px;padding:14px 0 0">
+          <div class="msg msg-me"><div class="who">Ich</div>
+            Welche Bugs liegen in ready?</div>
+          <div class="msg msg-ai"><div class="who">Claude</div>
+            Zwei: <code>bug-051</code> und <code>bug-052</code>. Soll ich
+            mit dem älteren anfangen?</div>
+        </div>
+      </div>
+      <div class="composer">
+        <input class="input" placeholder="Nachricht an Claude">
+        <button class="btn btn-primary">Senden</button>
+      </div>
+      <nav class="tabbar" aria-label="Hauptnavigation">
+        <button class="tab">
+          <svg class="ico" width="23" height="23" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+          Aktivität
+        </button>
+        <button class="tab">
+          <svg class="ico" width="23" height="23" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+          Verlauf
+        </button>
+        <button class="tab tab-chat is-active">
+          <span class="ring">
+            <svg class="ico" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" stroke-width="1.8"><path d="M20 15a2 2 0 01-2 2H8l-4 4V5a2 2 0 012-2h12a2 2 0 012 2z"/></svg>
+            <span class="bead">2</span>
+          </span>
+          Chat
+        </button>
+        <button class="tab">
+          <svg class="ico" width="23" height="23" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.5 6H14a4 4 0 014 4v-1"/></svg>
+          Repos
+        </button>
+        <button class="tab">
+          <svg class="ico" width="23" height="23" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="1.8"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+          Mehr
+        </button>
+      </nav>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ 2 · iPad ══════════════ -->
+<div class="size">
+  <div class="size-label">
+    <strong>iPad</strong>
+    <span>744–1023px · schmale Seitenleiste (nur Symbole), zwei Spalten</span>
+  </div>
+  <div class="frame frame-tablet">
+    <div class="app">
+      <nav class="rail rail-narrow" aria-label="Hauptnavigation">
+        <div class="rail-brand"><div class="logo">&gt;_</div></div>
+        <button class="nav-item" aria-label="Aktivität" title="Aktivität">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>
+        </button>
+        <button class="nav-item" aria-label="Verlauf" title="Verlauf">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+        </button>
+        <button class="nav-item is-chat is-active" aria-label="Chat" title="Chat">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M20 15a2 2 0 01-2 2H8l-4 4V5a2 2 0 012-2h12a2 2 0 012 2z"/></svg>
+        </button>
+        <button class="nav-item" aria-label="Repos" title="Repos">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.5 6H14a4 4 0 014 4v-1"/></svg>
+        </button>
+        <button class="nav-item" aria-label="Zustand" title="Zustand">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M20.8 8.6a4.8 4.8 0 00-8.8-2.2 4.8 4.8 0 00-8.8 2.2c0 5 8.8 10.4 8.8 10.4s8.8-5.4 8.8-10.4z"/></svg>
+        </button>
+        <button class="nav-item" aria-label="Tasks" title="Tasks">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>
+        </button>
+        <div class="rail-spacer"></div>
+        <button class="nav-item" aria-label="Einstellungen" title="Einstellungen">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1 2 2 0 11-4 0 1.6 1.6 0 00-2.7-1.1l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.6 1.6 0 003 15a2 2 0 110-4 1.6 1.6 0 001.1-2.7l-.1-.1a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 0010 4.6a2 2 0 114 0 1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1A1.6 1.6 0 0021 11a2 2 0 110 4z"/></svg>
+        </button>
+        <button class="rail-toggle" aria-label="Seitenleiste aufklappen" title="Aufklappen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M10 6l6 6-6 6"/></svg></button>
+      </nav>
+      <div class="main">
+        <div class="topbar">
+          <div class="module">
+            <div class="kicker">Modul</div>
+            <h2>Chat</h2>
+          </div>
+          <div class="topbar-actions">
+            <span class="running"><i></i>Wellarita antwortet</span>
+            <button class="btn btn-icon btn-secondary" aria-label="Theme">
+              <svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="split">
+          <!-- Die Repo-Auswahl wird zur Spalte: alle Repos sichtbar, der
+               Zustand jeder Sitzung ablesbar (req-040) -->
+          <div class="col-list">
+            <div class="list-kicker">Repos</div>
+            <div class="repo-row is-active">
+              <span class="pos">1</span><span class="nm">CellarVoice</span><span class="dot"></span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">2</span><span class="nm">Wellarita</span>
+              <span class="running"><i></i></span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">3</span><span class="nm">Knipsa</span><span class="bead">2</span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">4</span><span class="nm">Wegfara</span><span class="dot"></span>
+            </div>
+            <div class="repo-row is-off">
+              <span class="pos">5</span><span class="nm">appbaua</span><span class="dot is-off"></span>
+            </div>
+          </div>
+          <div class="col-detail">
+            <div class="pane-head">
+              <span class="t">CellarVoice</span>
+              <span class="s">Sitzung offen · Opus</span>
+            </div>
+            <div class="chat-scroll">
+              <div class="msg msg-me"><div class="who">Ich</div>
+                Welche Bugs liegen in ready?</div>
+              <div class="msg msg-ai"><div class="who">Claude</div>
+                Zwei: <code>bug-051</code> (Sterne zu klein im Querformat)
+                und <code>bug-052</code> (Fußzeile verdeckt den Knopf).
+                Soll ich mit dem älteren anfangen?</div>
+              <div class="msg msg-me"><div class="who">Ich</div>
+                Ja, und schreib mir danach ein Requirement für die
+                Aroma-Auswahl.</div>
+            </div>
+            <div class="composer">
+              <input class="input" placeholder="Nachricht an Claude">
+              <button class="btn btn-primary">Senden</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ 3 · Laptop ══════════════ -->
+<div class="size">
+  <div class="size-label">
+    <strong>Laptop</strong>
+    <span>ab 1024px · breite Seitenleiste (Symbol + Text), zwei Spalten</span>
+  </div>
+  <div class="frame frame-laptop">
+    <div class="app">
+      <nav class="rail rail-wide" aria-label="Hauptnavigation">
+        <div class="rail-brand">
+          <div class="logo">&gt;_</div>
+          <div class="wordmark"><b>appbaua</b><small>Coding-Worker</small></div>
+        </div>
+        <button class="nav-item">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg>Aktivität
+        </button>
+        <button class="nav-item">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>Verlauf
+        </button>
+        <button class="nav-item is-chat is-active">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M20 15a2 2 0 01-2 2H8l-4 4V5a2 2 0 012-2h12a2 2 0 012 2z"/></svg>Chat
+          <span style="flex:1"></span><span class="bead">2</span>
+        </button>
+        <button class="nav-item">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.5 6H14a4 4 0 014 4v-1"/></svg>Repos
+        </button>
+        <button class="nav-item">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M20.8 8.6a4.8 4.8 0 00-8.8-2.2 4.8 4.8 0 00-8.8 2.2c0 5 8.8 10.4 8.8 10.4s8.8-5.4 8.8-10.4z"/></svg>Zustand
+        </button>
+        <button class="nav-item">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg>Tasks
+        </button>
+        <div class="rail-spacer"></div>
+        <button class="nav-item">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1 2 2 0 11-4 0 1.6 1.6 0 00-2.7-1.1l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.6 1.6 0 003 15a2 2 0 110-4 1.6 1.6 0 001.1-2.7l-.1-.1a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 0010 4.6a2 2 0 114 0 1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1A1.6 1.6 0 0021 11a2 2 0 110 4z"/></svg>Einstellungen
+        </button>
+        <button class="rail-toggle" aria-label="Seitenleiste einklappen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M14 6l-6 6 6 6"/></svg> Einklappen</button>
+      </nav>
+      <div class="main">
+        <div class="topbar">
+          <div class="module">
+            <div class="kicker">Modul</div>
+            <h2>Chat</h2>
+          </div>
+          <div class="topbar-actions">
+            <span class="running"><i></i>Wellarita antwortet</span>
+            <button class="btn btn-icon btn-secondary" aria-label="Theme">
+              <svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="split">
+          <div class="col-list">
+            <div class="list-kicker">Repos</div>
+            <div class="repo-row is-active">
+              <span class="pos">1</span><span class="nm">CellarVoice</span><span class="dot"></span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">2</span><span class="nm">Wellarita</span>
+              <span class="running"><i></i></span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">3</span><span class="nm">Knipsa</span><span class="bead">2</span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">4</span><span class="nm">Wegfara</span><span class="dot"></span>
+            </div>
+            <div class="repo-row is-off">
+              <span class="pos">5</span><span class="nm">appbaua</span><span class="dot is-off"></span>
+            </div>
+          </div>
+          <div class="col-detail">
+            <div class="pane-head">
+              <span class="t">CellarVoice</span>
+              <span class="s">Sitzung offen · Opus · zuletzt 14:22</span>
+            </div>
+            <!-- Der Gesprächstext bleibt lesbar breit, statt auf 1180px
+                 gezogen zu werden -->
+            <div class="chat-scroll">
+              <div class="msg msg-me"><div class="who">Ich</div>
+                Welche Bugs liegen in ready?</div>
+              <div class="msg msg-ai"><div class="who">Claude</div>
+                Zwei: <code>bug-051</code> (Sterne zu klein im Querformat)
+                und <code>bug-052</code> (Fußzeile verdeckt den Knopf).
+                Soll ich mit dem älteren anfangen?</div>
+              <div class="msg msg-me"><div class="who">Ich</div>
+                Ja, und schreib mir danach ein Requirement für die
+                Aroma-Auswahl.</div>
+              <div class="msg msg-ai"><div class="who">Claude</div>
+                <code>bug-051</code> ist behoben — die Sterne skalieren
+                jetzt mit der Kachelhöhe, Suite grün (3257 Tests). Zum
+                Requirement habe ich zwei Fragen.</div>
+            </div>
+            <div class="composer">
+              <input class="input" placeholder="Nachricht an Claude">
+              <button class="btn btn-primary">Senden</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ 4 · Laptop, Leiste eingeklappt ══════════════ -->
+<div class="size">
+  <div class="size-label">
+    <strong>Laptop · Leiste eingeklappt</strong>
+    <span>derselbe Laptop, Seitenleiste von Hand schmal gestellt — mehr Platz fürs Gespräch</span>
+  </div>
+  <div class="frame frame-laptop" style="height:560px">
+    <div class="app">
+      <nav class="rail rail-narrow" aria-label="Hauptnavigation">
+        <div class="rail-brand"><div class="logo">&gt;_</div></div>
+        <button class="nav-item" aria-label="Aktivität" title="Aktivität"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>
+        <button class="nav-item" aria-label="Verlauf" title="Verlauf"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg></button>
+        <button class="nav-item is-chat is-active" aria-label="Chat" title="Chat"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 15a2 2 0 01-2 2H8l-4 4V5a2 2 0 012-2h12a2 2 0 012 2z"/></svg></button>
+        <button class="nav-item" aria-label="Repos" title="Repos"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="9" r="2.5"/><path d="M6 8.5v7M8.5 6H14a4 4 0 014 4v-1"/></svg></button>
+        <button class="nav-item" aria-label="Zustand" title="Zustand"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20.8 8.6a4.8 4.8 0 00-8.8-2.2 4.8 4.8 0 00-8.8 2.2c0 5 8.8 10.4 8.8 10.4s8.8-5.4 8.8-10.4z"/></svg></button>
+        <button class="nav-item" aria-label="Tasks" title="Tasks"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></svg></button>
+        <div class="rail-spacer"></div>
+        <button class="nav-item" aria-label="Einstellungen" title="Einstellungen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1 2 2 0 11-4 0 1.6 1.6 0 00-2.7-1.1l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.6 1.6 0 003 15a2 2 0 110-4 1.6 1.6 0 001.1-2.7l-.1-.1a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 0010 4.6a2 2 0 114 0 1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1A1.6 1.6 0 0021 11a2 2 0 110 4z"/></svg></button>
+        <button class="rail-toggle" aria-label="Seitenleiste aufklappen" title="Aufklappen"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M10 6l6 6-6 6"/></svg></button>
+      </nav>
+      <div class="main">
+        <div class="topbar">
+          <div class="module">
+            <div class="kicker">Modul</div>
+            <h2>Chat</h2>
+          </div>
+          <div class="topbar-actions">
+            <span class="running"><i></i>Wellarita antwortet</span>
+            <button class="btn btn-icon btn-secondary" aria-label="Theme"><svg class="ico" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/></svg></button>
+          </div>
+        </div>
+        <div class="split">
+          <div class="col-list">
+            <div class="list-kicker">Repos</div>
+            <div class="repo-row is-active">
+              <span class="pos">1</span><span class="nm">CellarVoice</span><span class="dot"></span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">2</span><span class="nm">Wellarita</span>
+              <span class="running"><i></i></span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">3</span><span class="nm">Knipsa</span><span class="bead">2</span>
+            </div>
+            <div class="repo-row">
+              <span class="pos">4</span><span class="nm">Wegfara</span><span class="dot"></span>
+            </div>
+            <div class="repo-row is-off">
+              <span class="pos">5</span><span class="nm">appbaua</span><span class="dot is-off"></span>
+            </div>
+          </div>
+          <div class="col-detail">
+            <div class="pane-head">
+              <span class="t">CellarVoice</span>
+              <span class="s">Sitzung offen · Opus · zuletzt 14:22</span>
+            </div>
+            <div class="chat-scroll">
+              <div class="msg msg-me"><div class="who">Ich</div>
+                Welche Bugs liegen in ready?</div>
+              <div class="msg msg-ai"><div class="who">Claude</div>
+                Zwei: <code>bug-051</code> (Sterne zu klein im Querformat)
+                und <code>bug-052</code> (Fußzeile verdeckt den Knopf).
+                Soll ich mit dem älteren anfangen?</div>
+              <div class="msg msg-me"><div class="who">Ich</div>
+                Ja, und schreib mir danach ein Requirement für die
+                Aroma-Auswahl.</div>
+              <div class="msg msg-ai"><div class="who">Claude</div>
+                <code>bug-051</code> ist behoben — die Sterne skalieren
+                jetzt mit der Kachelhöhe, Suite grün (3257 Tests). Zum
+                Requirement habe ich zwei Fragen.</div>
+            </div>
+            <div class="composer">
+              <input class="input" placeholder="Nachricht an Claude">
+              <button class="btn btn-primary">Senden</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="q">
+  <h3>Woran ich im Entwurf entschieden habe</h3>
+  <ol>
+    <li><b>Navigation links statt unten</b>, ab iPad. Die untere Leiste
+    aus req-039 bleibt am iPhone unverändert.</li>
+    <li><b>Die Seitenleiste lässt sich zusammenklappen</b> — in jeder
+    Größe, auch auf dem Laptop. Eingeklappt bleiben nur die Symbole, der
+    Text entfällt. Die Fensterbreite gibt den Anfangszustand vor (iPad
+    schmal, Laptop breit), danach entscheidet der Knopf unten in der
+    Leiste. Der vierte Rahmen zeigt den eingeklappten Laptop.</li>
+    <li><b>Alle Menüpunkte oben, nur Einstellungen unten.</b> Kein
+    Dropdown wie am iPhone — "Mehr" entfällt auf den großen Geräten.</li>
+    <li><b>Der Chat-Eintrag bleibt hervorgehoben</b> — in der
+    Seitenleiste nicht als Kreis, sondern mit Akzentrand. Ein
+    eingekreistes Symbol mitten in einer senkrechten Liste wirkt
+    verloren; der Rand überträgt dieselbe Absicht.</li>
+    <li><b>Zwei Spalten im Chat: links die Repos, rechts das
+    Gespräch.</b> Die Repo-Spalte zeigt nebenbei, was am iPhone der eine
+    Punkt am Chat-Knopf tragen muss — welches Repo gerade antwortet und
+    wo eine Antwort wartet.</li>
+    <li><b>Text bleibt lesbar breit statt voll ausgezogen.</b> Das
+    Gespräch hört bei etwa 760px auf; auf einem 27-Zoll-Bildschirm
+    Zeilen über die volle Breite zu lesen ist unangenehm.</li>
+    <li><b>Die Grenzen liegen bei 744px und 1024px.</b> Ein iPad im
+    Hochformat (768px) startet mit der schmalen Seitenleiste, im
+    Querformat (1024px) mit der breiten. Ein iPhone im Querformat bleibt
+    beim Telefon-Layout.</li>
+  </ol>
+  <p style="font-size:13.5px;margin-top:16px;
+     color:color-mix(in srgb, var(--color-text) 55%, transparent)">
+    <b style="color:var(--color-text)">Noch offen:</b> Wie die
+    Detailseiten der übrigen Menüpunkte (Repos, Zustand, Tasks,
+    Einstellungen) die zweite Spalte nutzen, ist bewusst nicht
+    entworfen. Dieser Entwurf deckt die Navigation und den Chat ab.
+  </p>
+</div>
+
+</body>
+</html>

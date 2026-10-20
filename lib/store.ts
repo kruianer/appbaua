@@ -19,15 +19,18 @@ export interface RepoStore {
 
 /**
  * Backfill for a persisted repo written before a field existed: `model`
- * (req-028) and `monitored` (req-032). Reading such a row as a Repo would
- * silently produce `undefined` rather than the documented default. Cheap and
- * idempotent — a repo that already has both passes through unchanged.
+ * (req-028), `monitored` (req-032), `weeklyBudget` (req-044) and
+ * `selfAssign` (req-047). Reading such a row as a Repo would silently
+ * produce `undefined` rather than the documented default. Cheap and
+ * idempotent — a repo that already has all four passes through unchanged.
  */
 function withDefaults(repos: Repo[]): Repo[] {
   return repos.map((r) => ({
     ...r,
     model: r.model ?? DEFAULT_REPO_MODEL,
     monitored: r.monitored ?? false,
+    weeklyBudget: r.weeklyBudget ?? null,
+    selfAssign: r.selfAssign ?? false,
   }));
 }
 

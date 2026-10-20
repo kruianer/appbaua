@@ -150,6 +150,53 @@ describe("docker-compose.yml — Telegram (req-033)", () => {
   });
 });
 
+describe("docker-compose.yml — Speicherlimit fuer den Worker (bug-026)", () => {
+  it("AC: der worker-Dienst hat ein Speicherlimit, nicht nur die anderen", () => {
+    // Ohne Limit darf der Dienst den ganzen Host-Speicher nehmen — genau das
+    // riss den Rechner am 14.10. an die Grenze (global_oom).
+    expect(serviceBlock("worker")).toMatch(/^\s*mem_limit:\s*\S+/m);
+  });
+
+  it("AC: kein zusaetzliches Swapping ueber das Limit hinaus", () => {
+    // memswap_limit = mem_limit: ein entgleister Lauf endet am Limit, statt
+    // sich ins Swapping zu retten und den ganzen Host zu bremsen.
+    const worker = serviceBlock("worker");
+    const mem = worker.match(/^\s*mem_limit:\s*(\S+)/m);
+    const swap = worker.match(/^\s*memswap_limit:\s*(\S+)/m);
+    expect(mem).toBeTruthy();
+    expect(swap).toBeTruthy();
+    expect(swap![1]).toBe(mem![1]);
+  });
+});
+
+describe("docker-compose.yml — Claude-Code-Anmeldung im App-Container (bug-028, Schreibzugriff seit bug-037)", () => {
+  // Der Chat (req-040) laeuft im App-Container und braucht dieselbe
+  // Abo-Anmeldung wie der Worker, die im Volume claude-home unter /claude-home
+  // liegt. bug-028 hatte das Volume nur lesend eingehaengt; bug-037 hat das
+  // zurueckgenommen, siehe die Tests dort.
+
+  it("AC: HOME des App-Containers zeigt auf /claude-home, nicht auf /home/nextjs", () => {
+    expect(serviceBlock("app")).toContain("HOME: /claude-home");
+  });
+});
+
+describe("docker-compose.yml — Chat kann seinen Token erneuern (bug-037)", () => {
+  // Ein OAuth-Zugangstoken ist kurzlebig und wird bei jedem normalen Lauf per
+  // Refresh-Token erneuert — das schreibt die Anmeldedatei neu. Nur lesend
+  // (bug-028) verhinderte genau das im App-Container: jede Erneuerung
+  // schlug fehl, der Chat verlangte praktisch taeglich eine neue Anmeldung.
+
+  it("AC: das claude-home-Volume ist im App-Container schreibbar eingehaengt", () => {
+    const app = serviceBlock("app");
+    expect(app).toMatch(/^\s*-\s*claude-home:\/claude-home\s*$/m);
+  });
+
+  it("der App-Container haengt das Volume NICHT mehr nur lesend ein", () => {
+    const app = serviceBlock("app");
+    expect(app).not.toMatch(/^\s*-\s*claude-home:\/claude-home:ro\s*$/m);
+  });
+});
+
 describe("docker-compose.yml — Arbeitskopien ueberleben einen Deploy (req-062-Verlust)", () => {
   function serviceBlockLocal(name: string): string {
     const lines = COMPOSE.split("\n");
@@ -171,5 +218,45 @@ describe("docker-compose.yml — Arbeitskopien ueberleben einen Deploy (req-062-
     // Ein Mount auf einen nicht deklarierten Namen legt bei Compose ein
     // anonymes Volume an — das ueberlebt ein `down` nicht.
     expect(COMPOSE).toMatch(/^\s{2}worker-work:\s*$/m);
+  });
+});
+
+describe("docker-compose.yml — Chat-Arbeitskopie ueberlebt einen Deploy (bug-029)", () => {
+  it("AC: CHAT_WORKDIR liegt in einem eigenen Volume, nicht im Container", () => {
+    // Ohne Volume ersetzt jeder Deploy den App-Container und damit die
+    // Chat-Arbeitskopie — die laufende Claude-Sitzung zeigt danach ins Leere.
+    expect(serviceBlock("app")).toMatch(/^\s*-\s*chat-work:\/chat-work\s*$/m);
+  });
+
+  it("das Volume ist auch deklariert", () => {
+    expect(COMPOSE).toMatch(/^\s{2}chat-work:\s*$/m);
+  });
+});
+
+describe("docker-compose.yml — Chat-Sitzungen koennen gespeichert werden (bug-032)", () => {
+  // Claude legt seine Sitzungen unter $HOME/.claude/projects ab — also im
+  // claude-home-Volume, das im App-Container seit bug-028 nur lesend
+  // eingehaengt ist. Ohne ein eigenes, schreibbares Volume genau fuer diesen
+  // Unterpfad konnte NIE eine Sitzung geschrieben werden, nicht erst nach
+  // einem Neustart.
+
+  it("AC: ein eigenes Volume macht genau den Sitzungs-Unterpfad schreibbar", () => {
+    expect(serviceBlock("app")).toMatch(
+      /^\s*-\s*chat-sessions:\/claude-home\/\.claude\/projects\s*$/m,
+    );
+  });
+
+  it("das Volume ist auch deklariert", () => {
+    expect(COMPOSE).toMatch(/^\s{2}chat-sessions:\s*$/m);
+  });
+
+  it("der Sitzungs-Unterpfad bleibt ein eigenes Volume, auch nachdem bug-037 claude-home insgesamt schreibbar gemacht hat", () => {
+    // bug-037 hat die :ro-Auflage aus bug-028 fuer das ganze claude-home-
+    // Volume aufgehoben (siehe dort). Das eigene Volume fuer den
+    // Sitzungs-Unterpfad bleibt trotzdem bestehen — es ist seither nicht
+    // mehr die einzige schreibbare Stelle, aber unveraendert vorhanden.
+    expect(serviceBlock("app")).toMatch(
+      /^\s*-\s*chat-sessions:\/claude-home\/\.claude\/projects\s*$/m,
+    );
   });
 });

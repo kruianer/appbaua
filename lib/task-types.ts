@@ -47,15 +47,23 @@ export type TaskType = {
 /**
  * The predefined types in the vision order P1–P5. Security sits next to
  * Code-Review, because the vision puts "Code-Review & Security-Review" on the
- * same priority P3 (req-014).
+ * same priority P3 (req-014). Feedback (req-043) sits right after
+ * Requirements, because it is the third member of that same file-driven
+ * family — "Neben Bugs und Requirements gibt es die Task-Art Feedback".
+ * Selbstauftrag (req-047) sits right after Ideen: it is the step that was
+ * missing when nobody turns an open idea into a requirement.
  */
+export const SELF_ASSIGN_TASK_ID = "selbstauftrag";
+
 export const DEFAULT_TASK_TYPES: { id: string; label: string }[] = [
   { id: "bug", label: "Bugs" },
   { id: "requirement", label: "Requirements" },
+  { id: "feedback", label: "Feedback" },
   { id: "code-review", label: "Code-Review" },
   { id: "security", label: "Security" },
   { id: "doku", label: "Doku" },
   { id: "ideen", label: "Ideen" },
+  { id: SELF_ASSIGN_TASK_ID, label: "Selbstauftrag" },
 ];
 
 export function emptySchedule(): Schedule {

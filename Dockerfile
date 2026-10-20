@@ -25,10 +25,38 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # git at runtime: "Auf appbaua umstellen" (req-012) clones the appbaua source and
 # the target repo from inside the app and pushes to the target's dev branch — or
 # to its default branch when it has no dev (req-013).
-RUN apk add --no-cache git
+#
+# bash: Claude Code runs every shell command of its Bash tool through bash, and
+# Alpine ships only busybox sh (same pattern as bug-016 in Dockerfile.worker).
+# Without it the chat (req-040) can read a file whose path it already knows but
+# can't search, list, or run anything (bug-035).
+#
+# SHELL=/bin/bash: the CLI refuses to run commands without SHELL set, even with
+# bash installed — Alpine leaves it unset (bug-035).
+#
+# rg (ripgrep) deliberately NOT added: the CLI binary bundles its own ripgrep
+# (confirmed via `strings` on the installed claude binary — it embeds
+# `@vscode/ripgrep`) and never shells out to a system `rg`, so the package
+# would only cost image size without changing search behaviour.
+#
+# The Claude Code CLI: the chat (req-040) runs in this container and calls the
+# same runClaude as the worker. Without it every message answered "Claude-Code-
+# CLI nicht verfügbar" (bug-028).
+RUN apk add --no-cache git bash \
+  && npm install -g @anthropic-ai/claude-code
+ENV SHELL=/bin/bash
 
 # Where that rollout clones repos (must be writable by the app user).
 ENV WORKER_WORKDIR=/work
+
+# The chat's own working copy (req-040 AC15), on its own volume so a deploy
+# does not wipe it out from under a running Claude session (bug-029).
+ENV CHAT_WORKDIR=/chat-work
+
+# Claude Code auth lives here too (claude-home volume, mounted read-only — see
+# docker-compose.yml). Without this HOME points at /home/nextjs and the CLI
+# never finds the subscription login (bug-028).
+ENV HOME=/claude-home
 
 # Run as non-root.
 RUN addgroup --system --gid 1001 nodejs \
@@ -39,9 +67,20 @@ RUN addgroup --system --gid 1001 nodejs \
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Directory for the JSON fallback store (used only when DATABASE_URL is unset)
-# and the work dir for the appbaua rollout (req-012).
-RUN mkdir -p .data /work && chown -R nextjs:nodejs .data /work
+# Directory for the JSON fallback store (used only when DATABASE_URL is unset),
+# the work dir for the appbaua rollout (req-012), and the chat's own working
+# copy (bug-029).
+#
+# /claude-home/.claude/projects also gets created here: docker-compose.yml
+# mounts a SEPARATE writable volume over exactly this subpath of the
+# read-only claude-home volume (bug-032). Claude Code keeps its sessions
+# there, named after the cwd — with claude-home entirely read-only (bug-028),
+# the chat could never write one, so EVERY turn, not just one after a
+# restart, found no session to resume. A named volume adopts the ownership
+# this directory already has in the image on first mount, so without the
+# chown below it would come up owned by root and stay unwritable for nextjs.
+RUN mkdir -p .data /work /chat-work /claude-home/.claude/projects \
+  && chown -R nextjs:nodejs .data /work /chat-work /claude-home
 
 USER nextjs
 EXPOSE 3000

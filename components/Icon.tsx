@@ -33,6 +33,16 @@ export const ICONS = {
   // header without a tile behind it.
   brand:
     '<circle cx="12" cy="12" r="6.2"/><path d="M12 3.6v2.2"/><path d="M12 18.2v2.2"/><path d="M3.6 12h2.2"/><path d="M18.2 12h2.2"/><path d="M7.6 7.6L6.1 6.1"/><path d="M16.4 16.4l1.5 1.5"/><path d="M16.4 7.6l1.5-1.5"/><path d="M7.6 16.4l-1.5 1.5"/><path d="M8.8 12.2l2.3 2.3 4.1-4.5"/>',
+  // Chat-Platz in der unteren Navigation (req-039).
+  chat: '<path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-4 4v-4H6a2 2 0 0 1-2-2z"/>',
+  // "Mehr" — die drei ausgelagerten Menüpunkte (req-039).
+  more: '<circle cx="5" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.6" fill="currentColor" stroke="none"/>',
+  // Ein-/Ausklapp-Knopf der Seitenleiste (req-041).
+  chevronLeft: '<path d="M14 6l-6 6 6 6"/>',
+  chevronRight: '<path d="M10 6l6 6-6 6"/>',
+  // Release-Infos (req-046).
+  megaphone:
+    '<path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/>',
 } as const;
 
 export type IconName = keyof typeof ICONS;

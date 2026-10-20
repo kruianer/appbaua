@@ -13,7 +13,7 @@ import {
   LOG_MAX_AGE_DAYS,
   LOG_MAX_ROWS,
 } from "./run-log";
-import { type RunLogStore, isIdleSummary } from "./run-log-store";
+import { type RunLogStore, isIdleSummary, isBudgetSkipSummary } from "./run-log-store";
 import {
   type WorkerStatus,
   type WorkerStatusStore,
@@ -40,6 +40,8 @@ import {
 import { type AlertState, normalizeAlertState } from "./telegram-alerts";
 import { type AnalysisState, normalizeAnalyses } from "./log-analysis";
 import type { AuthStore } from "./auth-store";
+import type { ChatUiStateStore } from "./chat-store";
+import type { ChatMessage, ChatSession, ChatSessionStore } from "./chat-session-store";
 import type {
   AuthUser,
   AuthCredential,
@@ -123,8 +125,10 @@ export function createPgStore(): RepoStore {
         active: boolean;
         model: string | null;
         monitored: boolean | null;
+        weekly_budget: number | null;
+        self_assign: boolean | null;
       }>(
-        "SELECT id, name, url, active, model, monitored FROM repos ORDER BY position ASC",
+        "SELECT id, name, url, active, model, monitored, weekly_budget, self_assign FROM repos ORDER BY position ASC",
       );
       return res.rows.map((r) => ({
         id: r.id,
@@ -135,6 +139,10 @@ export function createPgStore(): RepoStore {
         model: (r.model as Repo["model"]) || DEFAULT_REPO_MODEL,
         // Same for req-032's switch: a row from before it is not watched.
         monitored: r.monitored ?? false,
+        // req-044: NULL (unset, or a row from before it existed) means no limit.
+        weeklyBudget: r.weekly_budget ?? null,
+        // req-047: a row from before the switch existed never self-assigns.
+        selfAssign: r.self_assign ?? false,
       }));
     },
 
@@ -147,8 +155,18 @@ export function createPgStore(): RepoStore {
         for (let i = 0; i < repos.length; i++) {
           const r = repos[i];
           await client.query(
-            "INSERT INTO repos (id, name, url, active, position, model, monitored) VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            [r.id, r.name, r.url, r.active, i, r.model, r.monitored],
+            "INSERT INTO repos (id, name, url, active, position, model, monitored, weekly_budget, self_assign) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            [
+              r.id,
+              r.name,
+              r.url,
+              r.active,
+              i,
+              r.model,
+              r.monitored,
+              r.weeklyBudget ?? null,
+              r.selfAssign ?? false,
+            ],
           );
         }
         await client.query("COMMIT");
@@ -374,6 +392,37 @@ export function createPgRunLogStore(): RunLogStore {
       );
       return res.rows.length ? toEntry(res.rows[0]) : null;
     },
+    async countSuccessSince(
+      repoName: string,
+      taskTypeLabels: string[],
+      sinceIso: string,
+    ): Promise<number> {
+      await ensureSchema();
+      const res = await getPool().query<{ c: string }>(
+        `SELECT COUNT(*)::text AS c FROM run_log
+         WHERE repo = $1 AND task_type = ANY($2) AND status = 'success'
+           AND started_at >= $3`,
+        [repoName, taskTypeLabels, sinceIso],
+      );
+      return Number(res.rows[0].c);
+    },
+    async upsertBudgetSkip(entry: NewRunLogEntry): Promise<RunLogEntry> {
+      await ensureSchema();
+      const newest = await getPool().query<Row>(
+        `SELECT ${COLUMNS} FROM run_log WHERE repo = $1 ORDER BY id DESC LIMIT 1`,
+        [entry.repo],
+      );
+      const last = newest.rows[0] ? toEntry(newest.rows[0]) : null;
+      if (last && isBudgetSkipSummary(last)) {
+        const upd = await getPool().query<Row>(
+          `UPDATE run_log SET ended_at = $1, message = $2 WHERE id = $3
+           RETURNING ${COLUMNS}`,
+          [entry.endedAt, entry.message, last.id],
+        );
+        return toEntry(upd.rows[0]);
+      }
+      return this.append(entry);
+    },
     async clear(): Promise<void> {
       await ensureSchema();
       // Only run_log — repos, task_types, worker_state and worker_status stay.
@@ -481,6 +530,115 @@ export function createPgNetworkAbortStore(): NetworkAbortStore {
          ON CONFLICT (id) DO UPDATE SET counts = EXCLUDED.counts`,
         [JSON.stringify(counts)],
       );
+    },
+  };
+}
+
+export function createPgChatUiStateStore(): ChatUiStateStore {
+  return {
+    async getActiveRepoId(): Promise<string | null> {
+      await ensureSchema();
+      const res = await getPool().query<{ active_repo_id: string | null }>(
+        "SELECT active_repo_id FROM chat_ui_state WHERE id = 'chat'",
+      );
+      return res.rows[0]?.active_repo_id ?? null;
+    },
+    async setActiveRepoId(repoId: string): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO chat_ui_state (id, active_repo_id) VALUES ('chat', $1)
+         ON CONFLICT (id) DO UPDATE SET active_repo_id = EXCLUDED.active_repo_id`,
+        [repoId],
+      );
+    },
+  };
+}
+
+export function createPgChatSessionStore(): ChatSessionStore {
+  type Row = {
+    id: string;
+    repo_id: string;
+    role: ChatRole;
+    content: string;
+    created_at: Date;
+    steps: string | null;
+  };
+  type ChatRole = ChatMessage["role"];
+  const toMessage = (r: Row): ChatMessage => ({
+    id: Number(r.id),
+    repoId: r.repo_id,
+    role: r.role,
+    content: r.content,
+    createdAt: new Date(r.created_at).toISOString(),
+    // req-049: NULL bei einer Nutzer-Nachricht und bei jeder Zeile von davor.
+    steps: r.steps ?? undefined,
+  });
+  return {
+    async listMessages(repoId: string): Promise<ChatMessage[]> {
+      await ensureSchema();
+      const res = await getPool().query<Row>(
+        `SELECT id, repo_id, role, content, created_at, steps FROM chat_messages
+         WHERE repo_id = $1 ORDER BY id ASC`,
+        [repoId],
+      );
+      return res.rows.map(toMessage);
+    },
+    async appendMessage(msg: Omit<ChatMessage, "id">): Promise<ChatMessage> {
+      await ensureSchema();
+      const res = await getPool().query<Row>(
+        `INSERT INTO chat_messages (repo_id, role, content, created_at, steps)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING id, repo_id, role, content, created_at, steps`,
+        [msg.repoId, msg.role, msg.content, msg.createdAt, msg.steps ?? null],
+      );
+      return toMessage(res.rows[0]);
+    },
+    async getSession(repoId: string): Promise<ChatSession | null> {
+      await ensureSchema();
+      const res = await getPool().query<{
+        repo_id: string;
+        claude_session_id: string;
+        last_active_at: Date;
+        unread: boolean;
+      }>(
+        `SELECT repo_id, claude_session_id, last_active_at, unread FROM chat_sessions
+         WHERE repo_id = $1`,
+        [repoId],
+      );
+      const r = res.rows[0];
+      if (!r) return null;
+      return {
+        repoId: r.repo_id,
+        claudeSessionId: r.claude_session_id,
+        lastActiveAt: new Date(r.last_active_at).toISOString(),
+        unread: r.unread,
+      };
+    },
+    async putSession(session: ChatSession): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        `INSERT INTO chat_sessions (repo_id, claude_session_id, last_active_at, unread)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (repo_id) DO UPDATE SET
+           claude_session_id = EXCLUDED.claude_session_id,
+           last_active_at = EXCLUDED.last_active_at,
+           unread = EXCLUDED.unread`,
+        [session.repoId, session.claudeSessionId, session.lastActiveAt, session.unread],
+      );
+    },
+    async setUnread(repoId: string, unread: boolean): Promise<void> {
+      await ensureSchema();
+      await getPool().query(
+        "UPDATE chat_sessions SET unread = $2 WHERE repo_id = $1",
+        [repoId, unread],
+      );
+    },
+    async listUnreadRepoIds(): Promise<string[]> {
+      await ensureSchema();
+      const res = await getPool().query<{ repo_id: string }>(
+        "SELECT repo_id FROM chat_sessions WHERE unread = TRUE",
+      );
+      return res.rows.map((r) => r.repo_id);
     },
   };
 }

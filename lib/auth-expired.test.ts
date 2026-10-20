@@ -3,6 +3,8 @@ import {
   isAuthExpired,
   AUTH_EXPIRED_MESSAGE,
   AUTH_EXPIRED_PAUSE_MS,
+  authExpiredWorkerContainer,
+  authExpiredChatMessage,
 } from "./auth-expired";
 
 describe("isAuthExpired (bug-019)", () => {
@@ -44,5 +46,39 @@ describe("AUTH_EXPIRED_MESSAGE (bug-019)", () => {
 describe("AUTH_EXPIRED_PAUSE_MS (bug-019)", () => {
   it("is a long pause, not a short retry — a login does not resolve on its own", () => {
     expect(AUTH_EXPIRED_PAUSE_MS).toBeGreaterThanOrEqual(60 * 60_000);
+  });
+});
+
+describe("authExpiredWorkerContainer (bug-031)", () => {
+  it("names the dev worker container on the dev origin", () => {
+    expect(
+      authExpiredWorkerContainer({ APP_ORIGIN: "https://dev.appbaua.com" }),
+    ).toBe("appbaua-dev-worker-1");
+  });
+
+  it("names the prod worker container on the prod origin", () => {
+    expect(
+      authExpiredWorkerContainer({ APP_ORIGIN: "https://app.appbaua.com" }),
+    ).toBe("appbaua-prod-worker-1");
+  });
+
+  it("falls back to dev without a set APP_ORIGIN (local development)", () => {
+    expect(authExpiredWorkerContainer({})).toBe("appbaua-dev-worker-1");
+  });
+});
+
+describe("authExpiredChatMessage (bug-031)", () => {
+  it("names a single concrete command for the running environment, in a copy-able block", () => {
+    const message = authExpiredChatMessage({ APP_ORIGIN: "https://dev.appbaua.com" });
+    expect(message).toContain(
+      "```\ndocker exec -it appbaua-dev-worker-1 claude login\n```",
+    );
+  });
+
+  it("names the prod container on the prod origin — dev and prod must not be confused", () => {
+    const devMessage = authExpiredChatMessage({ APP_ORIGIN: "https://dev.appbaua.com" });
+    const prodMessage = authExpiredChatMessage({ APP_ORIGIN: "https://app.appbaua.com" });
+    expect(devMessage).not.toBe(prodMessage);
+    expect(prodMessage).toContain("appbaua-prod-worker-1");
   });
 });

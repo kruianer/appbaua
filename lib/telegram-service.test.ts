@@ -55,6 +55,9 @@ function dockerStub(containers: DockerContainer[]): DockerClient {
       return "";
     },
     async restart() {},
+    async stats() {
+      return { memoryBytes: 0, cpuTotalUsage: 0, cpuSystemUsage: 0, onlineCpus: 1 };
+    },
   };
 }
 

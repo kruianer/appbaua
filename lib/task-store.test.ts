@@ -21,10 +21,12 @@ describe("seedMissingDefaults", () => {
     expect(types.map((t) => t.id)).toEqual([
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
       "ideen",
+      "selbstauftrag",
     ]);
     const security = types.find((t) => t.id === "security")!;
     expect(security.active).toBe(true);
@@ -58,7 +60,7 @@ describe("seedMissingDefaults", () => {
       },
     };
     const types = await seedMissingDefaults(counting).list();
-    expect(types).toHaveLength(6);
+    expect(types).toHaveLength(8);
     expect(writes).toBe(0);
   });
 

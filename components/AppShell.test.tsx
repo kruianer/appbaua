@@ -47,9 +47,23 @@ let serverWorkerEnabled: boolean;
  * (PATCH /api/repos/:id, PATCH /api/repos/:id/model, POST /api/repos/:id/appbaua)
  * zurückgeben. */
 let serverRepos: Repo[];
+/** req-040 AC8: welche Repos gerade eine ungesehene, fertige Chat-Antwort haben. */
+let chatUnreadRepoIds: string[];
 
 function jsonResponse(data: unknown) {
   return { ok: true, json: async () => data };
+}
+
+// req-041: ab 744px zeigt AppShell die Seitenleiste statt der unteren Leiste
+// (eigene Tests weiter unten). Diese Suite prüft weiterhin das iPhone-
+// Verhalten aus req-039/req-007, darum hier fest auf Telefonbreite stellen.
+function setWindowWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    writable: true,
+    configurable: true,
+    value: width,
+  });
+  window.dispatchEvent(new Event("resize"));
 }
 
 const systemMetrics = {
@@ -77,12 +91,19 @@ const dashboard = {
 };
 
 beforeEach(() => {
+  setWindowWidth(390);
+  window.localStorage.clear();
   entries = [logEntry()];
   systemCalls = 0;
   serverTaskTypes = defaultTaskTypes();
   serverWorkerEnabled = true;
   serverRepos = repos.map((r) => ({ ...r }));
+  chatUnreadRepoIds = [];
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+    // Mirrors GET /api/chat/unread (req-040 AC8).
+    if (url === "/api/chat/unread") {
+      return jsonResponse({ repoIds: chatUnreadRepoIds });
+    }
     // Mirrors PATCH /api/repos/:id (lib/repo-service#toggleRepo).
     const repoToggleMatch = /^\/api\/repos\/([^/]+)$/.exec(url);
     if (repoToggleMatch && init?.method === "PATCH") {
@@ -108,6 +129,25 @@ beforeEach(() => {
       const body = JSON.parse(String(init.body));
       serverRepos = serverRepos.map((r) =>
         r.id === id ? { ...r, model: body.model } : r,
+      );
+      return jsonResponse({ repos: serverRepos });
+    }
+    // Mirrors PATCH /api/repos/:id/weekly-budget (req-044).
+    const repoBudgetMatch = /^\/api\/repos\/([^/]+)\/weekly-budget$/.exec(url);
+    if (repoBudgetMatch && init?.method === "PATCH") {
+      const id = repoBudgetMatch[1];
+      const body = JSON.parse(String(init.body));
+      serverRepos = serverRepos.map((r) =>
+        r.id === id ? { ...r, weeklyBudget: body.weeklyBudget } : r,
+      );
+      return jsonResponse({ repos: serverRepos });
+    }
+    // Mirrors PATCH /api/repos/:id/self-assign (req-047).
+    const selfAssignMatch = /^\/api\/repos\/([^/]+)\/self-assign$/.exec(url);
+    if (selfAssignMatch && init?.method === "PATCH") {
+      const id = selfAssignMatch[1];
+      serverRepos = serverRepos.map((r) =>
+        r.id === id ? { ...r, selfAssign: !r.selfAssign } : r,
       );
       return jsonResponse({ repos: serverRepos });
     }
@@ -161,27 +201,372 @@ function renderShell() {
   );
 }
 
-describe("AppShell navigation (req-007)", () => {
-  // req-032 hat "Zustand" hinter "Aktivität" ergänzt: beide beantworten
-  // "läuft alles?", die erste über den Worker, die zweite über die
-  // überwachten Apps.
-  it("AC: the bottom navigation has six entries in order", async () => {
+// req-039: die Leiste aus req-007 (sechs gleich aussehende Plätze) ist
+// ersetzt durch fünf Plätze mit Chat in der Mitte und "Mehr" für die drei
+// ausgelagerten Menüpunkte.
+async function openMore(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Mehr" }));
+}
+
+async function gotoViaMore(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+) {
+  await openMore(user);
+  await user.click(screen.getByRole("menuitem", { name: label }));
+}
+
+describe("Untere Navigation — fünf Plätze (req-039)", () => {
+  it("AC: die untere Leiste hat genau fünf Plätze", async () => {
     renderShell();
     await screen.findByText("Leerlauf — nichts zu tun"); // dashboard settled
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(5);
+  });
+
+  it("AC: die Beschriftungen lauten von links nach rechts Aktivität, Verlauf, Chat, Repos, Mehr", async () => {
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
     const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
     const labels = within(nav)
       .getAllByRole("button")
       .map((b) => b.textContent);
+    expect(labels).toEqual(["Aktivität", "Verlauf", "Chat", "Repos", "Mehr"]);
+  });
+
+  it("AC: das Chat-Symbol ist von einem Kreis umrandet und größer als die anderen", async () => {
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const chatButton = screen.getByRole("button", { name: "Chat" });
+    const circle = chatButton.querySelector<HTMLElement>("div")!;
+    const circleStyle = circle.getAttribute("style") ?? "";
+    expect(circleStyle).toContain("border-radius: 999px");
+    expect(circleStyle).toMatch(/border:\s*2px solid/);
+
+    const chatSvg = circle.querySelector("svg")!;
+    const otherSvg = screen
+      .getByRole("button", { name: "Repos" })
+      .querySelector("svg")!;
+    expect(Number(chatSvg.getAttribute("width"))).toBeGreaterThan(
+      Number(otherSvg.getAttribute("width")),
+    );
+  });
+
+  it('AC: "Mehr" öffnet eine Liste mit den ausgelagerten Menüpunkten', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await openMore(user);
+
+    const menu = screen.getByRole("menu", { name: "Mehr" });
+    const items = within(menu)
+      .getAllByRole("menuitem")
+      .map((b) => b.textContent);
+    // req-046 fügt "Release-Infos" als vierten Eintrag hinzu.
+    expect(items).toEqual(["Zustand", "Release-Infos", "Tasks", "Einstellungen"]);
+  });
+
+  it('AC: ein Tipp auf "Zustand" in der Liste zeigt die Zustandsübersicht und schließt die Liste', async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await gotoViaMore(user, "Zustand");
+
+    expect(screen.getByRole("heading", { name: "Zustand" })).toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("AC: ein Tipp daneben schließt die Liste, ohne den Menüpunkt zu ändern", async () => {
+    const user = userEvent.setup();
+    const { container } = renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await openMore(user);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    // Außerhalb der Liste tippen — direkt auf den Überlay-Hintergrund.
+    fireEvent.click(container.querySelector("[data-more-backdrop]")!);
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Aktivität" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC: beim Neuöffnen ist der Menüpunkt Aktivität aktiv", async () => {
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    expect(
+      screen.getByRole("heading", { name: "Aktivität" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Aktivität" }).getAttribute("style"),
+    ).toContain("var(--color-accent)");
+  });
+
+  it("AC: Zustand erscheint nicht als sechster Platz in der Leiste", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await gotoViaMore(user, "Zustand");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(5);
+    expect(
+      within(nav).queryByRole("button", { name: "Zustand" }),
+    ).not.toBeInTheDocument();
+  });
+});
+
+// req-041: ab 744px Fensterbreite wandert die Navigation von der unteren
+// Leiste in eine Seitenleiste am linken Rand; am iPhone (< 744px) bleibt
+// req-039 unverändert.
+describe("Seitenleiste statt untere Leiste ab 744px (req-041)", () => {
+  it("AC: bei 1280px steht die Navigation am linken Rand", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(nav.previousElementSibling).toBeNull();
+  });
+
+  it("AC: bei 1280px gibt es unten KEINE Leiste", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    expect(screen.queryByRole("button", { name: "Mehr" })).not.toBeInTheDocument();
+    // Die untere Leiste hat fünf gleichartige Plätze; die Seitenleiste hat
+    // mehr (oben + Einstellungen unten) — ein verlässlicher Unterschied.
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button").length).toBeGreaterThan(5);
+  });
+
+  it("AC: bei 390px steht die Leiste wie bisher unten, keine Seitenleiste links", async () => {
+    setWindowWidth(390);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getAllByRole("button")).toHaveLength(5); // req-039
+    expect(screen.getByRole("button", { name: "Mehr" })).toBeInTheDocument();
+  });
+
+  it("AC: die Seitenleiste listet von oben nach unten Aktivität, Verlauf, Chat, Repos, Tasks, Zustand, Release-Infos, Einstellungen", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    const labels = within(nav)
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label"))
+      // Der Ein-/Ausklapp-Knopf gehört nicht zu den Menüpunkten (eigene AC).
+      .filter((l) => l !== "Seitenleiste einklappen" && l !== "Seitenleiste aufklappen");
+    // req-046 fügt "Release-Infos" als eigenen Platz hinzu.
     expect(labels).toEqual([
       "Aktivität",
-      "Zustand",
       "Verlauf",
+      "Chat",
       "Repos",
       "Tasks",
+      "Zustand",
+      "Release-Infos",
       "Einstellungen",
     ]);
   });
 
+  it('AC: es gibt KEINEN Eintrag "Mehr" in der Seitenleiste', async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    expect(screen.queryByRole("button", { name: "Mehr" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+});
+
+// req-041 AC6/AC7: die Seitenleiste lässt sich von Hand ein- und ausklappen,
+// unabhängig vom Anfangszustand (eigene ACs weiter unten).
+describe("Seitenleiste ein-/ausklappen (req-041)", () => {
+  it("AC6: ein Tipp auf den Einklapp-Knopf zeigt nur noch Symbole ohne Text", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "Aktivität",
+    );
+
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    );
+
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "",
+    );
+  });
+
+  it("AC7: ein Tipp auf den Aufklapp-Knopf zeigt wieder Symbol und Text", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    );
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "",
+    );
+
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste aufklappen" }),
+    );
+
+    expect(within(nav).getByRole("button", { name: "Aktivität" }).textContent).toBe(
+      "Aktivität",
+    );
+  });
+});
+
+// req-041 AC8-10: die Fensterbreite gibt nur den ANFANGSZUSTAND vor — ein von
+// Hand gesetzter Zustand übersteht einen Neustart (neues render() derselben
+// Seite, gleiches localStorage).
+describe("Seitenleiste — Anfangszustand und Persistenz (req-041)", () => {
+  it("AC8: bei 1280px ist die Seitenleiste beim ersten Erscheinen aufgeklappt", async () => {
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(
+      within(nav).getByRole("button", { name: "Aktivität" }).textContent,
+    ).toBe("Aktivität");
+    expect(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC9: bei 800px ist die Seitenleiste beim ersten Erscheinen eingeklappt", async () => {
+    setWindowWidth(800);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    expect(
+      within(nav).getByRole("button", { name: "Aktivität" }).textContent,
+    ).toBe("");
+    expect(
+      within(nav).getByRole("button", { name: "Seitenleiste aufklappen" }),
+    ).toBeInTheDocument();
+  });
+
+  it("AC10: eine von Hand eingeklappte Seitenleiste bleibt nach einem Neustart eingeklappt", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280); // würde ohne gespeicherten Zustand aufgeklappt starten
+    const { unmount } = renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(
+      within(nav).getByRole("button", { name: "Seitenleiste einklappen" }),
+    );
+    expect(
+      within(nav).getByRole("button", { name: "Aktivität" }).textContent,
+    ).toBe("");
+
+    unmount(); // "App schließen"
+    renderShell(); // "neu öffnen"
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const navAfterRestart = screen.getByRole("navigation", {
+      name: "Hauptnavigation",
+    });
+    expect(
+      within(navAfterRestart).getByRole("button", { name: "Aktivität" })
+        .textContent,
+    ).toBe("");
+  });
+});
+
+// req-041: AppShell reicht die Fensterbreite an Chat weiter (split-Prop) —
+// Chat.test.tsx prüft das Verhalten selbst im Detail (AC11-13).
+describe("Chat zweispaltig über AppShell (req-041)", () => {
+  it("AC: bei 1280px zeigt der Chat-Tab die Repo-Liste statt der Dropdown-Auswahl", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const nav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(within(nav).getByRole("button", { name: "Chat" }));
+
+    expect(screen.queryByRole("combobox", { name: "Repo" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "beta" })).toBeInTheDocument();
+  });
+});
+
+// req-041 AC14: die Fensterbreite entscheidet laufend, nicht nur beim ersten
+// Erscheinen — ein Verkleinern während die App schon offen ist, schaltet
+// zurück auf untere Leiste und einspaltigen Chat.
+describe("Reagiert auf Fenster-Verkleinern (req-041 AC14)", () => {
+  it("AC14: von 1280px auf 390px gezogen steht die Navigation wieder unten, der Chat einspaltig", async () => {
+    const user = userEvent.setup();
+    setWindowWidth(1280);
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    const sidebar = screen.getByRole("navigation", { name: "Hauptnavigation" });
+    await user.click(within(sidebar).getByRole("button", { name: "Chat" }));
+    expect(screen.queryByRole("combobox", { name: "Repo" })).not.toBeInTheDocument();
+
+    setWindowWidth(390);
+
+    await waitFor(() => {
+      const bottomNav = screen.getByRole("navigation", { name: "Hauptnavigation" });
+      expect(within(bottomNav).getAllByRole("button")).toHaveLength(5); // req-039
+    });
+    expect(screen.getByRole("combobox", { name: "Repo" })).toBeInTheDocument();
+  });
+});
+
+describe("Hinweispunkt auf dem Chat-Knopf (req-040 AC8/AC9)", () => {
+  it("AC8: trägt einen Hinweispunkt, wenn ein Repo eine ungesehene Antwort hat", async () => {
+    chatUnreadRepoIds = ["r2"];
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Chat" }).querySelector("[data-chat-unread-dot]"),
+      ).toBeInTheDocument(),
+    );
+  });
+
+  it("AC9: ohne ungesehene Antworten ist kein Hinweispunkt zu sehen", async () => {
+    chatUnreadRepoIds = [];
+    renderShell();
+    await screen.findByText("Leerlauf — nichts zu tun");
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Chat" }).querySelector("[data-chat-unread-dot]"),
+      ).not.toBeInTheDocument(),
+    );
+  });
+});
+
+describe("AppShell navigation (req-007 → req-039)", () => {
   it("AC: clearing the log empties the Verlauf tab, repos and tasks survive", async () => {
     const user = userEvent.setup();
     renderShell();
@@ -190,8 +575,8 @@ describe("AppShell navigation (req-007)", () => {
     await user.click(screen.getByRole("button", { name: "Verlauf" }));
     expect(await screen.findByText("Bugs × appbaua")).toBeInTheDocument();
 
-    // Delete it from the Einstellungen tab.
-    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+    // Delete it from the Einstellungen tab (reached via "Mehr").
+    await gotoViaMore(user, "Einstellungen");
     expect(
       await screen.findByText("Aktuell 1 Eintrag im Verlauf"),
     ).toBeInTheDocument();
@@ -213,7 +598,7 @@ describe("AppShell navigation (req-007)", () => {
     expect(
       screen.getByText("github.com/kruianer/appbaua"),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
     expect(screen.getByText("Requirements")).toBeInTheDocument();
   });
 });
@@ -223,7 +608,7 @@ describe("Einstellungen — System-Kacheln (req-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+    await gotoViaMore(user, "Einstellungen");
 
     expect(await screen.findByText("System")).toBeInTheDocument();
     expect(screen.getByText("Freier Speicherplatz")).toBeInTheDocument();
@@ -238,7 +623,7 @@ describe("Einstellungen — System-Kacheln (req-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+    await gotoViaMore(user, "Einstellungen");
     expect(await screen.findByText("37 %")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Aktivität" }));
@@ -311,7 +696,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
     const toggle = await screen.findByRole("switch", {
       name: "Code-Review aktiv/inaktiv",
     });
@@ -326,7 +711,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
 
     // Weg vom Tab (TaskControl hängt aus) und zurück (TaskControl mountet neu).
     await user.click(screen.getByRole("button", { name: "Aktivität" }));
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
 
     expect(
       await screen.findByRole("switch", { name: "Code-Review aktiv/inaktiv" }),
@@ -337,7 +722,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
     const user = userEvent.setup();
     renderShell();
 
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
     const worker = await screen.findByRole("switch", {
       name: "Worker an/aus",
     });
@@ -351,7 +736,7 @@ describe("Task-Steuerung — Zustand übersteht Tab-Wechsel (bug-009)", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Repos" }));
-    await user.click(screen.getByRole("button", { name: "Tasks" }));
+    await gotoViaMore(user, "Tasks");
 
     expect(
       await screen.findByRole("switch", { name: "Worker an/aus" }),
@@ -485,6 +870,76 @@ describe("Repo-Zeile — aufklappbar (req-030)", () => {
     await waitFor(() => expect(watch).toHaveAttribute("aria-checked", "true"));
     // Der andere Schalter hat sich dabei nicht bewegt.
     expect(active).toHaveAttribute("aria-checked", "true");
+  });
+
+  // req-047 AC2/AC3: der Schalter "Selbstauftrag" ist aus, bis er für genau
+  // dieses Repo bewusst eingeschaltet wird — ein anderes Repo bleibt unberührt.
+  it("req-047: der Selbstauftrag-Schalter ist aus und wirkt nur auf das eigene Repo", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+    await user.click(nameToggle(document.body, "r1"));
+
+    const selfAssignR1 = screen.getByRole("switch", {
+      name: "appbaua Selbstauftrag",
+    });
+    expect(selfAssignR1).toHaveAttribute("aria-checked", "false"); // Vorgabe: aus
+
+    await user.click(selfAssignR1);
+    await waitFor(() =>
+      expect(selfAssignR1).toHaveAttribute("aria-checked", "true"),
+    );
+
+    // Das andere Repo sieht davon nichts (öffnen schließt r1 automatisch).
+    await user.click(nameToggle(document.body, "r2"));
+    const selfAssignR2 = screen.getByRole("switch", {
+      name: "beta Selbstauftrag",
+    });
+    expect(selfAssignR2).toHaveAttribute("aria-checked", "false");
+  });
+
+  // req-044 AC1: im aufgeklappten Bereich steht ein Eingabefeld für das
+  // Wochenbudget.
+  it("req-044: im aufgeklappten Bereich kann ich ein Wochenbudget eintragen", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+    await user.click(nameToggle(document.body, "r1"));
+
+    const budgetInput = screen.getByLabelText("appbaua: Wochenbudget");
+    expect(budgetInput).toHaveValue(null); // Vorgabe: kein Budget gesetzt
+
+    await user.type(budgetInput, "3");
+    await user.tab(); // onBlur committet
+
+    await waitFor(() => expect(budgetInput).toHaveValue(3));
+    expect(serverRepos.find((r) => r.id === "r1")?.weeklyBudget).toBe(3);
+  });
+
+  // req-044 AC10: wie viel vom Wochenbudget schon verbraucht ist.
+  it("req-044: zeigt den Verbrauch des Wochenbudgets, wenn eines gesetzt ist", async () => {
+    const budgeted: Repo[] = [{ ...repos[0], weeklyBudget: 3 }, repos[1]];
+    const user = userEvent.setup();
+    render(
+      <AppShell
+        initialRepos={budgeted}
+        initialTaskTypes={defaultTaskTypes()}
+        initialWorkerEnabled
+        initialWeeklyUsage={{ r1: 2 }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Repos" }));
+    await screen.findByText("github.com/kruianer/appbaua");
+
+    await user.click(nameToggle(document.body, "r1"));
+
+    expect(screen.getByText("2/3 diese Woche")).toBeInTheDocument();
+  });
+
+  it("req-044: ohne Budget wird kein Verbrauch angezeigt", async () => {
+    const user = userEvent.setup();
+    await openRepos(user);
+    await user.click(nameToggle(document.body, "r1"));
+
+    expect(screen.queryByText(/diese Woche/)).not.toBeInTheDocument();
   });
 
   it("AC: nach ausgelöster Umstellung bleibt der Bereich mit der Ergebnismeldung offen", async () => {

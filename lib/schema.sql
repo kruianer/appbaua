@@ -22,6 +22,18 @@ ALTER TABLE repos ADD COLUMN IF NOT EXISTS model TEXT;
 -- FALSE: watching reaches into a live system and is switched on deliberately.
 ALTER TABLE repos ADD COLUMN IF NOT EXISTS monitored BOOLEAN NOT NULL DEFAULT FALSE;
 
+-- Added with req-044: how many Bugs+Requirements the worker may work off for
+-- this repo per week. NULL means no limit — existing repos keep running
+-- unbounded, as before.
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS weekly_budget INTEGER;
+
+-- Added with req-047: whether the Selbstauftrag task may write new
+-- requirements into this repo. The switch belongs to the repo (like model
+-- and weekly_budget above), not to task_types, which has no repo column and
+-- would otherwise turn it on everywhere at once. Existing rows default to
+-- FALSE: a repo never self-assigns until someone switches it on.
+ALTER TABLE repos ADD COLUMN IF NOT EXISTS self_assign BOOLEAN NOT NULL DEFAULT FALSE;
+
 -- Task types (req-002). Predefined types, seeded on first use; the user only
 -- edits priority (position), active and the per-weekday schedule (JSONB:
 -- { mon: {enabled, start, end}, ... }). New types are added via code/seed.
@@ -213,3 +225,43 @@ CREATE TABLE IF NOT EXISTS auth_backup_codes (
 );
 
 CREATE INDEX IF NOT EXISTS auth_backup_codes_user_idx ON auth_backup_codes (user_id);
+
+-- Chat-UI-Zustand (req-040): welches Repo zuletzt offen war, damit der
+-- Chat-Tab es beim nächsten Öffnen vorauswählt statt immer auf das erste
+-- Repo der Liste zurückzufallen. Einzelne Zeile, Muster wie worker_state.
+CREATE TABLE IF NOT EXISTS chat_ui_state (
+  id             TEXT PRIMARY KEY,
+  active_repo_id TEXT
+);
+
+-- Chat-Gespräche (req-040). Ein Verlauf-Eintrag je Nachricht, zeitlich
+-- sortiert über die id. role: 'user' | 'assistant' | 'system' (Systemtexte
+-- wie eine Rate-Limit-Meldung).
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id         BIGSERIAL PRIMARY KEY,
+  repo_id    TEXT NOT NULL,
+  role       TEXT NOT NULL,
+  content    TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS chat_messages_repo_idx ON chat_messages (repo_id, id);
+
+-- Eine Zeile je Repo mit laufendem/gewesenem Gespräch: die Claude-eigene
+-- Sitzungskennung (für --resume, damit der nächste Turn denselben Kontext
+-- fortsetzt) und wann zuletzt geschrieben wurde — das steuert sowohl die
+-- Fünf-Sitzungen-Grenze (AC10) als auch das Acht-Stunden-Leerlaufende (AC12).
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  repo_id           TEXT PRIMARY KEY,
+  claude_session_id TEXT NOT NULL,
+  last_active_at    TIMESTAMPTZ NOT NULL
+);
+
+-- Hinweispunkt auf dem Chat-Knopf (AC8/AC9): wahr, sobald ein Turn fertig
+-- wurde, während sein Repo nicht das offene war; verschwindet, wenn es
+-- geöffnet wird.
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS unread BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- req-049: die Schritte des Zugs, der zu dieser Nachricht geführt hat (NULL
+-- bei einer Nutzer-Nachricht und bei jeder Zeile von vor diesem Requirement).
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS steps TEXT;

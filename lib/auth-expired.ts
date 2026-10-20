@@ -8,6 +8,8 @@
 //
 // Kept pure and text-only so it is trivially testable and has no I/O.
 
+import { appOrigin } from "./webauthn-config";
+
 /**
  * How long to pause once auth has expired (bug-019). A rate limit resets by
  * itself; an expired login does not — it needs a human to run `claude login`
@@ -44,4 +46,44 @@ const AUTH_EXPIRED_PATTERNS = [
 export function isAuthExpired(text: string | null | undefined): boolean {
   if (!text) return false;
   return AUTH_EXPIRED_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Welche der beiden Umgebungen (delivery/devops.md) gerade läuft — dieselbe
+ * Unterscheidung, die APP_ORIGIN schon für den WebAuthn-rpId trifft
+ * (webauthn-config.ts). Ohne gesetzten Wert (lokale Entwicklung) gilt "dev".
+ */
+function currentEnvironment(
+  env: Record<string, string | undefined> = process.env,
+): "dev" | "prod" {
+  return appOrigin(env).includes("app.appbaua.com") ? "prod" : "dev";
+}
+
+/**
+ * Der Worker-Container, in dem `claude login` für die gerade laufende
+ * Umgebung wirkt (bug-031) — Compose benennt ihn `appbaua-<env>-worker-1`.
+ */
+export function authExpiredWorkerContainer(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  return `appbaua-${currentEnvironment(env)}-worker-1`;
+}
+
+/**
+ * Was der Chat zeigt, wenn die Anmeldung abgelaufen ist (bug-031). Anders als
+ * AUTH_EXPIRED_MESSAGE (für den Worker-Lauf) nennt diese Meldung den
+ * Container der GERADE laufenden Umgebung: der Chat läuft im App-Container,
+ * der das Volume nur lesend hat (bug-028) — anmelden muss man im
+ * zugehörigen Worker-Container, und je Umgebung ist das ein anderer.
+ * Der Befehl steht in einem Markdown-Codeblock, den die Chat-Oberfläche als
+ * eigenes Kopierfeld zeigt (components/CopyCommand.tsx).
+ */
+export function authExpiredChatMessage(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const container = authExpiredWorkerContainer(env);
+  return (
+    "Anmeldung abgelaufen. Im Worker-Container dieser Umgebung neu anmelden:\n\n" +
+    `\`\`\`\ndocker exec -it ${container} claude login\n\`\`\``
+  );
 }

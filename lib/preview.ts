@@ -1,15 +1,20 @@
 import type { Repo } from "./repos";
 import type { TaskType } from "./task-types";
 import { planPreview, type PreviewEntry } from "./scheduling";
-import { sourceFor, readyDir, oldestMd } from "./task-source";
-import { RECURRING_MD_LABEL } from "./run-log";
+import { sourceFor, readyDir, sortedMds } from "./task-source";
 import { prepareRepoOnConvention, listReady } from "./workspace";
 
 // Builds the "Nächste Aktivitäten" look-ahead (req-022): not just which
-// repo × task type is next, but the ACTUAL file waiting for it — so the
+// repo × task type is next, but the ACTUAL files waiting for it — so the
 // preview shows what really is about to happen, not a category guess. That
 // means cloning each active repo once and reading its ready/ folder, the
 // same thing execute-step does right before a step actually runs.
+//
+// Only bugs and requirements show here (bug-025): they are what the operator
+// actually wants a look-ahead on. Recurring task types (Security, Doku,
+// Ideen, Code-Review) have no file backlog to preview and used to drown out
+// the repos' real work, so they are filtered out before planPreview even
+// sees them — they stay visible in the Verlauf, just not here.
 //
 // Deliberately NOT run on every page load: cloning every active repo on a
 // browser poll would be expensive and pointless if nothing changed. Instead
@@ -17,11 +22,14 @@ import { prepareRepoOnConvention, listReady } from "./workspace";
 // check (req-029's rate-limit pause aside, see worker-loop) — and the result
 // is read like any other status field.
 
-/** One row of the preview, with the concrete filename resolved (req-022). */
+/**
+ * One row of the preview, one per waiting file (req-022, bug-025): a repo ×
+ * task type with three files waiting is three rows, not one, so the list
+ * shows the real backlog instead of just the next file in line.
+ */
 export type PreviewRow = {
   repo: string;
   taskType: string;
-  /** The waiting file's name, or the recurring placeholder — never null. */
   mdName: string;
   due:
     | { kind: "queue"; position: number }
@@ -39,20 +47,20 @@ const defaultDeps: PreviewDeps = {
 };
 
 /**
- * Resolve one entry's filename: the oldest waiting .md for a file-driven type,
- * the recurring placeholder for everything else. Null means "nothing waiting"
- * — a file-driven type with an empty ready/ has no row to show, exactly like
- * execute-step silently skips it.
+ * All of one entry's waiting .md files, oldest first — empty when the
+ * ready/ folder has nothing, exactly like execute-step silently skips it.
+ * Only called for file-driven entries; `buildPreview` filters out every
+ * other kind before this runs.
  */
-async function resolveMd(
+async function waitingMds(
   entry: PreviewEntry,
   dir: string,
   deps: PreviewDeps,
-): Promise<string | null> {
+): Promise<string[]> {
   const src = sourceFor(entry.taskType.id);
-  if (src.kind !== "file" || !src.base) return RECURRING_MD_LABEL;
+  if (src.kind !== "file" || !src.base) return [];
   const files = await deps.listReady(dir, readyDir(src.base));
-  return oldestMd(files);
+  return sortedMds(files);
 }
 
 /**
@@ -70,7 +78,8 @@ export async function buildPreview(
   deps: Partial<PreviewDeps> = {},
 ): Promise<PreviewRow[]> {
   const d: PreviewDeps = { ...defaultDeps, ...deps };
-  const entries = planPreview(repos, taskTypes, now);
+  const fileDrivenTypes = taskTypes.filter((t) => sourceFor(t.id).kind === "file");
+  const entries = planPreview(repos, fileDrivenTypes, now);
 
   const dirByRepoId = new Map<string, string | null>();
   const rows: PreviewRow[] = [];
@@ -86,18 +95,14 @@ export async function buildPreview(
     const dir = dirByRepoId.get(entry.repo.id);
     if (!dir) continue;
 
-    const mdName = await resolveMd(entry, dir, d);
-    if (!mdName) continue; // file-driven with nothing waiting: no row
-
-    rows.push({
-      repo: entry.repo.name,
-      taskType: entry.taskType.label,
-      mdName,
-      due:
-        entry.due.kind === "queue"
-          ? entry.due
-          : { kind: "at", at: entry.due.at.toISOString() },
-    });
+    const mdNames = await waitingMds(entry, dir, d);
+    const due: PreviewRow["due"] =
+      entry.due.kind === "queue"
+        ? entry.due
+        : { kind: "at", at: entry.due.at.toISOString() };
+    for (const mdName of mdNames) {
+      rows.push({ repo: entry.repo.name, taskType: entry.taskType.label, mdName, due });
+    }
   }
   return rows;
 }

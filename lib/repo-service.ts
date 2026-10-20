@@ -13,6 +13,8 @@ import {
   type ConvertSummary,
   queueAppbauaStandard,
 } from "./appbaua-standard";
+import { BUDGET_TASK_LABELS, startOfWeek } from "./budget";
+import { getRunLogStore } from "./run-log-store";
 
 // Application service: the operations req-001 exposes. Routes stay thin and
 // call these; tests exercise them directly. Reachability is injected so tests
@@ -59,6 +61,8 @@ export async function addRepo(
     model: DEFAULT_REPO_MODEL,
     // req-032: watching an app reaches into a live system, so it starts off.
     monitored: false,
+    // req-047: a repo never self-assigns until someone switches it on for it.
+    selfAssign: false,
   };
   const next = [...repos, repo]; // append = lowest priority
   await getStore().replace(next);
@@ -86,6 +90,19 @@ export async function toggleRepoMonitored(id: string): Promise<Repo[]> {
   return getStore().replace(next);
 }
 
+/**
+ * Flip the "Selbstauftrag" switch of one repo (req-047). Its own operation,
+ * same shape as toggleRepoMonitored: the switch belongs to this ONE repo, so
+ * turning it on here must never affect any other repo's setting.
+ */
+export async function toggleRepoSelfAssign(id: string): Promise<Repo[]> {
+  const repos = await getStore().list();
+  const next = repos.map((r) =>
+    r.id === id ? { ...r, selfAssign: !r.selfAssign } : r,
+  );
+  return getStore().replace(next);
+}
+
 /** Set the model this repo's Claude Code calls use (req-028). */
 export async function setRepoModel(
   id: string,
@@ -94,6 +111,38 @@ export async function setRepoModel(
   const repos = await getStore().list();
   const next = repos.map((r) => (r.id === id ? { ...r, model } : r));
   return getStore().replace(next);
+}
+
+/**
+ * Set how many Bugs+Requirements the worker may work off for this repo per
+ * week (req-044). `null` removes the limit.
+ */
+export async function setRepoWeeklyBudget(
+  id: string,
+  weeklyBudget: number | null,
+): Promise<Repo[]> {
+  const repos = await getStore().list();
+  const next = repos.map((r) => (r.id === id ? { ...r, weeklyBudget } : r));
+  return getStore().replace(next);
+}
+
+/**
+ * How many Bugs+Requirements each budgeted repo has worked off since the
+ * start of this week (req-044 AC10) — keyed by repo id, only for repos that
+ * have a weekly budget set (the number has no meaning without one).
+ */
+export async function weeklyUsageByRepo(
+  repos: Repo[],
+  now: Date,
+): Promise<Record<string, number>> {
+  const log = getRunLogStore();
+  const sinceIso = startOfWeek(now).toISOString();
+  const usage: Record<string, number> = {};
+  for (const r of repos) {
+    if (r.weeklyBudget == null) continue;
+    usage[r.id] = await log.countSuccessSince(r.name, BUDGET_TASK_LABELS, sinceIso);
+  }
+  return usage;
 }
 
 export async function removeRepo(id: string): Promise<Repo[]> {

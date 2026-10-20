@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { addRepo, listRepos } from "@/lib/repo-service";
+import { addRepo, listRepos, weeklyUsageByRepo } from "@/lib/repo-service";
 
 export async function GET() {
   const repos = await listRepos();
-  return NextResponse.json({ repos });
+  const weeklyUsage = await weeklyUsageByRepo(repos, new Date());
+  return NextResponse.json({ repos, weeklyUsage });
 }
 
 export async function POST(request: Request) {

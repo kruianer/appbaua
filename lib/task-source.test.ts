@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   IDEA_DIR,
+  SELF_ASSIGN_DIR,
+  isQueueDriven,
   newMdFiles,
   oldestMd,
   ranTodayForRepo,
@@ -46,16 +48,53 @@ describe("sourceFor", () => {
   it("maps security to its own kind, without a work-item folder", () => {
     expect(sourceFor("security")).toEqual({ base: null, kind: "security" });
   });
+
+  // req-043: Feedback has its own queue, separate from Bug/Requirement, because
+  // a feedback does not describe work to carry out — Claude decides what (if
+  // anything) it becomes.
+  it("maps feedback to its own folder and kind", () => {
+    expect(sourceFor("feedback")).toEqual({
+      base: "delivery/feedback",
+      kind: "feedback",
+    });
+  });
+
+  // req-047: the Selbstauftrag task writes straight into the SAME ready/
+  // folder a human-written Requirement lands in — no queue of its own.
+  it("maps selbstauftrag to the requirements' ready/ folder", () => {
+    expect(sourceFor("selbstauftrag")).toEqual({
+      base: SELF_ASSIGN_DIR,
+      kind: "self-assign",
+    });
+    expect(SELF_ASSIGN_DIR).toBe("delivery/requirements/ready");
+  });
 });
 
 describe("runsOncePerDay", () => {
-  it("is true for recurring, idea, security and doc types, false for file-driven ones", () => {
+  it("is true for recurring, idea, security and doc types, false for queue-driven ones", () => {
     expect(runsOncePerDay(sourceFor("ideen"))).toBe(true);
     expect(runsOncePerDay(sourceFor("code-review"))).toBe(true);
     expect(runsOncePerDay(sourceFor("security"))).toBe(true);
     expect(runsOncePerDay(sourceFor("doku"))).toBe(true);
     expect(runsOncePerDay(sourceFor("bug"))).toBe(false);
     expect(runsOncePerDay(sourceFor("requirement"))).toBe(false);
+    // req-043: Feedback has a ready/ queue too, so a day with files waiting
+    // must not be skipped the way a once-per-day type would be.
+    expect(runsOncePerDay(sourceFor("feedback"))).toBe(false);
+    // req-047: once per repo and calendar day, same as the idea task.
+    expect(runsOncePerDay(sourceFor("selbstauftrag"))).toBe(true);
+  });
+});
+
+describe("isQueueDriven", () => {
+  it("is true for file and feedback, false for everything else", () => {
+    expect(isQueueDriven("file")).toBe(true);
+    expect(isQueueDriven("feedback")).toBe(true);
+    expect(isQueueDriven("recurring")).toBe(false);
+    expect(isQueueDriven("idea")).toBe(false);
+    expect(isQueueDriven("security")).toBe(false);
+    expect(isQueueDriven("doc")).toBe(false);
+    expect(isQueueDriven("self-assign")).toBe(false);
   });
 });
 

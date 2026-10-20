@@ -17,10 +17,12 @@ describe("defaultTaskTypes", () => {
     expect(defaultTaskTypes().map((t) => t.label)).toEqual([
       "Bugs",
       "Requirements",
+      "Feedback",
       "Code-Review",
       "Security",
       "Doku",
       "Ideen",
+      "Selbstauftrag",
     ]);
   });
   it("all start active, always-on, with an empty schedule", () => {
@@ -30,8 +32,8 @@ describe("defaultTaskTypes", () => {
       expect(Object.values(t.schedule).every((d) => !d.enabled)).toBe(true);
     }
   });
-  it("has exactly six predefined types", () => {
-    expect(DEFAULT_TASK_TYPES).toHaveLength(6);
+  it("has exactly eight predefined types", () => {
+    expect(DEFAULT_TASK_TYPES).toHaveLength(8);
   });
 });
 
@@ -51,10 +53,12 @@ describe("withMissingDefaults", () => {
     expect(ids).toEqual([
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
       "ideen",
+      "selbstauftrag",
     ]);
   });
 
@@ -72,9 +76,11 @@ describe("withMissingDefaults", () => {
       "ideen",
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
+      "selbstauftrag",
     ]);
     expect(next.find((t) => t.id === "doku")!.active).toBe(false);
     expect(next.find((t) => t.id === "doku")!.always).toBe(false);
@@ -86,10 +92,12 @@ describe("withMissingDefaults", () => {
     expect(withMissingDefaults(only).map((t) => t.id)).toEqual([
       "bug",
       "requirement",
+      "feedback",
       "code-review",
       "security",
       "doku",
       "ideen",
+      "selbstauftrag",
     ]);
   });
 

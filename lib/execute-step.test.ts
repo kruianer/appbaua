@@ -34,13 +34,18 @@ import {
   networkAbortKey,
 } from "./network-abort";
 import type { NetworkAbortCounts } from "./network-abort-store";
+import { NO_FEEDBACK_ACTION_MESSAGE, OOM_KILL_MESSAGE } from "./claude-runner";
+import { RELEASE_INFO_MARKER } from "./release-info";
 
 const repo: Repo = { id: "r1", name: "appbaua", url: "github.com/kruianer/appbaua", active: true, model: "sonnet", monitored: false };
 const bug = defaultTaskTypes().find((t) => t.id === "bug")!;
+const requirement = defaultTaskTypes().find((t) => t.id === "requirement")!;
 const review = defaultTaskTypes().find((t) => t.id === "code-review")!;
 const ideen = defaultTaskTypes().find((t) => t.id === "ideen")!;
 const security = defaultTaskTypes().find((t) => t.id === "security")!;
 const doku = defaultTaskTypes().find((t) => t.id === "doku")!;
+const feedback = defaultTaskTypes().find((t) => t.id === "feedback")!;
+const selbstauftrag = defaultTaskTypes().find((t) => t.id === "selbstauftrag")!;
 const now = new Date(2026, 6, 24, 15, 0, 0);
 
 /**
@@ -331,6 +336,35 @@ describe("executeStep (req-006)", () => {
     expect(await counts.get()).toEqual({
       [networkAbortKey("appbaua", "bug-001.md")]: 1,
     });
+  });
+
+  it("bug-026: an OOM-killed run is a normal (parked) failure, NOT a network-abort", async () => {
+    const moveMd = vi.fn(async () => {});
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      deps({
+        listReady: folders({ ready: ["bug-001.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: OOM_KILL_MESSAGE,
+          report: "",
+        })),
+        moveMd,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    if (d.kind !== "error") throw new Error("expected error");
+    // Parked to failed/, like any other real failure — unlike a network abort,
+    // a memory-exhausted run is not something a short retry would fix.
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/bugs/ready/bug-001.md",
+      "delivery/bugs/failed/bug-001.md",
+    );
+    expect(d.message).toContain(OOM_KILL_MESSAGE);
+    expect(d.message).not.toContain(NETWORK_ABORT_MESSAGE);
   });
 
   it("req-038: a red test suite still fails normally — the new handling is network-abort-only", async () => {
@@ -809,6 +843,195 @@ describe("executeStep — Bericht ablegen (req-010)", () => {
     expect(d.kind).toBe("success");
     if (d.kind !== "success") return;
     expect(d.message).not.toContain("Bericht:");
+  });
+});
+
+// req-046: a finished Requirement/Bug tells the operator what changed for
+// them, in a Release-Info filed in the target repo — written in THIS run,
+// from Claude's own final answer, never reconstructed from the Verlauf.
+describe("executeStep — Release-Info je Paket (req-046)", () => {
+  const RELEASE_TEXT =
+    "Du kannst jetzt je Repo ein Wochenbudget setzen, unter Repos.";
+
+  function fileDeps(
+    md: string,
+    report: string,
+    over: Partial<ExecuteDeps> = {},
+  ): Partial<ExecuteDeps> {
+    return deps({
+      listReady: folders({ ready: [md] }),
+      runClaude: vi.fn(async () => ({
+        ok: true,
+        summary: "done",
+        report,
+      })),
+      ...over,
+    });
+  }
+
+  const reportWithMarker = `Alles abgehakt und committet.\n\n${RELEASE_INFO_MARKER}\n${RELEASE_TEXT}`;
+
+  it("AC1: a finished Requirement gets a Release-Info in the target repo", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      requirement,
+      [],
+      fileDeps("req-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    expect(d.kind).toBe("success");
+    const call = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    );
+    expect(call).toBeTruthy();
+    const [dir, rel, content] = call!;
+    expect(dir).toBe("/work/appbaua");
+    expect(rel).toBe("delivery/release-info/2026-07-24-req-001.md");
+    expect(content).toContain(RELEASE_TEXT);
+  });
+
+  it("AC2: a finished Bug gets a Release-Info in the target repo", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    expect(d.kind).toBe("success");
+    const call = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    );
+    expect(call).toBeTruthy();
+    expect(call![1]).toBe("delivery/release-info/2026-07-24-bug-001.md");
+  });
+
+  it("names repo and package so an entry can be told apart (AC8 groundwork)", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    const content = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    )![2];
+    expect(content).toContain("repo: appbaua");
+    expect(content).toContain("package: bug-001");
+  });
+
+  it("carries only the text AFTER the marker — nothing from before it", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, { writeRepoFile }),
+    );
+    const content = writeRepoFile.mock.calls.find(([, rel]) =>
+      rel.startsWith("delivery/release-info/"),
+    )![2];
+    expect(content).not.toContain("Alles abgehakt");
+  });
+
+  it("no marker in the final answer -> no Release-Info is filed", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", "Fertig, alles grün.", { writeRepoFile }),
+    );
+    expect(d.kind).toBe("success");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  // AC9: ein abgebrochenes oder fehlgeschlagenes Paket bekommt KEINE
+  // Release-Info.
+  it("AC9: a failed Claude run files no Release-Info", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", "", {
+        writeRepoFile,
+        runClaude: vi.fn(async () => ({
+          ok: false,
+          summary: "Timeout",
+          report: "",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("AC9: a red test gate (parked to failed/) files no Release-Info", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, {
+        writeRepoFile,
+        runTestGate: vi.fn(async () => red("npm test: 1 failing")),
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("recurring/idea/security/doc/feedback tasks never file a Release-Info", async () => {
+    const writeRepoFile = writerFake();
+    const d = await executeStep(
+      repo,
+      review,
+      [],
+      deps({
+        writeRepoFile,
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "done",
+          report: reportWithMarker,
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(
+      writeRepoFile.mock.calls.some(([, rel]) =>
+        rel.startsWith("delivery/release-info/"),
+      ),
+    ).toBe(false);
+  });
+
+  it("a failing write never turns a finished package into an error", async () => {
+    const d = await executeStep(
+      repo,
+      bug,
+      [],
+      fileDeps("bug-001.md", reportWithMarker, {
+        writeRepoFile: vi.fn(async (_d: string, rel: string) => {
+          if (rel.startsWith("delivery/release-info/")) {
+            throw new Error("Platte voll");
+          }
+        }),
+      }),
+    );
+    expect(d.kind).toBe("success");
   });
 });
 
@@ -1326,6 +1549,179 @@ describe("executeStep — Ideen-Task (req-011)", () => {
   });
 });
 
+// req-047: the Selbstauftrag task. Once per repo and calendar day, Claude
+// proposes exactly one new Requirement straight into
+// delivery/requirements/ready/ — same mechanics as the Ideen task (req-011):
+// whether it happened is read off the folder, not off Claude's answer.
+describe("executeStep — Selbstauftrag-Task (req-047)", () => {
+  const SELF_ASSIGN_READY = "delivery/requirements/ready";
+
+  /**
+   * Fake for the ready/ folder: the listing before the Claude run and the
+   * one after it, same trick as the Ideen task's fake.
+   */
+  function readyFolder(before: string[], after: string[]) {
+    let calls = 0;
+    return vi.fn(async (_dir: string, rel: string) => {
+      if (rel !== SELF_ASSIGN_READY) return [];
+      calls += 1;
+      return calls === 1 ? before : after;
+    });
+  }
+
+  /** Claude run that writes one new requirement file into the working copy. */
+  function proposes(before: string[], name: string) {
+    return readyFolder(before, [...before, name]);
+  }
+
+  it("AC: a new requirement file is created and pushed on dev", async () => {
+    const commitAndPush = vi.fn(async () => ({
+      pushed: true,
+      detail: "auf dev gepusht",
+    }));
+    const d = await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: proposes([], "req-050-dunkelmodus.md"),
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain("req-050-dunkelmodus.md");
+    expect(d.message).toContain("auf dev gepusht");
+    expect(commitAndPush).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "worker: Selbstauftrag req-050-dunkelmodus.md",
+      "tok",
+      ON(),
+    );
+  });
+
+  it("AC: a second run on the same calendar day is skipped", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 5).toISOString(),
+        repo: "appbaua",
+        taskType: "Selbstauftrag",
+        status: "success",
+        message: "Selbstauftrag: req-050-dunkelmodus.md — auf dev gepusht",
+      },
+    ];
+    const prepareRepo = vi.fn(async () => PREPARED);
+    const d = await executeStep(repo, selbstauftrag, ranToday, deps({ prepareRepo }));
+    expect(d.kind).toBe("skip");
+    expect(prepareRepo).not.toHaveBeenCalled(); // skipped before cloning
+  });
+
+  it("AC: no new requirement -> nothing is committed and the log says so", async () => {
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "x" }));
+    const discardChanges = vi.fn(async (_dir: string) => {});
+    const d = await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: readyFolder(["req-049-bestand.md"], ["req-049-bestand.md"]),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "kein sinnvoller Selbstauftrag gefunden",
+          report: "",
+        })),
+        commitAndPush,
+        discardChanges,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toBe("kein sinnvoller Selbstauftrag gefunden");
+    expect(commitAndPush).not.toHaveBeenCalled();
+    expect(discardChanges).toHaveBeenCalledWith("/work/appbaua"); // nothing half-done reaches dev
+  });
+
+  it("an empty-handed run still uses up the day", async () => {
+    const empty = await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({ listReady: readyFolder([], []) }),
+    );
+    expect(empty.kind).toBe("success");
+    if (empty.kind !== "success") return;
+    const log: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: now.toISOString(),
+        endedAt: now.toISOString(),
+        repo: "appbaua",
+        taskType: "Selbstauftrag",
+        status: "success",
+        message: empty.message,
+      },
+    ];
+    expect((await executeStep(repo, selbstauftrag, log, deps())).kind).toBe("skip");
+  });
+
+  it("AC: the vision, shipped work, feedback and open ideas reach Claude as sources", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: "vorgeschlagen", report: "" };
+    });
+    await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({ listReady: proposes([], "req-050-dunkelmodus.md"), runClaude }),
+    );
+    expect(seenPrompt).toContain("delivery/vision.md");
+    expect(seenPrompt).toContain("delivery/requirements/done/");
+    expect(seenPrompt).toContain("delivery/feedback/done/");
+    expect(seenPrompt).toContain("delivery/idea/");
+    expect(seenPrompt).toContain("Nicht-Ziele");
+  });
+
+  it("claims no .md — the Selbstauftrag task has no work-item queue", async () => {
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: proposes([], "req-050-dunkelmodus.md"),
+        moveMd,
+        setCurrentMd,
+      }),
+    );
+    expect(moveMd).not.toHaveBeenCalled();
+    expect(setCurrentMd).not.toHaveBeenCalled();
+  });
+
+  it("files no review report — the requirement file is the result (req-010 stays untouched)", async () => {
+    const writeRepoFile = writerFake();
+    await executeStep(
+      repo,
+      selbstauftrag,
+      [],
+      deps({
+        listReady: proposes([], "req-050-dunkelmodus.md"),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "vorgeschlagen",
+          report: "# Ein langer Bericht",
+        })),
+        writeRepoFile,
+      }),
+    );
+    expect(writeRepoFile).not.toHaveBeenCalled();
+  });
+});
+
 // req-014: the Security task. Once per repo and calendar day it checks the repo
 // against delivery/security.md, changes nothing, and files a report in
 // delivery/security/ — but only when it found something.
@@ -1564,6 +1960,178 @@ describe("executeStep — Security-Task (req-014)", () => {
     if (d.kind !== "success") return;
     expect(d.message).not.toContain(long);
     expect(d.message.length).toBeLessThan(500);
+  });
+});
+
+// req-043: the Feedback task. A ready/in-progress/done/failed queue like
+// Bug/Requirement, but the .md is freeform text that names no task — Claude
+// decides on its own what, if anything, it becomes, and it never changes
+// application code.
+describe("executeStep — Feedback-Task (req-043)", () => {
+  it("AC: empty ready/ -> skip (no Verlauf entry)", async () => {
+    const d = await executeStep(repo, feedback, [], deps({ listReady: folders() }));
+    expect(d.kind).toBe("skip");
+  });
+
+  it("AC: claims the oldest feedback into in-progress/", async () => {
+    const moveMd = vi.fn(async () => {});
+    const setCurrentMd = vi.fn(async (_md: string | null) => {});
+    await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-002-b.md", "fb-001-farben.md"] }),
+        moveMd,
+        setCurrentMd,
+      }),
+    );
+    expect(moveMd).toHaveBeenCalledWith(
+      "/work/appbaua",
+      "delivery/feedback/ready/fb-001-farben.md",
+      "delivery/feedback/in-progress/fb-001-farben.md",
+    );
+    expect(setCurrentMd).toHaveBeenCalledWith("fb-001-farben.md");
+  });
+
+  it("AC: a processed feedback is moved to done/ and pushed", async () => {
+    const moveMd = vi.fn(async () => {});
+    const commitAndPush = vi.fn(async () => ({ pushed: true, detail: "auf dev gepusht" }));
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Requirement req-050-dunkelmodus.md angelegt",
+          report: "",
+        })),
+        moveMd,
+        commitAndPush,
+      }),
+    );
+    expect(d.kind).toBe("success");
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/feedback/in-progress/fb-001-farben.md",
+      "delivery/feedback/done/fb-001-farben.md",
+    );
+    expect(commitAndPush).toHaveBeenCalled();
+  });
+
+  it("AC: the Verlauf names the feedback file and what became of it", async () => {
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: "Bug bug-030-startseite-unruhig.md angelegt",
+          report: "",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.md).toBe("fb-001-farben.md"); // req-015: names the file
+    expect(d.message).toContain("Bug bug-030-startseite-unruhig.md angelegt");
+  });
+
+  it("AC: a feedback without consequence still files normally", async () => {
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({
+          ok: true,
+          summary: NO_FEEDBACK_ACTION_MESSAGE,
+          report: "",
+        })),
+      }),
+    );
+    expect(d.kind).toBe("success");
+    if (d.kind !== "success") return;
+    expect(d.message).toContain(NO_FEEDBACK_ACTION_MESSAGE);
+  });
+
+  it("AC: changes no code — skips the test gate entirely, even when it would be red", async () => {
+    const runTestGate = vi.fn(async () => red("2 Tests rot"));
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runTestGate,
+      }),
+    );
+    expect(d.kind).toBe("success"); // a red suite elsewhere must not block Feedback
+    expect(runTestGate).not.toHaveBeenCalled();
+  });
+
+  it("AC: the prompt forbids code changes and names the destinations Claude may use", async () => {
+    let seenPrompt = "";
+    const runClaude = vi.fn(async (_dir: string, prompt: string) => {
+      seenPrompt = prompt;
+      return { ok: true, summary: NO_FEEDBACK_ACTION_MESSAGE, report: "" };
+    });
+    await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({ listReady: folders({ ready: ["fb-001-farben.md"] }), runClaude }),
+    );
+    expect(seenPrompt).toContain("delivery/feedback/in-progress/fb-001-farben.md");
+    expect(seenPrompt).toContain("delivery/requirements/ready/");
+    expect(seenPrompt).toContain("delivery/bugs/ready/");
+    expect(seenPrompt).toContain("KEINEN Code");
+  });
+
+  it("a failed Claude run parks the feedback under failed/, like a bug", async () => {
+    const moveMd = vi.fn(async () => {});
+    const d = await executeStep(
+      repo,
+      feedback,
+      [],
+      deps({
+        listReady: folders({ ready: ["fb-001-farben.md"] }),
+        runClaude: vi.fn(async () => ({ ok: false, summary: "Timeout", report: "" })),
+        moveMd,
+      }),
+    );
+    expect(d.kind).toBe("error");
+    expect(moveMd).toHaveBeenLastCalledWith(
+      "/work/appbaua",
+      "delivery/feedback/ready/fb-001-farben.md",
+      "delivery/feedback/failed/fb-001-farben.md",
+    );
+  });
+
+  it("a queue with files waiting is never skipped as 'already ran today'", async () => {
+    const ranToday: RunLogEntry[] = [
+      {
+        id: 1,
+        startedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        endedAt: new Date(2026, 6, 24, 9, 0).toISOString(),
+        repo: "appbaua",
+        taskType: "Feedback",
+        status: "success",
+        message: "ok",
+      },
+    ];
+    const d = await executeStep(
+      repo,
+      feedback,
+      ranToday,
+      deps({ listReady: folders({ ready: ["fb-001-farben.md"] }) }),
+    );
+    expect(d.kind).not.toBe("skip");
   });
 });
 

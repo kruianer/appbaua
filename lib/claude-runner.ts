@@ -1,6 +1,7 @@
-import { run, type RunResult } from "./workspace";
+import { ABORT_EXIT_CODE, run, type RunResult } from "./workspace";
 import { describeEvent, finalResultText, modelFromEvent } from "./claude-events";
 import { SECURITY_OK_MESSAGE } from "./security-report";
+import { RELEASE_INFO_MARKER } from "./release-info";
 
 // Invokes Claude Code headless to work a task (req-006). Fully autonomous: the
 // CLI runs non-interactively with permissions skipped so it never asks. Auth is
@@ -30,6 +31,29 @@ export const CLAUDE_TIMEOUT_MS = 120 * 60_000;
 /** Die Grenze in Minuten — fuer Meldungen, damit sie nie auseinanderlaufen. */
 export const CLAUDE_TIMEOUT_MINUTES = CLAUDE_TIMEOUT_MS / 60_000;
 export const CLAUDE_MODEL = "sonnet";
+
+/**
+ * What the Verlauf leads with when the Claude process died from a signal
+ * instead of exiting on its own (bug-026). SIGKILL without warning is what
+ * the kernel's OOM killer does — the 14.10. incident confirmed that directly
+ * via journalctl — but a signal alone cannot prove the cause the way a log
+ * line can, hence "mutmaßlich". This must stay distinguishable from both a
+ * genuine failure and a network abort (req-038); see isOomKill in
+ * network-abort.ts, which guards isNetworkAbort against this exact text.
+ */
+export const OOM_KILL_MESSAGE = "Claude-Lauf: mutmaßlich wegen Speichermangel beendet (SIGKILL)";
+
+/**
+ * What the Verlauf/Gespräch shows for a run the Stopp-Knopf ended (bug-030).
+ * Distinct from a timeout or a genuine failure: the operator asked for this,
+ * so it must never read like something went wrong.
+ */
+export const ABORTED_MESSAGE = "Claude-Lauf: abgebrochen";
+
+/** Was this failed run the Stopp-Knopf ending it, rather than a real failure? */
+export function isAborted(summary: string | null | undefined): boolean {
+  return summary === ABORTED_MESSAGE;
+}
 
 /** How much of the running output is published live, and how often (req-008). */
 export const LIVE_TAIL_LINES = 50;
@@ -138,6 +162,17 @@ export function fileTaskPrompt(mdRelPath: string): string {
     `Nennt die Datei keine Akzeptanzkriterien, arbeite sie wie bisher in`,
     `einem Zug ab und committe am Ende einmal.`,
     ``,
+    `Sind alle Kriterien abgehakt, beende deine letzte Antwort mit dem Marker`,
+    `"${RELEASE_INFO_MARKER}" auf eigener Zeile, danach EIN bis wenige Sätze`,
+    `für den Betreiber der App — in SEINER Sprache, nicht technisch: was ist`,
+    `für ihn jetzt anders. Betraf die Änderung eine Funktion ohne eigene`,
+    `Oberfläche, ergänze einen Satz, woran er überhaupt merkt, dass es sie`,
+    `gibt. Muss er selbst etwas tun, damit die Änderung wirkt (z.B. eine`,
+    `Einstellung setzen), nenne genau das. Nenne nach dem Marker KEINE`,
+    `Dateinamen und KEINE Testzahlen — die stehen bereits im Verlauf.`,
+    `Lässt du ein Kriterium offen (z.B. weil die Zeit nicht reicht), lass den`,
+    `Marker ganz weg.`,
+    ``,
     `PUSHE NICHT — das übernimmt der Worker.`,
     `Arbeite vollständig autonom; frage nichts.`,
   ].join("\n");
@@ -220,6 +255,56 @@ export function ideaPrompt(paths: {
 }
 
 /**
+ * What the worker logs — and what Claude is asked to answer — when a
+ * self-assign run found nothing sensible to propose (req-047).
+ */
+export const NO_SELF_ASSIGN_MESSAGE = "kein sinnvoller Selbstauftrag gefunden";
+
+/**
+ * The prompt for the Selbstauftrag task (req-047). Unlike the Ideen prompt
+ * above, its result is not a loose idea but a finished Requirement, filed
+ * straight into `readyDir` — the same place a human-written one lands, so it
+ * must look like one: same frontmatter, same sections. The sources it is
+ * told to read (vision, shipped requirements + code, past feedback, open
+ * ideas, the repo's own conventions) and the vision's Non-Goals as a hard
+ * boundary are both named explicitly here, because the requirement makes
+ * both binding and nothing else in the pipeline enforces them.
+ */
+export function selfAssignPrompt(paths: {
+  readyDir: string;
+  doneRequirementsDir: string;
+  ideaDir: string;
+  feedbackDoneDir: string;
+  visionFile: string;
+}): string {
+  return [
+    `Schlage dir selbst GENAU EIN neues Requirement für dieses Repo vor —`,
+    `eines, das als Nächstes sinnvoll fehlt, nicht, was dir irgendwie einfällt.`,
+    `Schöpfe dabei aus ${paths.visionFile} (einschließlich ihrer Nicht-Ziele),`,
+    `den bereits umgesetzten Requirements in ${paths.doneRequirementsDir}/ und`,
+    `dem Code, früherem Feedback in ${paths.feedbackDoneDir}/, den offenen`,
+    `Ideen in ${paths.ideaDir}/ sowie den Vorgaben dieses Repos (Stack, DevOps,`,
+    `CLAUDE.md). Die Nicht-Ziele der Vision sind dabei eine Grenze, keine`,
+    `Anregung — verstoße NICHT gegen sie.`,
+    `Eine offene Idee ist nur eine Quelle, kein Auftrag: verschiebe, lösche`,
+    `oder ändere KEINE Datei in ${paths.ideaDir}/, auch wenn du sie aufgreifst.`,
+    `Lege das Requirement als neue .md-Datei direkt in ${paths.readyDir}/ ab,`,
+    `in genau derselben Form wie ein von Hand geschriebenes: Frontmatter`,
+    `(id, title, app, area, priority, created), danach die Abschnitte`,
+    `"# Goal (Why)", "# Function (What)", "# Acceptance Criteria" (als`,
+    `Given/when/then-Kästchen "- [ ] ...") und "# Out of Scope". Die id ist die`,
+    `nächste freie req-NNN-Nummer über ALLE Unterordner von`,
+    `delivery/requirements/ hinweg (draft, ready, in-progress, done); der`,
+    `Dateiname ist req-NNN-<slug>.md.`,
+    `Ändere sonst NICHTS in diesem Repo — kein Code, keine andere Datei; dies`,
+    `ist ausschließlich das Anlegen dieser einen .md.`,
+    `Findest du nichts Sinnvolles, lege KEINE Datei an und antworte genau`,
+    `"${NO_SELF_ASSIGN_MESSAGE}".`,
+    `Committe/pushe NICHT selbst. Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
  * The prompt for the Security task (req-014). Like a recurring task it answers
  * with a report — but only when it actually found something, because a run
  * without findings files no file at all. The four areas, the severity, the
@@ -252,6 +337,47 @@ export function securityPrompt(paths: { policyFile: string }): string {
     `ob es live verifiziert oder nur aus Code/Config erschlossen wurde.`,
     `Findest du keine Auffälligkeit, gib KEINEN Bericht aus und antworte genau`,
     `"${SECURITY_OK_MESSAGE}".`,
+    `Arbeite vollständig autonom; frage nichts.`,
+  ].join(" ");
+}
+
+/**
+ * What the worker logs — and what Claude is asked to answer — when a
+ * feedback warranted no follow-up at all (req-043).
+ */
+export const NO_FEEDBACK_ACTION_MESSAGE = "keine Maßnahme nötig";
+
+/**
+ * The prompt for the Feedback task (req-043). A feedback is freeform text, not
+ * a work order — it does not say what to do, so this prompt is the only place
+ * that can hand Claude the decision the requirement reserves for it: turn it
+ * into a Requirement, a Bug, a change to the vision, a note, or nothing.
+ *
+ * The one rule this prompt must never relax: a feedback changes no application
+ * code. It may only add work for later — a new .md elsewhere in the repo's own
+ * delivery/ folders, or a change to delivery/vision.md — which is why it names
+ * those destinations explicitly instead of leaving "wohin" to Claude.
+ */
+export function feedbackPrompt(paths: {
+  feedbackPath: string;
+  bugsReadyDir: string;
+  requirementsReadyDir: string;
+  visionFile: string;
+}): string {
+  return [
+    `Lies das Feedback in ${paths.feedbackPath} — es ist freier Text, der`,
+    `einen Eindruck schildert, aber NICHT vorschreibt, was zu tun ist.`,
+    `Entscheide selbst, was daraus wird: ein neues Requirement (neue .md in`,
+    `${paths.requirementsReadyDir}/), ein neuer Bug (neue .md in`,
+    `${paths.bugsReadyDir}/), eine Ergänzung von ${paths.visionFile}, eine`,
+    `kurze Notiz — oder nichts, wenn das Feedback keine Konsequenz hat.`,
+    `Ändere dabei KEINEN Code und keine bestehende Konfiguration der App —`,
+    `ein Feedback erzeugt höchstens Arbeit für später, niemals direkt Code.`,
+    `Lass ${paths.feedbackPath} selbst unverändert; der Worker verschiebt es.`,
+    `Halte dich an die CLAUDE.md dieses Repos. Beende deine Antwort mit genau`,
+    `einem Satz, was du entschieden hast (z. B. "Requirement`,
+    `req-050-dunkelmodus.md angelegt" oder "${NO_FEEDBACK_ACTION_MESSAGE}").`,
+    `Committe/pushe NICHT selbst — das übernimmt der Worker.`,
     `Arbeite vollständig autonom; frage nichts.`,
   ].join(" ");
 }
@@ -353,6 +479,14 @@ export async function runClaude(
      */
     onOutput?: (tail: string) => void;
     /**
+     * How many of the most recent activity lines `onOutput` receives
+     * (defaults to `LIVE_TAIL_LINES`). The Chat turn (req-049) passes
+     * `Infinity` here: its tail becomes the permanent record of that turn's
+     * steps once the turn ends, so it must never lose the earlier ones the
+     * way the worker's short live preview may.
+     */
+    tailLines?: number;
+    /**
      * Fires once with the model the run's own "init" event names (req-027) —
      * the model actually used, read from the event stream rather than assumed
      * from the --model flag handed in. Never fires again after the first call.
@@ -360,6 +494,26 @@ export async function runClaude(
     onModel?: (model: string) => void;
     /** Clock for the throttle; injectable for tests. */
     now?: () => number;
+    /**
+     * Continue a previous conversation by its Claude session id (req-040):
+     * the Chat feature's turns are separate CLI invocations that must still
+     * share one context, which `--resume` is what the CLI itself offers for
+     * that. Mutually exclusive with `sessionId` — a turn either continues an
+     * existing session or starts a new one, never both.
+     */
+    resume?: string;
+    /**
+     * Start a NEW conversation under a caller-chosen session id (req-040)
+     * instead of letting the CLI generate one — so the id is known up front
+     * and can be persisted for the next turn's `resume`.
+     */
+    sessionId?: string;
+    /**
+     * Ends the run from outside (bug-030: der Stopp-Knopf im Chat). Forwarded
+     * straight to `run()`, which already knows how to take the whole process
+     * tree down on a timeout — an abort gets the identical treatment.
+     */
+    signal?: AbortSignal;
   },
 ): Promise<ClaudeOutcome> {
   const runImpl = deps?.runImpl ?? run;
@@ -368,7 +522,7 @@ export async function runClaude(
   const onOutput = deps?.onOutput;
   const onModel = deps?.onModel;
   const activityData = onOutput
-    ? createActivityStream(onOutput, { now: deps?.now })
+    ? createActivityStream(onOutput, { now: deps?.now, lines: deps?.tailLines })
     : undefined;
   // A second, independent look at the same raw lines for the model (req-027):
   // this must never depend on onOutput being set, and must never throw into the
@@ -410,10 +564,12 @@ export async function runClaude(
         "--output-format",
         "stream-json",
         "--verbose",
+        ...(deps?.resume ? ["--resume", deps.resume] : []),
+        ...(deps?.sessionId ? ["--session-id", deps.sessionId] : []),
       ],
       // Closed stdin: nothing is piped in, and an open pipe makes the CLI wait
       // for input and warn about it (bug-001).
-      { cwd: dir, timeoutMs, onData, stdin: "ignore" },
+      { cwd: dir, timeoutMs, onData, stdin: "ignore", signal: deps?.signal },
     );
   } catch (err) {
     return {
@@ -426,6 +582,9 @@ export async function runClaude(
   if (res.code === 127) {
     return { ok: false, summary: "Claude-Code-CLI nicht verfügbar", report: "" };
   }
+  // Checked before the SIGKILL branch below: a timeout is already known with
+  // certainty (code 124 only ever comes from run()'s OWN timeout path), so it
+  // must win over a signal field a test stub might also set for that code.
   if (res.code === 124) {
     // On timeout, keep the last activity so a run that hung on a rate limit can
     // be told from one that was genuinely busy (req-026). finalResultText finds
@@ -443,6 +602,22 @@ export async function runClaude(
       summary: `Claude-Lauf: Timeout (${CLAUDE_TIMEOUT_MINUTES} min)${note}`,
       report: "",
     };
+  }
+  // A process that died from an external SIGKILL (bug-026) — most likely the
+  // kernel's OOM killer, since run()'s own timeout kill is already handled
+  // above via code 124 and never reaches here with the signal set. Checked
+  // before the generic !res.ok branch below, which would otherwise log an
+  // empty or misleading tail: a process killed this abruptly gets no chance
+  // to write a final error message.
+  if (res.signal === "SIGKILL") {
+    return { ok: false, summary: OOM_KILL_MESSAGE, report: "" };
+  }
+  // bug-030: the Stopp-Knopf's own exit code — checked before the generic
+  // !res.ok branch for the same reason as the two above, and distinct from
+  // both: this is neither a timeout nor a crash, so it must never read as
+  // "Claude-Lauf fehlgeschlagen: …".
+  if (res.code === ABORT_EXIT_CODE) {
+    return { ok: false, summary: ABORTED_MESSAGE, report: "" };
   }
   if (!res.ok) {
     const tail = (res.stderr.trim() || finalResultText(res.stdout)).slice(-300);

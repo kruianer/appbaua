@@ -35,6 +35,7 @@ const TOOL_TARGET_KEYS = [
 type ContentBlock = {
   type?: unknown;
   text?: unknown;
+  thinking?: unknown;
   name?: unknown;
   input?: unknown;
   is_error?: unknown;
@@ -90,6 +91,11 @@ function describeAssistant(message: unknown): string[] {
   for (const block of contentBlocks(message)) {
     if (block.type === "text" && typeof block.text === "string") {
       const line = toActivityLine(block.text);
+      if (line) lines.push(line);
+    } else if (block.type === "thinking" && typeof block.thinking === "string") {
+      // bug-033: ohne diesen Zweig blieb der Ereignisstrom für die gesamte
+      // Denkzeit vor dem ersten Werkzeug oder Textblock leer.
+      const line = toActivityLine(block.thinking);
       if (line) lines.push(line);
     } else if (block.type === "tool_use" && typeof block.name === "string") {
       const target = toolTarget(block.input);

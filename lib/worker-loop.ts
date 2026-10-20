@@ -1,16 +1,24 @@
 import type { Repo } from "./repos";
-import type { TaskType } from "./task-types";
+import { SELF_ASSIGN_TASK_ID, type TaskType } from "./task-types";
 import type { RunLogEntry } from "./run-log";
 import { listRepos } from "./repo-service";
 import { listTaskTypes } from "./task-service";
 import { getWorkerState } from "./worker-state";
 import { getRunLogStore, isIdleSummary } from "./run-log-store";
 import { planRun, isTaskDue } from "./scheduling";
+import {
+  BUDGET_SKIP_PREFIX,
+  BUDGET_TASK_LABELS,
+  isBudgetExhausted,
+  isBudgetGoverned,
+  startOfWeek,
+} from "./budget";
 import { executeStep, type StepDecision } from "./execute-step";
 import { errorKindOf } from "./error-kind";
 import { redact } from "./redact";
 import {
   clearRunningStep,
+  getWorkerStatusStore,
   setPauseUntil,
   setRunningStep,
 } from "./worker-status";
@@ -32,6 +40,13 @@ import { getPreviewStore } from "./preview-store";
 // but to an empty RESULT — every pause is preceded by a line saying why.
 
 export const EMPTY_PAUSE_MS = 5 * 60_000;
+
+/**
+ * How long one slice of a pause sleeps before the loop looks up again whether
+ * the pause still stands (bug-022). Short enough that ending a pause by hand
+ * takes effect right away, long enough not to poll the store all day.
+ */
+export const PAUSE_POLL_MS = 20_000;
 
 /** Prefix the pause status carries when the wait is a rate limit (req-029). */
 export const RATE_LIMIT_PAUSE_PREFIX = "Pause wegen Rate-Limit bis";
@@ -91,6 +106,14 @@ export type LoopDeps = {
    * own work changes what's next.
    */
   updatePreview: () => Promise<void>;
+  /**
+   * The pause window as it currently stands in the store (bug-022). Re-read
+   * between the slices of a pause: anything other than what the loop wrote
+   * itself is a human ending or moving the pause.
+   */
+  getPauseUntil: () => Promise<string | null>;
+  /** The main switch, re-read between the slices of a pause (bug-022). */
+  isEnabled: () => Promise<boolean>;
 };
 
 const defaultDeps: LoopDeps = {
@@ -108,6 +131,8 @@ const defaultDeps: LoopDeps = {
     const rows = await buildPreview(repos, taskTypes, new Date(), token);
     await getPreviewStore().set(rows);
   },
+  getPauseUntil: async () => (await getWorkerStatusStore().get()).pauseUntil,
+  isEnabled: async () => (await getWorkerState()).enabled,
 };
 
 /**
@@ -163,6 +188,58 @@ export async function runOnce(
     const typeNow = freshTypes.find((t) => t.id === step.taskType.id);
     if (!repoActive || !typeNow || !isTaskDue(typeNow, deps.now())) {
       continue;
+    }
+
+    // req-044: a repo's weekly budget covers Bugs+Requirements together. Once
+    // it is used up, this repo's bug/requirement steps are skipped for the
+    // rest of the week — other repos, and this repo's recurring task types,
+    // are untouched (isBudgetGoverned only matches "bug"/"requirement").
+    if (isBudgetGoverned(step.taskType.id) && step.repo.weeklyBudget != null) {
+      const usedThisWeek = await log.countSuccessSince(
+        step.repo.name,
+        BUDGET_TASK_LABELS,
+        startOfWeek(deps.now()).toISOString(),
+      );
+      if (isBudgetExhausted(step.repo.weeklyBudget, usedThisWeek)) {
+        const at = deps.now().toISOString();
+        await log.upsertBudgetSkip({
+          startedAt: at,
+          endedAt: at,
+          repo: step.repo.name,
+          taskType: null,
+          status: "idle", // not "error": nothing failed, the budget just ran out
+          message:
+            `${BUDGET_SKIP_PREFIX} (${usedThisWeek}/${step.repo.weeklyBudget}) — ` +
+            "Bugs und Requirements werden übersprungen, bis die Woche vorbei ist.",
+          md: null,
+        });
+        logged += 1; // this pass had a reason, not nothing to do (req-020)
+        continue;
+      }
+    }
+
+    // req-047 AC: Selbstauftrag reads the SAME weekly budget (still only
+    // Bugs+Requirements usage, via BUDGET_TASK_LABELS) to decide whether to
+    // author a new Requirement at all — a repo that cannot work off what it
+    // already has this week does not need another one piling up. This is
+    // deliberately a SEPARATE check from the one above: Selbstauftrag's own
+    // successes must never count AGAINST that budget (its label is not in
+    // BUDGET_TASK_LABELS), only read it. Silent, like the due-ness check
+    // above — unlike the Bugs/Requirements skip, there is no "used up" row to
+    // show, since the day is simply not spent yet and the step tries again
+    // on the next pass.
+    if (
+      step.taskType.id === SELF_ASSIGN_TASK_ID &&
+      step.repo.weeklyBudget != null
+    ) {
+      const usedThisWeek = await log.countSuccessSince(
+        step.repo.name,
+        BUDGET_TASK_LABELS,
+        startOfWeek(deps.now()).toISOString(),
+      );
+      if (isBudgetExhausted(step.repo.weeklyBudget, usedThisWeek)) {
+        continue;
+      }
     }
 
     const startedAt = deps.now().toISOString();
@@ -288,6 +365,67 @@ export async function runOnce(
 }
 
 /**
+ * Is the stored pause window still the one the loop wrote? Compared as an
+ * INSTANT, not as text: the value travels through the store (Postgres
+ * timestamptz) and can come back formatted differently for the same moment.
+ */
+function isOwnPause(stored: string | null, ownMs: number): boolean {
+  if (!stored) return false;
+  const t = new Date(stored).getTime();
+  return Number.isFinite(t) && Math.abs(t - ownMs) < 1000;
+}
+
+/**
+ * Wait out a pause the loop has just written to the status store — in slices of
+ * PAUSE_POLL_MS, looking up between them whether the pause still stands
+ * (bug-022).
+ *
+ * Before the fix the loop slept the whole window in one go, so `pause_until`
+ * was merely the DISPLAY of the pause: clearing it in the database left the
+ * worker asleep for the remaining hours while the start page fell back to
+ * "Leerlauf — nichts zu tun". It is now the SOURCE of the pause. Between slices
+ * the stored value is compared with `ownMs`, the instant the loop wrote itself,
+ * so only a human's change counts — the loop never reads back its own pause as
+ * an intervention. Any deviation (cleared, shortened, moved) ends the wait. The
+ * main switch is watched the same way: turned off and on again during a pause,
+ * it ends the wait too.
+ *
+ * Returns whether the stored window is still the loop's own one, i.e. whether
+ * the caller may clear it — a window a human put there belongs to that human.
+ */
+async function sleepThroughPause(
+  untilMs: number,
+  deps: LoopDeps,
+): Promise<boolean> {
+  let sawDisabled = false;
+  for (;;) {
+    const remaining = untilMs - deps.now().getTime();
+    if (remaining <= 0) return true; // waited it out: ours to clear
+    await deps.sleep(Math.min(PAUSE_POLL_MS, remaining));
+
+    // A store that hiccups must never cut a pause short: an unreadable value
+    // counts as unchanged, and the next slice looks again.
+    let stored: string | null;
+    try {
+      stored = await deps.getPauseUntil();
+    } catch {
+      continue;
+    }
+    if (!isOwnPause(stored, untilMs)) return false;
+
+    try {
+      if (await deps.isEnabled()) {
+        if (sawDisabled) return true; // off and on again: pick the work up now
+      } else {
+        sawDisabled = true;
+      }
+    } catch {
+      /* ignore: the switch is checked again at the start of the next pass */
+    }
+  }
+}
+
+/**
  * Endless loop. After a pass that got nothing done — nothing was due, or every
  * step failed — wait EMPTY_PAUSE_MS before looking again (bug-002).
  */
@@ -320,17 +458,17 @@ export async function runForever(deps: LoopDeps = defaultDeps): Promise<void> {
       const untilMs = Math.max(result.pauseUntil, deps.now().getTime());
       const until = new Date(untilMs).toISOString();
       await deps.setPauseUntil(until, result.pauseReason ?? RATE_LIMIT_PAUSE_PREFIX);
-      await deps.sleep(untilMs - deps.now().getTime());
-      await deps.setPauseUntil(null);
+      // Sliced, so clearing pause_until (after a `claude login`, say) gets the
+      // worker going again instead of leaving it asleep for hours (bug-022).
+      if (await sleepThroughPause(untilMs, deps)) await deps.setPauseUntil(null);
       continue;
     }
 
     if (result.succeeded === 0) {
       // Record the pause window so the start page can show "Pause bis HH:MM".
-      const until = new Date(deps.now().getTime() + EMPTY_PAUSE_MS).toISOString();
-      await deps.setPauseUntil(until);
-      await deps.sleep(EMPTY_PAUSE_MS);
-      await deps.setPauseUntil(null);
+      const untilMs = deps.now().getTime() + EMPTY_PAUSE_MS;
+      await deps.setPauseUntil(new Date(untilMs).toISOString());
+      if (await sleepThroughPause(untilMs, deps)) await deps.setPauseUntil(null);
     }
   }
 }

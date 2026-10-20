@@ -1,19 +1,29 @@
 import { describe, it, expect } from "vitest";
 import {
+  ABORTED_MESSAGE,
   CLAUDE_TIMEOUT_MINUTES,
   CLAUDE_TIMEOUT_MS,
   createActivityStream,
   createLiveTail,
   docPrompt,
+  feedbackPrompt,
+  fileTaskPrompt,
   ideaPrompt,
+  isAborted,
   lastLines,
   recurringPrompt,
   runClaude,
   securityPrompt,
   LIVE_TAIL_LINES,
+  NO_FEEDBACK_ACTION_MESSAGE,
   NO_IDEA_MESSAGE,
+  NO_SELF_ASSIGN_MESSAGE,
+  OOM_KILL_MESSAGE,
+  selfAssignPrompt,
 } from "./claude-runner";
+import { ABORT_EXIT_CODE } from "./workspace";
 import { SECURITY_OK_MESSAGE } from "./security-report";
+import { RELEASE_INFO_MARKER } from "./release-info";
 import type { run } from "./workspace";
 
 // Live output of a running Claude step (req-008): only the last ~50 lines, and
@@ -96,6 +106,28 @@ describe("runClaude live output", () => {
     expect(seen).toEqual(["Zeile 1\n", "Zeile 1\nZeile 2\n"]);
   });
 
+  it("req-049: caps onOutput at LIVE_TAIL_LINES by default, but a caller can lift the cap via tailLines", async () => {
+    const lineCount = LIVE_TAIL_LINES + 20;
+    const manyLines = `${Array.from({ length: lineCount }, (_, i) => `Zeile ${i}`).join("\n")}\n`;
+    const runImpl: typeof run = async (_cmd, _args, opts = {}) => {
+      opts.onData?.(manyLines);
+      return { ok: true, code: 0, stdout: manyLines, stderr: "" };
+    };
+
+    let capped = "";
+    await runClaude("/repo", "prompt", { runImpl, onOutput: (tail) => (capped = tail) });
+    expect(capped.trim().split("\n").length).toBeLessThanOrEqual(LIVE_TAIL_LINES);
+    expect(capped).not.toContain("Zeile 0\n");
+
+    let uncapped = "";
+    await runClaude("/repo", "prompt", {
+      runImpl,
+      onOutput: (tail) => (uncapped = tail),
+      tailLines: Number.POSITIVE_INFINITY,
+    });
+    expect(uncapped.trim().split("\n")).toHaveLength(lineCount);
+  });
+
   it("passes no stream listener when nobody wants the live output", async () => {
     let sawListener = true;
     const runImpl: typeof run = async (_cmd, _args, opts = {}) => {
@@ -107,9 +139,84 @@ describe("runClaude live output", () => {
   });
 });
 
+// req-040: the Chat feature continues a conversation across separate CLI
+// invocations via the CLI's own --resume/--session-id flags.
+describe("runClaude session continuation (req-040)", () => {
+  it("passes --session-id to start a NEW session under a caller-chosen id", async () => {
+    let seenArgs: string[] = [];
+    const runImpl: typeof run = async (_cmd, args) => {
+      seenArgs = args;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl, sessionId: "abc-123" });
+    expect(seenArgs).toContain("--session-id");
+    expect(seenArgs[seenArgs.indexOf("--session-id") + 1]).toBe("abc-123");
+    expect(seenArgs).not.toContain("--resume");
+  });
+
+  it("passes --resume to continue an existing session", async () => {
+    let seenArgs: string[] = [];
+    const runImpl: typeof run = async (_cmd, args) => {
+      seenArgs = args;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl, resume: "abc-123" });
+    expect(seenArgs).toContain("--resume");
+    expect(seenArgs[seenArgs.indexOf("--resume") + 1]).toBe("abc-123");
+    expect(seenArgs).not.toContain("--session-id");
+  });
+
+  it("passes neither flag when the call names no session (worker's own calls)", async () => {
+    let seenArgs: string[] = [];
+    const runImpl: typeof run = async (_cmd, args) => {
+      seenArgs = args;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl });
+    expect(seenArgs).not.toContain("--resume");
+    expect(seenArgs).not.toContain("--session-id");
+  });
+});
+
 // bug-001: the Aktivität tab used to show nothing but the CLI's stdin warning
 // for minutes, because print mode writes to stdout only at the very end. The
 // run now asks for the structured event stream and closes stdin.
+
+// req-046: the prompt is the only place that can tell Claude what the
+// Release-Info has to contain and how to separate it from the rest of its
+// answer — execute-step.ts only extracts text after RELEASE_INFO_MARKER.
+describe("fileTaskPrompt — Release-Info (req-046)", () => {
+  const p = fileTaskPrompt("delivery/bugs/ready/bug-001.md");
+
+  it("asks to end the final answer with the marker", () => {
+    expect(p).toContain(RELEASE_INFO_MARKER);
+  });
+
+  it("asks for the operator's language, not a technical one", () => {
+    expect(p).toContain("Betreiber der App");
+    expect(p).toContain("nicht technisch");
+  });
+
+  it("asks how to notice a feature without its own UI", () => {
+    expect(p).toContain("ohne eigene");
+    expect(p).toContain("Oberfläche");
+  });
+
+  it("asks to name a required manual step", () => {
+    expect(p).toContain("Muss er selbst etwas tun");
+  });
+
+  it("forbids file names and test counts after the marker", () => {
+    expect(p).toContain("KEINE");
+    expect(p).toContain("Dateinamen");
+    expect(p).toContain("Testzahlen");
+  });
+
+  it("says to leave the marker out when a criterion stays open", () => {
+    expect(p).toContain("lass den");
+    expect(p).toContain("Marker ganz weg");
+  });
+});
 
 describe("recurringPrompt (req-010)", () => {
   it("names the task and asks for the complete report as the final answer", () => {
@@ -172,6 +279,61 @@ describe("ideaPrompt (req-011)", () => {
   });
 });
 
+// req-047: the Selbstauftrag task's result is a finished Requirement, not a
+// loose idea — it must read like one a human wrote, and it must respect the
+// vision's Non-Goals, which nothing else in the pipeline enforces.
+describe("selfAssignPrompt (req-047)", () => {
+  const p = selfAssignPrompt({
+    readyDir: "delivery/requirements/ready",
+    doneRequirementsDir: "delivery/requirements/done",
+    ideaDir: "delivery/idea",
+    feedbackDoneDir: "delivery/feedback/done",
+    visionFile: "delivery/vision.md",
+  });
+
+  it("asks for exactly one new requirement", () => {
+    expect(p).toContain("GENAU EIN neues Requirement");
+  });
+
+  it("AC: names vision, shipped requirements, feedback and open ideas as sources", () => {
+    expect(p).toContain("delivery/vision.md");
+    expect(p).toContain("delivery/requirements/done/");
+    expect(p).toContain("delivery/feedback/done/");
+    expect(p).toContain("delivery/idea/");
+  });
+
+  it("AC: the vision's Non-Goals are a boundary, not a suggestion", () => {
+    expect(p).toContain("Nicht-Ziele");
+    expect(p).toContain("Grenze");
+  });
+
+  it("AC: an open idea is read, never moved or deleted", () => {
+    expect(p).toContain("verschiebe, lösche");
+  });
+
+  it("AC: the file lands in ready/, in the same shape as a hand-written one", () => {
+    expect(p).toContain("delivery/requirements/ready/");
+    expect(p).toContain("Frontmatter");
+    expect(p).toContain("# Goal (Why)");
+    expect(p).toContain("# Function (What)");
+    expect(p).toContain("# Acceptance Criteria");
+    expect(p).toContain("# Out of Scope");
+  });
+
+  it("AC: changes nothing else in the repo", () => {
+    expect(p).toContain("Ändere sonst NICHTS in diesem Repo");
+  });
+
+  it("AC: finding nothing sensible -> no file, fixed answer", () => {
+    expect(p).toContain("lege KEINE Datei an");
+    expect(p).toContain(NO_SELF_ASSIGN_MESSAGE);
+  });
+
+  it("leaves committing and pushing to the worker", () => {
+    expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+});
+
 // req-014: the Security task asks for a report only when there IS something to
 // report — and it must not change the repo. Both, plus the four areas and the
 // shape of a finding, can only be stated here.
@@ -210,6 +372,48 @@ describe("securityPrompt (req-014)", () => {
   it("changes nothing and leaves committing to the worker", () => {
     expect(p).toContain("Ändere NICHTS im Repo");
     expect(p).toContain("Committe/pushe NICHT selbst.");
+  });
+});
+
+// req-043: a feedback is freeform text, not a work order. This prompt is the
+// only place that can hand Claude the decision the requirement reserves for
+// it (Requirement, Bug, Vision, note, or nothing) while pinning the one rule
+// that must never bend: no application code changes.
+describe("feedbackPrompt (req-043)", () => {
+  const p = feedbackPrompt({
+    feedbackPath: "delivery/feedback/in-progress/fb-001-farben.md",
+    bugsReadyDir: "delivery/bugs/ready",
+    requirementsReadyDir: "delivery/requirements/ready",
+    visionFile: "delivery/vision.md",
+  });
+
+  it("AC: reads the feedback as an impression, not an instruction", () => {
+    expect(p).toContain("delivery/feedback/in-progress/fb-001-farben.md");
+    expect(p).toContain("NICHT vor");
+  });
+
+  it("AC: names every outcome Claude may choose, including nothing", () => {
+    expect(p).toContain("delivery/requirements/ready/");
+    expect(p).toContain("delivery/bugs/ready/");
+    expect(p).toContain("delivery/vision.md");
+    expect(p).toContain("oder nichts");
+  });
+
+  it("AC: changes no code — a feedback creates work for later, never code", () => {
+    expect(p).toContain("KEINEN Code");
+    expect(p).toContain("niemals direkt Code");
+  });
+
+  it("leaves the feedback file itself untouched — the worker moves it", () => {
+    expect(p).toContain("unverändert");
+  });
+
+  it("AC: ends with one sentence the Verlauf can show", () => {
+    expect(p).toContain(NO_FEEDBACK_ACTION_MESSAGE);
+  });
+
+  it("leaves committing and pushing to the worker", () => {
+    expect(p).toContain("Committe/pushe NICHT selbst");
   });
 });
 
@@ -475,6 +679,62 @@ describe("runClaude — real progress instead of the stdin warning (bug-001)", (
     });
     const out = await runClaude("/repo", "prompt", { runImpl });
     expect(out.summary).toBe("Claude-Lauf fehlgeschlagen: claude: boom");
+  });
+
+  it("bug-026: a run killed by SIGKILL (OOM killer) gets its own message, not the generic one", async () => {
+    // What the kernel's OOM killer leaves behind: the process dies with no
+    // chance to write a final error, so stderr/stdout are typically empty —
+    // exactly the case the generic "Claude-Lauf fehlgeschlagen: <tail>" branch
+    // would otherwise log with nothing useful in <tail>.
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: 1,
+      stdout: "",
+      stderr: "",
+      signal: "SIGKILL",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.ok).toBe(false);
+    expect(out.summary).toBe(OOM_KILL_MESSAGE);
+  });
+
+  it("bug-026: a timeout kill (code 124) stays a Timeout even if signal were ever set", async () => {
+    // Belt and suspenders: the 124 branch is checked before the SIGKILL branch
+    // in the implementation, so a timeout can never be mistaken for an OOM-kill.
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: 124,
+      stdout: "",
+      stderr: "",
+      signal: "SIGKILL",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.summary).toContain("Timeout");
+  });
+
+  it("bug-030: a run the Stopp-Knopf ended gets its own message, not a failure", async () => {
+    const runImpl: typeof run = async () => ({
+      ok: false,
+      code: ABORT_EXIT_CODE,
+      stdout: "",
+      stderr: "\n[aborted]",
+    });
+    const out = await runClaude("/repo", "prompt", { runImpl });
+    expect(out.ok).toBe(false);
+    expect(out.summary).toBe(ABORTED_MESSAGE);
+    expect(isAborted(out.summary)).toBe(true);
+    expect(out.summary).not.toContain("fehlgeschlagen");
+  });
+
+  it("bug-030: forwards the caller's AbortSignal to run()", async () => {
+    const controller = new AbortController();
+    let seenSignal: AbortSignal | undefined;
+    const runImpl: typeof run = async (_cmd, _args, opts = {}) => {
+      seenSignal = opts.signal;
+      return { ok: true, code: 0, stdout: "ok", stderr: "" };
+    };
+    await runClaude("/repo", "prompt", { runImpl, signal: controller.signal });
+    expect(seenSignal).toBe(controller.signal);
   });
 
   // req-010: the report that gets filed in the repo is Claude's final answer,

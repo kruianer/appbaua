@@ -6,6 +6,7 @@ import {
   LOG_MAX_AGE_DAYS,
   LOG_MAX_ROWS,
 } from "./run-log";
+import { BUDGET_SKIP_PREFIX } from "./budget";
 
 // Persistence for the worker run log (req-004). Same store-seam pattern as the
 // other lists: file for zero-infra dev, Postgres when configured, memory for
@@ -32,6 +33,24 @@ export interface RunLogStore {
   /** The most recent 'error' entry, or null. */
   lastError(): Promise<RunLogEntry | null>;
   /**
+   * How many of the given task-type labels this repo worked off
+   * successfully since sinceIso — the weekly-budget count (req-044).
+   */
+  countSuccessSince(
+    repoName: string,
+    taskTypeLabels: string[],
+    sinceIso: string,
+  ): Promise<number>;
+  /**
+   * Record (or extend) a note that this repo's Bugs/Requirements are being
+   * skipped because its weekly budget is used up (req-044): if the newest
+   * entry for this exact repo is already such a note, only its end moves
+   * forward; otherwise a fresh note is appended. Scoped to the repo (not the
+   * whole log, unlike upsertIdle) because several repos can be budget-skipped
+   * independently, interleaved with other repos' real work.
+   */
+  upsertBudgetSkip(entry: NewRunLogEntry): Promise<RunLogEntry>;
+  /**
    * Delete every log entry (req-007, manual "Verlauf-Log löschen"). Touches
    * only the log — repos, task types and worker status stay as they are, and
    * the automatic retention above is unaffected.
@@ -42,6 +61,16 @@ export interface RunLogStore {
 /** Marks the single collapsed idle-summary row (req-021). */
 export function isIdleSummary(e: RunLogEntry): boolean {
   return e.status === "idle" && e.repo === null && e.taskType === null;
+}
+
+/** Marks a running "budget exhausted" note for one repo (req-044). */
+export function isBudgetSkipSummary(e: RunLogEntry): boolean {
+  return (
+    e.status === "idle" &&
+    e.repo !== null &&
+    e.taskType === null &&
+    e.message.startsWith(BUDGET_SKIP_PREFIX)
+  );
 }
 
 /** Drop entries older than the cutoff, then keep only the newest maxRows. */
@@ -125,10 +154,60 @@ export function createFileRunLogStore(): RunLogStore {
       const all = await readAll();
       return findLastError(all);
     },
+    async countSuccessSince(repoName, taskTypeLabels, sinceIso) {
+      const all = await readAll();
+      return countSuccess(all, repoName, taskTypeLabels, sinceIso);
+    },
+    async upsertBudgetSkip(entry) {
+      const all = await readAll(); // oldest-first
+      const last = findLastForRepo(all, entry.repo);
+      if (last && isBudgetSkipSummary(last)) {
+        const merged: RunLogEntry = {
+          ...last,
+          endedAt: entry.endedAt,
+          message: entry.message,
+        };
+        all[all.findIndex((e) => e.id === last.id)] = merged;
+        await writeAll(applyRetention(all, new Date(entry.endedAt)));
+        return merged;
+      }
+      const nextId = all.length ? all[all.length - 1].id + 1 : 1;
+      const full: RunLogEntry = { ...entry, id: nextId };
+      await writeAll(applyRetention([...all, full], new Date(entry.endedAt)));
+      return full;
+    },
     async clear() {
       await writeAll([]);
     },
   };
+}
+
+function countSuccess(
+  entries: RunLogEntry[],
+  repoName: string,
+  taskTypeLabels: string[],
+  sinceIso: string,
+): number {
+  const since = new Date(sinceIso).getTime();
+  return entries.filter(
+    (e) =>
+      e.status === "success" &&
+      e.repo === repoName &&
+      e.taskType !== null &&
+      taskTypeLabels.includes(e.taskType) &&
+      new Date(e.startedAt).getTime() >= since,
+  ).length;
+}
+
+/** The newest entry belonging to this repo, scanning newest-first, or null. */
+function findLastForRepo(
+  entries: RunLogEntry[],
+  repoName: string | null,
+): RunLogEntry | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (entries[i].repo === repoName) return entries[i];
+  }
+  return null;
 }
 
 function computeMetrics(
@@ -196,6 +275,28 @@ export function createMemoryRunLogStore(
     },
     async lastError() {
       return findLastError(entries);
+    },
+    async countSuccessSince(repoName, taskTypeLabels, sinceIso) {
+      return countSuccess(entries, repoName, taskTypeLabels, sinceIso);
+    },
+    async upsertBudgetSkip(entry) {
+      const last = findLastForRepo(entries, entry.repo);
+      if (last && isBudgetSkipSummary(last)) {
+        const merged: RunLogEntry = {
+          ...last,
+          endedAt: entry.endedAt,
+          message: entry.message,
+        };
+        entries = applyRetention(
+          entries.map((e) => (e.id === last.id ? merged : e)),
+          new Date(entry.endedAt),
+        );
+        return merged;
+      }
+      seq += 1;
+      const full: RunLogEntry = { ...entry, id: seq };
+      entries = applyRetention([...entries, full], new Date(entry.endedAt));
+      return full;
     },
     async clear() {
       // Only the entries go; `seq` keeps counting so ids stay unique.

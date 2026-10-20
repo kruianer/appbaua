@@ -16,58 +16,95 @@ import {
 } from "@/lib/repos";
 import type { TaskType } from "@/lib/task-types";
 import type { GithubRepo } from "@/lib/github-repos";
+import type { Tab } from "@/lib/tab";
+import { useWindowWidth } from "@/lib/use-window-width";
 import { Icon, type IconName } from "./Icon";
 import { TaskControl } from "./TaskControl";
 import { RunLog } from "./RunLog";
 import { Settings } from "./Settings";
 import { WorkerDashboard } from "./WorkerDashboard";
 import { HealthOverview } from "./HealthOverview";
+import { Chat } from "./Chat";
+import { Sidebar } from "./Sidebar";
+import { ReleaseInfo } from "./ReleaseInfo";
 
-type Tab =
-  | "aktiv"
-  | "zustand"
-  | "verlauf"
-  | "repos"
-  | "settings"
-  | "einstellungen";
+// req-041: ab dieser Fensterbreite wandert die Navigation von der unteren
+// Leiste in die Seitenleiste am linken Rand.
+export const SIDEBAR_BREAKPOINT = 744;
+// req-041: ab dieser Breite ist der Anfangszustand der Seitenleiste
+// aufgeklappt statt eingeklappt (744–1023px eingeklappt, ab 1024px
+// aufgeklappt) — nur solange noch kein Zustand gespeichert ist.
+const SIDEBAR_EXPANDED_BREAKPOINT = 1024;
+const SIDEBAR_COLLAPSED_KEY = "appbaua.sidebar-collapsed";
 
-// Aktivität is the start view and the first nav entry (req-005).
-// Order: Aktivität, Zustand, Verlauf, Repos, Tasks, Einstellungen (req-007,
-// req-032). Zustand sits right behind Aktivität: both answer "läuft alles?",
-// the first about the worker, the second about the watched apps.
-// The "settings" key is the Tasks tab (historical); "einstellungen" is the
-// Einstellungsseite and owns the cog icon, so Tasks shows a list icon.
-const TABS: { key: Tab; label: string; icon: IconName }[] = [
-  { key: "aktiv", label: "Aktivität", icon: "activity" },
+// req-039: fünf Plätze in der unteren Leiste — Aktivität, Verlauf, Chat,
+// Repos, Mehr. Chat sitzt in der Mitte, abgesetzt (Kreis, größeres Symbol).
+// "Mehr" ist kein eigener Tab, sondern öffnet die Liste MORE_ITEMS mit den
+// drei ausgelagerten Menüpunkten. Aktivität bleibt die Startansicht.
+
+// Die drei Menüpunkte, die seit req-039 keinen eigenen Platz mehr haben und
+// nur noch über "Mehr" erreichbar sind. Der "settings"-Key bezeichnet
+// historisch den Tasks-Tab; "einstellungen" ist die Einstellungsseite.
+const MORE_ITEMS: { key: Tab; label: string; icon: IconName }[] = [
   { key: "zustand", label: "Zustand", icon: "heart" },
-  { key: "verlauf", label: "Verlauf", icon: "clock" },
-  { key: "repos", label: "Repos", icon: "gitbranch" },
+  { key: "releaseinfo", label: "Release-Infos", icon: "megaphone" },
   { key: "settings", label: "Tasks", icon: "list" },
   { key: "einstellungen", label: "Einstellungen", icon: "settings" },
 ];
+const MORE_KEYS: Tab[] = MORE_ITEMS.map((i) => i.key);
 
 const MODULE_TITLE: Record<Tab, string> = {
   aktiv: "Aktivität",
   zustand: "Zustand",
   verlauf: "Verlauf",
+  chat: "Chat",
   repos: "Repo-Verwaltung",
   settings: "Task-Steuerung",
   einstellungen: "Einstellungen",
+  releaseinfo: "Release-Infos",
 };
 
 const muted = (pct: number) =>
   `color-mix(in srgb, var(--color-text) ${pct}%, transparent)`;
 
+const navButtonStyle = (active: boolean): CSSProperties => ({
+  flex: 1,
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 4,
+  background: "transparent",
+  border: "none",
+  cursor: "pointer",
+  padding: "4px 0",
+  color: active ? "var(--color-accent)" : muted(48),
+});
+
+const navLabelStyle: CSSProperties = {
+  fontSize: 10,
+  letterSpacing: ".01em",
+  whiteSpace: "nowrap",
+};
+
+/** Wie oft nach ungesehenen Chat-Antworten gefragt wird (req-040 AC8). */
+export const CHAT_UNREAD_POLL_MS = 5000;
+
 export function AppShell({
   initialRepos,
   initialTaskTypes,
   initialWorkerEnabled,
+  initialWeeklyUsage,
 }: {
   initialRepos: Repo[];
   initialTaskTypes: TaskType[];
   initialWorkerEnabled: boolean;
+  /** req-044: wie viel vom Wochenbudget jedes Repo bereits verbraucht hat. */
+  initialWeeklyUsage?: Record<string, number>;
 }) {
   const [repos, setRepos] = useState<Repo[]>(initialRepos);
+  const [weeklyUsage, setWeeklyUsage] = useState<Record<string, number>>(
+    initialWeeklyUsage ?? {},
+  );
   // Lifted here (not owned by TaskControl) so the state survives the
   // remount TaskControl goes through when the tab bar switches away and
   // back — see bug-009. Mirrors the existing `repos` pattern above.
@@ -76,6 +113,36 @@ export function AppShell({
     initialWorkerEnabled,
   );
   const [tab, setTab] = useState<Tab>("aktiv");
+  // req-041: ab 744px wandert die Navigation von der unteren Leiste in die
+  // Seitenleiste am linken Rand; darunter bleibt req-039 unverändert.
+  const width = useWindowWidth();
+  const isPhone = width < SIDEBAR_BREAKPOINT;
+  // req-041: ob die Seitenleiste nur Symbole (eingeklappt) oder Symbol und
+  // Text (aufgeklappt) zeigt. Die Fensterbreite gibt nur den Anfangszustand
+  // vor (AC8/AC9) — ein von Hand gesetzter Zustand übersteht einen Neustart
+  // (AC10), darum erst entscheiden, sobald die echte Breite UND ein
+  // eventuell gespeicherter Zustand bekannt sind.
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState(true);
+  const [sidebarCollapsedReady, setSidebarCollapsedReady] = useState(false);
+
+  useEffect(() => {
+    if (sidebarCollapsedReady || width === 0) return;
+    const stored = window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY);
+    setSidebarCollapsedState(
+      stored !== null ? stored === "true" : width < SIDEBAR_EXPANDED_BREAKPOINT,
+    );
+    setSidebarCollapsedReady(true);
+  }, [width, sidebarCollapsedReady]);
+
+  const setSidebarCollapsed = useCallback((value: boolean) => {
+    setSidebarCollapsedState(value);
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(value));
+  }, []);
+  // req-040 AC8/AC9: ob mindestens ein Repo eine ungesehene, fertige
+  // Chat-Antwort hat — der Hinweispunkt auf dem Chat-Knopf unten.
+  const [chatUnread, setChatUnread] = useState(false);
+  // req-039: ob die "Mehr"-Liste (Zustand, Tasks, Einstellungen) offen ist.
+  const [moreOpen, setMoreOpen] = useState(false);
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -102,6 +169,27 @@ export function AppShell({
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // req-040 AC8: unabhängig vom offenen Tab nachfragen, ob irgendein Repo
+  // eine fertige, ungesehene Chat-Antwort hat — der Chat-Knopf trägt dann
+  // einen Hinweispunkt, egal welches Modul gerade zu sehen ist.
+  useEffect(() => {
+    let cancelled = false;
+    const check = () => {
+      fetch("/api/chat/unread")
+        .then((r) => r.json())
+        .then((d: { repoIds?: string[] }) => {
+          if (!cancelled) setChatUnread((d.repoIds ?? []).length > 0);
+        })
+        .catch(() => {});
+    };
+    check();
+    const timer = setInterval(check, CHAT_UNREAD_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   const confirmRepo = repos.find((r) => r.id === confirmId) ?? null;
 
@@ -170,6 +258,19 @@ export function AppShell({
     }
   }, []);
 
+  // req-047: der Schalter "Selbstauftrag" — gehört zum Repo, nicht zur
+  // Task-Art, damit er nicht versehentlich überall läuft.
+  const toggleSelfAssign = useCallback(async (id: string) => {
+    setRepos((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, selfAssign: !r.selfAssign } : r)),
+    );
+    const res = await fetch(`/api/repos/${id}/self-assign`, { method: "PATCH" });
+    if (res.ok) {
+      const data = await res.json();
+      setRepos(data.repos);
+    }
+  }, []);
+
   const setModel = useCallback(async (id: string, model: RepoModel) => {
     // optimistic (req-028)
     setRepos((prev) => prev.map((r) => (r.id === id ? { ...r, model } : r)));
@@ -183,6 +284,24 @@ export function AppShell({
       setRepos(data.repos);
     }
   }, []);
+
+  // req-044: how many Bugs+Requirements the worker may work off here per
+  // week; null removes the limit. Optimistic update already happened in the
+  // input's onChange — this just persists it on blur.
+  const setWeeklyBudget = useCallback(
+    async (id: string, weeklyBudget: number | null) => {
+      const res = await fetch(`/api/repos/${id}/weekly-budget`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weeklyBudget }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setRepos(data.repos);
+      }
+    },
+    [],
+  );
 
   const doRemove = useCallback(async () => {
     if (!confirmId) return;
@@ -287,151 +406,111 @@ export function AppShell({
     [persistOrder],
   );
 
-  const appStyle: CSSProperties = {
-    position: "relative",
-    height: "100dvh", // fixed viewport height: header/footer stay put, middle scrolls
-    maxWidth: 460,
-    margin: "0 auto",
-    display: "flex",
-    flexDirection: "column",
-    background: "var(--color-bg)",
-    color: "var(--color-text)",
-    fontFamily: "var(--font-body)",
-    overflow: "hidden",
-  };
+  const appStyle: CSSProperties = isPhone
+    ? {
+        position: "relative",
+        height: "100dvh", // fixed viewport height: header/footer stay put, middle scrolls
+        maxWidth: 460,
+        margin: "0 auto",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--color-bg)",
+        color: "var(--color-text)",
+        fontFamily: "var(--font-body)",
+        overflow: "hidden",
+      }
+    : {
+        // req-041: ab 744px nutzt die App die volle Fensterbreite —
+        // Seitenleiste links, Inhalt rechts — statt der schmalen, zentrierten
+        // Telefonspalte.
+        position: "relative",
+        height: "100dvh",
+        display: "flex",
+        background: "var(--color-bg)",
+        color: "var(--color-text)",
+        fontFamily: "var(--font-body)",
+        overflow: "hidden",
+      };
 
-  return (
-    <div style={appStyle}>
-      {/* App bar — its accent tint lives in nocturne.css (.app-bar), the app's
-          source of truth for the look (req-015). */}
+  // Theme-Knopf und (nur im Repos-Tab) der "Repo hinzufügen"-Knopf — am
+  // iPhone in der App-Bar, ab 744px im zusammengelegten Kopf der Hauptspalte.
+  const headerActions = (
+    <div style={{ display: "flex", gap: "var(--space-2)", flex: "none" }}>
+      <button
+        className="btn btn-icon btn-secondary"
+        aria-label="Theme wechseln"
+        onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+      >
+        <Icon name={theme === "dark" ? "sun" : "moon"} size={19} />
+      </button>
+      {tab === "repos" && (
+        <button
+          className="btn btn-icon btn-primary"
+          aria-label="Repo hinzufügen"
+          onClick={openSheet}
+        >
+          <Icon name="plus" size={20} />
+        </button>
+      )}
+    </div>
+  );
+
+  const moduleHeader = (
+    <div style={{ minWidth: 0 }}>
       <div
-        className="app-bar"
-        data-app-bar
         style={{
-          flexShrink: 0,
-          padding: "12px 16px 6px",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "var(--space-2)",
+          fontSize: 10,
+          letterSpacing: ".14em",
+          textTransform: "uppercase",
+          color: "var(--color-accent-300)",
+          marginBottom: 2,
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            minWidth: 0,
-          }}
-        >
-          {/* Free-standing line logo — no tile, no box (req-015). */}
-          <div
-            data-logo
-            style={{
-              flex: "none",
-              display: "grid",
-              placeItems: "center",
-              color: "var(--color-accent)",
-            }}
-          >
-            <Icon name="brand" size={30} sw={1.6} />
-          </div>
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              minWidth: 0,
-              lineHeight: 1.02,
-            }}
-          >
-            <span
-              style={{
-                fontWeight: 700,
-                fontSize: 18,
-                letterSpacing: "-.03em",
-              }}
-            >
-              appbaua
-            </span>
-            <span
-              style={{
-                fontSize: 9,
-                letterSpacing: ".16em",
-                textTransform: "uppercase",
-                color: muted(46),
-              }}
-            >
-              Coding-Worker
-            </span>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: "var(--space-2)", flex: "none" }}>
-          <button
-            className="btn btn-icon btn-secondary"
-            aria-label="Theme wechseln"
-            onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-          >
-            <Icon name={theme === "dark" ? "sun" : "moon"} size={19} />
-          </button>
-          {tab === "repos" && (
-            <button
-              className="btn btn-icon btn-primary"
-              aria-label="Repo hinzufügen"
-              onClick={openSheet}
-            >
-              <Icon name="plus" size={20} />
-            </button>
-          )}
-        </div>
+        Modul
       </div>
-
-      {/* Module title */}
-      <div style={{ flexShrink: 0, padding: "6px 20px 10px", minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: 10,
-            letterSpacing: ".14em",
-            textTransform: "uppercase",
-            color: "var(--color-accent-300)",
-            marginBottom: 2,
-          }}
-        >
-          Modul
+      <h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.02em" }}>
+        {MODULE_TITLE[tab]}
+      </h2>
+      {tab === "aktiv" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Was der Worker gerade tut.
         </div>
-        <h2 style={{ margin: 0, fontSize: 28, letterSpacing: "-.02em" }}>
-          {MODULE_TITLE[tab]}
-        </h2>
-        {tab === "aktiv" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Was der Worker gerade tut.
-          </div>
-        )}
-        {tab === "zustand" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Läuft jede überwachte App — und wenn nicht, woran es hängt.
-          </div>
-        )}
-        {tab === "repos" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Der Worker arbeitet die Liste von oben nach unten ab.
-          </div>
-        )}
-        {tab === "settings" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Priorität und Zeiten je Task-Typ — gilt für alle Repos.
-          </div>
-        )}
-        {tab === "einstellungen" && (
-          <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
-            Wartung und Optionen der App.
-          </div>
-        )}
-      </div>
+      )}
+      {tab === "zustand" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Läuft jede überwachte App — und wenn nicht, woran es hängt.
+        </div>
+      )}
+      {tab === "repos" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Der Worker arbeitet die Liste von oben nach unten ab.
+        </div>
+      )}
+      {tab === "settings" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Priorität und Zeiten je Task-Typ — gilt für alle Repos.
+        </div>
+      )}
+      {tab === "einstellungen" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Wartung und Optionen der App.
+        </div>
+      )}
+      {tab === "releaseinfo" && (
+        <div style={{ fontSize: 13, color: muted(55), marginTop: 3 }}>
+          Was sich für dich geändert hat — aus allen Repos.
+        </div>
+      )}
+    </div>
+  );
 
-      {tab === "aktiv" ? (
+  const moduleContent =
+    tab === "aktiv" ? (
         <WorkerDashboard />
       ) : tab === "zustand" ? (
         <HealthOverview />
+      ) : tab === "chat" ? (
+        <Chat repos={repos} split={!isPhone} />
       ) : tab === "repos" ? (
         <>
           {/* List / empty state (Repo-Verwaltung only, no dashboard) */}
@@ -669,6 +748,64 @@ export function AppShell({
                                 </option>
                               ))}
                             </select>
+                            {/* req-044: wie viele Bugs+Requirements der
+                                Worker hier pro Woche höchstens abarbeitet;
+                                leer = unbegrenzt. */}
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "var(--space-2)",
+                                flex: "none",
+                                fontSize: 12,
+                                color: muted(70),
+                              }}
+                            >
+                              Wochenbudget
+                              <input
+                                type="number"
+                                min={1}
+                                inputMode="numeric"
+                                aria-label={`${r.name}: Wochenbudget`}
+                                value={r.weeklyBudget ?? ""}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const parsed =
+                                    raw === "" ? null : Number(raw);
+                                  setRepos((prev) =>
+                                    prev.map((x) =>
+                                      x.id === r.id
+                                        ? { ...x, weeklyBudget: parsed }
+                                        : x,
+                                    ),
+                                  );
+                                }}
+                                onBlur={() =>
+                                  setWeeklyBudget(r.id, r.weeklyBudget ?? null)
+                                }
+                                placeholder="unbegrenzt"
+                                style={{
+                                  width: 60,
+                                  flex: "none",
+                                  fontSize: 12,
+                                  padding: "5px 8px",
+                                  borderRadius: "var(--radius-sm, 6px)",
+                                  background: "var(--color-surface)",
+                                  color: "var(--color-text)",
+                                  border:
+                                    "1px solid color-mix(in srgb, var(--color-text) 20%, transparent)",
+                                }}
+                              />
+                              {/* req-044 AC10: wie viel vom Wochenbudget
+                                  schon verbraucht ist — nur sichtbar, wenn
+                                  überhaupt eines eingetragen ist. */}
+                              {r.weeklyBudget != null && (
+                                <span>
+                                  {weeklyUsage[r.id] ?? 0}/{r.weeklyBudget}{" "}
+                                  diese Woche
+                                </span>
+                              )}
+                            </span>
                             {/* req-032: überwachen — eigener Schalter, eigene
                                 Bedeutung. Eine App kann überwacht werden, ohne
                                 dass der Worker an ihr arbeitet, und umgekehrt. */}
@@ -701,6 +838,54 @@ export function AppShell({
                                     ? "flex-end"
                                     : "flex-start",
                                   background: r.monitored
+                                    ? "var(--color-accent)"
+                                    : "color-mix(in srgb, var(--color-text) 22%, transparent)",
+                                  transition: "background .15s ease",
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    width: 18,
+                                    height: 18,
+                                    borderRadius: 999,
+                                    background: "var(--color-bg)",
+                                    boxShadow: "0 1px 2px rgba(0,0,0,.4)",
+                                  }}
+                                />
+                              </button>
+                            </span>
+                            {/* req-047: Selbstauftrag — gehört dem Repo, nicht
+                                der Task-Art; eigener Schalter je Repo, aus bis
+                                jemand ihn bewusst einschaltet. */}
+                            <span
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "var(--space-2)",
+                                flex: "none",
+                                fontSize: 12,
+                                color: muted(70),
+                              }}
+                            >
+                              Selbstauftrag
+                              <button
+                                role="switch"
+                                aria-checked={Boolean(r.selfAssign)}
+                                aria-label={`${r.name} Selbstauftrag`}
+                                onClick={() => toggleSelfAssign(r.id)}
+                                style={{
+                                  flex: "none",
+                                  width: 40,
+                                  height: 24,
+                                  borderRadius: 999,
+                                  border: "none",
+                                  padding: 3,
+                                  display: "flex",
+                                  cursor: "pointer",
+                                  justifyContent: r.selfAssign
+                                    ? "flex-end"
+                                    : "flex-start",
+                                  background: r.selfAssign
                                     ? "var(--color-accent)"
                                     : "color-mix(in srgb, var(--color-text) 22%, transparent)",
                                   transition: "background .15s ease",
@@ -794,11 +979,16 @@ export function AppShell({
         />
       ) : tab === "einstellungen" ? (
         <Settings />
+      ) : tab === "releaseinfo" ? (
+        <ReleaseInfo />
       ) : (
         <RunLog />
-      )}
+      );
 
-      {/* Bottom tab bar */}
+  // Bottom tab bar — five places (req-039): Aktivität, Verlauf, Chat, Repos,
+  // Mehr. Nur am iPhone (< 744px) — ab dort übernimmt die Sidebar (req-041).
+  const bottomNav = (
+    <>
       <nav
         aria-label="Hauptnavigation"
         style={{
@@ -821,38 +1011,255 @@ export function AppShell({
               "linear-gradient(to right, transparent, var(--color-divider) 48px, var(--color-divider) calc(100% - 48px), transparent)",
           }}
         />
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            aria-label={t.label}
-            onClick={() => setTab(t.key)}
+        <button
+          aria-label="Aktivität"
+          onClick={() => setTab("aktiv")}
+          style={navButtonStyle(tab === "aktiv")}
+        >
+          <Icon name="activity" size={23} />
+          <span style={navLabelStyle}>Aktivität</span>
+        </button>
+        <button
+          aria-label="Verlauf"
+          onClick={() => setTab("verlauf")}
+          style={navButtonStyle(tab === "verlauf")}
+        >
+          <Icon name="clock" size={23} />
+          <span style={navLabelStyle}>Verlauf</span>
+        </button>
+        {/* Chat sitzt in der Mitte, abgesetzt: Symbol im Kreis und größer
+            als die übrigen (req-039). Der Hinweispunkt (req-040 AC8/AC9)
+            zeigt eine fertige, noch ungesehene Antwort in einem anderen
+            Repo an. */}
+        <button
+          aria-label="Chat"
+          onClick={() => setTab("chat")}
+          style={navButtonStyle(tab === "chat")}
+        >
+          <div
             style={{
-              flex: 1,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 4,
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              padding: "4px 0",
-              color:
-                tab === t.key ? "var(--color-accent)" : muted(48),
+              position: "relative",
+              width: 42,
+              height: 42,
+              marginTop: -10,
+              display: "grid",
+              placeItems: "center",
+              borderRadius: 999,
+              border: `2px solid ${
+                tab === "chat" ? "var(--color-accent)" : muted(48)
+              }`,
+              background: "var(--color-bg)",
             }}
           >
-            <Icon name={t.icon} size={23} />
-            <span
+            <Icon name="chat" size={24} />
+            {chatUnread && (
+              <span
+                data-chat-unread-dot
+                style={{
+                  position: "absolute",
+                  top: 1,
+                  right: 1,
+                  width: 9,
+                  height: 9,
+                  borderRadius: 999,
+                  background: "var(--color-accent)",
+                  boxShadow: "0 0 0 2px var(--color-bg)",
+                }}
+              />
+            )}
+          </div>
+          <span style={navLabelStyle}>Chat</span>
+        </button>
+        <button
+          aria-label="Repos"
+          onClick={() => setTab("repos")}
+          style={navButtonStyle(tab === "repos")}
+        >
+          <Icon name="gitbranch" size={23} />
+          <span style={navLabelStyle}>Repos</span>
+        </button>
+        <button
+          aria-label="Mehr"
+          aria-expanded={moreOpen}
+          onClick={() => setMoreOpen((o) => !o)}
+          style={navButtonStyle(MORE_KEYS.includes(tab))}
+        >
+          <Icon name="more" size={23} />
+          <span style={navLabelStyle}>Mehr</span>
+        </button>
+      </nav>
+
+      {/* "Mehr"-Liste (req-039): Zustand, Tasks, Einstellungen. Ein Tipp
+          daneben schließt sie, ohne den Menüpunkt zu ändern. */}
+      {moreOpen && (
+        <div
+          data-more-backdrop
+          onClick={() => setMoreOpen(false)}
+          style={{ position: "absolute", inset: 0, zIndex: 30 }}
+        >
+          <div
+            role="menu"
+            aria-label="Mehr"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: "absolute",
+              right: 12,
+              bottom: 78,
+              minWidth: 180,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+              padding: "var(--space-2)",
+              background: "var(--color-surface)",
+              borderRadius: "var(--radius-md)",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            {MORE_ITEMS.map((item) => (
+              <button
+                key={item.key}
+                role="menuitem"
+                onClick={() => {
+                  setTab(item.key);
+                  setMoreOpen(false);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 10px",
+                  background: "transparent",
+                  border: "none",
+                  borderRadius: "var(--radius-sm, 6px)",
+                  textAlign: "left",
+                  cursor: "pointer",
+                  fontSize: 14,
+                  color: "var(--color-text)",
+                }}
+              >
+                <Icon name={item.icon} size={18} />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  return (
+    <div style={appStyle}>
+      {isPhone ? (
+        <>
+          {/* App bar — its accent tint lives in nocturne.css (.app-bar), the
+              app's source of truth for the look (req-015). */}
+          <div
+            className="app-bar"
+            data-app-bar
+            style={{
+              flexShrink: 0,
+              padding: "12px 16px 6px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "var(--space-2)",
+            }}
+          >
+            <div
               style={{
-                fontSize: 10,
-                letterSpacing: ".01em",
-                whiteSpace: "nowrap",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                minWidth: 0,
               }}
             >
-              {t.label}
-            </span>
-          </button>
-        ))}
-      </nav>
+              {/* Free-standing line logo — no tile, no box (req-015). */}
+              <div
+                data-logo
+                style={{
+                  flex: "none",
+                  display: "grid",
+                  placeItems: "center",
+                  color: "var(--color-accent)",
+                }}
+              >
+                <Icon name="brand" size={30} sw={1.6} />
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  minWidth: 0,
+                  lineHeight: 1.02,
+                }}
+              >
+                <span
+                  style={{
+                    fontWeight: 700,
+                    fontSize: 18,
+                    letterSpacing: "-.03em",
+                  }}
+                >
+                  appbaua
+                </span>
+                <span
+                  style={{
+                    fontSize: 9,
+                    letterSpacing: ".16em",
+                    textTransform: "uppercase",
+                    color: muted(46),
+                  }}
+                >
+                  Coding-Worker
+                </span>
+              </div>
+            </div>
+            {headerActions}
+          </div>
+
+          {/* Module title */}
+          <div style={{ flexShrink: 0, padding: "6px 20px 10px" }}>
+            {moduleHeader}
+          </div>
+
+          {moduleContent}
+          {bottomNav}
+        </>
+      ) : (
+        <>
+          {/* req-041: Seitenleiste ersetzt ab 744px die untere Leiste. */}
+          <Sidebar
+            tab={tab}
+            onSelect={setTab}
+            collapsed={sidebarCollapsed}
+            onToggleCollapsed={() => setSidebarCollapsed(!sidebarCollapsed)}
+          />
+          <div
+            style={{
+              flex: 1,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "flex-end",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: "16px 22px 12px",
+              }}
+            >
+              {moduleHeader}
+              {headerActions}
+            </div>
+            {moduleContent}
+          </div>
+        </>
+      )}
 
       {/* Add sheet */}
       {sheetOpen && (

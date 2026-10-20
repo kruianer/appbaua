@@ -125,6 +125,20 @@ p {
   background: color-mix(in srgb, var(--color-accent) 30%, transparent);
 }
 
+/* — scrollbars (bug-033) — */
+/* Browsers default to a gray scrollbar, out of step with the accent color
+   everywhere else. One rule covers every scrollable element, current and
+   future, without repeating it per component. scrollbar-color handles
+   Firefox/Chromium; the ::-webkit-scrollbar-thumb rule covers WebKit, which
+   ignores scrollbar-color. */
+html {
+  scrollbar-color: var(--color-accent) transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-accent);
+  border-radius: var(--radius-sm);
+}
+
 /* — links — */
 /* bug-013: plain <a> tags (the auth pages' "Ersteinrichtung"/"Backup-Code"/
    "Anmelden" links) carried no color of their own, so the browser applied its
