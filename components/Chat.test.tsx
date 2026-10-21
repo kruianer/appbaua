@@ -120,7 +120,7 @@ beforeEach(() => {
           list[list.length - 1] = { ...last, steps: stepsByRepo[repoId] ?? undefined };
         }
       }
-      return { ok: true, json: async () => ({ messages: visible, running: runningByRepo[repoId] ?? false }) };
+      return { ok: true, json: async () => ({ messages: visible, running: runningByRepo[repoId] ?? (lastIsAnswer && !releaseAnswer[repoId]) }) };
     }
     if (messagesMatch && init?.method === "POST") {
       const repoId = messagesMatch[1];
@@ -891,6 +891,32 @@ describe("Sitzung überlebt den Tab-Wechsel (bug-038)", () => {
     runningByRepo.r1 = false;
     await waitFor(() => expect(screen.getByText("Fertig")).toBeInTheDocument(), { timeout: 4000 });
     expect(screen.queryByText("Claude schreibt …")).not.toBeInTheDocument();
+  });
+});
+
+describe("Antwort erscheint von selbst (bug-039)", () => {
+  it("die Antwort steht ohne weitere Nachricht da, auch wenn die Nachrichtenzahl vorher schon stimmte", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={[cellarVoice, wellarita]} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    // Die Antwort läuft noch; der Server meldet running, die Frage steht schon im Gespräch.
+    releaseAnswer.r1 = false;
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Drei Rückfragen?");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Abbrechen" })).toBeInTheDocument(),
+    );
+
+    // Der Zug endet im Hintergrund — die Ansicht holt die Antwort selbst.
+    releaseAnswer.r1 = true;
+    await waitFor(
+      () => expect(screen.getByText("Antwort auf: Drei Rückfragen?")).toBeInTheDocument(),
+      { timeout: 4000 },
+    );
+    expect(screen.queryByText("Claude schreibt …")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Senden" })).toBeInTheDocument();
   });
 });
 
