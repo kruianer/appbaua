@@ -32,23 +32,23 @@ unverändert.
 
 # Acceptance Criteria
 
-- [ ] Given "CellarVoice" hat auf `main` ein Favicon, when ich die
+- [x] Given "CellarVoice" hat auf `main` ein Favicon, when ich die
       Repo-Liste im Chat auf dem Laptop ansehe, then steht dieses
       Favicon vor "CellarVoice".
-- [ ] Given "CellarVoice" hat auf `main` ein Favicon, when ich auf dem
+- [x] Given "CellarVoice" hat auf `main` ein Favicon, when ich auf dem
       Handy die Repo-Auswahl öffne, then steht das Favicon vor dem
       Eintrag "CellarVoice".
-- [ ] Given "CellarVoice" ist auf dem Handy gewählt, when ich die
+- [x] Given "CellarVoice" ist auf dem Handy gewählt, when ich die
       geschlossene Repo-Auswahl ansehe, then steht das Favicon vor
       "CellarVoice".
-- [ ] Given "Wellarita" hat kein Favicon, when ich die Repo-Liste
+- [x] Given "Wellarita" hat kein Favicon, when ich die Repo-Liste
       ansehe, then steht vor "Wellarita" ein Platzhalter mit "W".
-- [ ] Given zwei Repos ohne Favicon, when ich ihre Platzhalter
+- [x] Given zwei Repos ohne Favicon, when ich ihre Platzhalter
       vergleiche, then haben beide dieselbe Farbe.
-- [ ] Given das Favicon von "CellarVoice" liegt nur auf `dev`, nicht auf
+- [x] Given das Favicon von "CellarVoice" liegt nur auf `dev`, nicht auf
       `main`, when ich die Repo-Liste ansehe, then steht dort noch das
       alte Favicon bzw. der Platzhalter.
-- [ ] Given ein Repo hat eine kaputte Favicon-Datei, when ich die
+- [x] Given ein Repo hat eine kaputte Favicon-Datei, when ich die
       Repo-Liste ansehe, then erscheint NICHT das Symbol für ein
       fehlendes Bild, sondern der Platzhalter.
 

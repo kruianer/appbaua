@@ -5,6 +5,7 @@ import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 import { parseChatContentBlocks } from "@/lib/chat-message-blocks";
 import { CopyCommand } from "./CopyCommand";
+import { RepoIcon } from "./RepoIcon";
 
 // Chat-Tab (req-040): oben die Repo-Auswahl, darunter das Gespräch mit
 // Claude. Jedes Repo hat sein eigenes Gespräch UND seine eigene Claude-
@@ -97,6 +98,7 @@ function StepList({ text }: { text: string }) {
 export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean }) {
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [draft, setDraft] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [messagesByRepo, setMessagesByRepo] = useState<Record<string, ChatMessage[]>>({});
   const [pendingByRepo, setPendingByRepo] = useState<Record<string, boolean>>({});
   const [stepsByRepo, setStepsByRepo] = useState<Record<string, string | null>>({});
@@ -509,6 +511,7 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
                   color: r.active ? "var(--color-text)" : muted(40),
                 }}
               >
+                <RepoIcon repoId={r.id} name={r.name} />
                 <span
                   style={{
                     flex: 1,
@@ -543,6 +546,7 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
               borderBottom: "1px solid var(--color-divider)",
             }}
           >
+            {activeRepo && <RepoIcon repoId={activeRepo.id} name={activeRepo.name} />}
             <span data-chat-active-repo style={{ fontSize: 14, fontWeight: 600 }}>
               {activeRepo?.name ?? ""}
             </span>
@@ -563,12 +567,92 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
         minHeight: 0,
       }}
     >
-      <div style={{ padding: "0 20px 10px", flexShrink: 0 }}>
+      <div style={{ padding: "0 20px 10px", flexShrink: 0, position: "relative" }}>
+        {/* req-050: ein natives <select> kann kein Bild vor die Einträge setzen,
+            deshalb zeigt eine eigene Auswahl die Favicons. Das echte <select>
+            bleibt unsichtbar daneben bestehen (Bedienhilfen, Tests). */}
+        <button
+          type="button"
+          data-repo-picker
+          aria-haspopup="listbox"
+          aria-expanded={pickerOpen}
+          onClick={() => setPickerOpen((o) => !o)}
+          className="input"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            width: "100%",
+            textAlign: "left",
+            font: "inherit",
+            cursor: "pointer",
+          }}
+        >
+          {activeRepo && <RepoIcon repoId={activeRepo.id} name={activeRepo.name} />}
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {activeRepo?.name ?? ""}
+          </span>
+          <span aria-hidden="true">▾</span>
+        </button>
+        {pickerOpen && (
+          <ul
+            role="listbox"
+            aria-label="Repo-Auswahl"
+            style={{
+              position: "absolute",
+              left: 20,
+              right: 20,
+              zIndex: 20,
+              margin: "4px 0 0",
+              padding: 4,
+              listStyle: "none",
+              maxHeight: "50vh",
+              overflowY: "auto",
+              background: "var(--color-surface, var(--color-bg))",
+              border: "1px solid var(--color-divider)",
+              borderRadius: "var(--radius-md)",
+            }}
+          >
+            {repos.map((r) => (
+              <li
+                key={r.id}
+                role="option"
+                aria-selected={r.id === repoId}
+                onClick={() => {
+                  setPickerOpen(false);
+                  selectRepo(r.id);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  padding: "10px",
+                  cursor: "pointer",
+                  borderRadius: "var(--radius-md)",
+                  background:
+                    r.id === repoId
+                      ? "color-mix(in srgb, var(--color-accent) 12%, transparent)"
+                      : "transparent",
+                }}
+              >
+                <RepoIcon repoId={r.id} name={r.name} />
+                <span>{r.name}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <select
           aria-label="Repo"
-          className="input"
+          tabIndex={-1}
           value={repoId}
           onChange={(e) => selectRepo(e.target.value)}
+          style={{
+            position: "absolute",
+            width: 1,
+            height: 1,
+            opacity: 0,
+            overflow: "hidden",
+          }}
         >
           {repos.map((r) => (
             <option key={r.id} value={r.id}>

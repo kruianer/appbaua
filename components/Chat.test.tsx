@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Chat, MAX_COMPOSER_HEIGHT_PX, formatElapsed } from "./Chat";
 import type { Repo } from "@/lib/repos";
@@ -891,5 +891,48 @@ describe("Sitzung überlebt den Tab-Wechsel (bug-038)", () => {
     runningByRepo.r1 = false;
     await waitFor(() => expect(screen.getByText("Fertig")).toBeInTheDocument(), { timeout: 4000 });
     expect(screen.queryByText("Claude schreibt …")).not.toBeInTheDocument();
+  });
+});
+
+// req-050: Favicon je Repo vor dem Namen; Platzhalter, wenn das Bild fehlt.
+describe("Favicon je Repo (req-050)", () => {
+  const iconOf = (el: HTMLElement) => el.querySelector("[data-repo-icon]");
+  const placeholderOf = (el: HTMLElement) => el.querySelector("[data-repo-icon-placeholder]");
+
+  it("AC1: in der Repo-Liste steht das Favicon vor dem Namen", async () => {
+    render(<Chat repos={repos} split />);
+    const btn = screen.getByRole("button", { name: "CellarVoice" });
+    expect(iconOf(btn)).toHaveAttribute("src", "/api/repos/r1/favicon");
+    expect(btn.firstElementChild).toBe(iconOf(btn));
+  });
+
+  it("AC2/AC3: auf dem Handy zeigen geschlossene und geöffnete Auswahl das Favicon", async () => {
+    render(<Chat repos={repos} />);
+    const picker = document.querySelector("[data-repo-picker]") as HTMLElement;
+    // Wellarita ist vorgewählt.
+    expect(iconOf(picker)).toHaveAttribute("src", "/api/repos/r2/favicon");
+    await userEvent.click(picker);
+    const option = within(screen.getByRole("listbox")).getByRole("option", { name: "CellarVoice" });
+    expect(iconOf(option)).toHaveAttribute("src", "/api/repos/r1/favicon");
+    await userEvent.click(option);
+    expect(iconOf(document.querySelector("[data-repo-picker]") as HTMLElement)).toHaveAttribute(
+      "src",
+      "/api/repos/r1/favicon",
+    );
+  });
+
+  it("AC4/AC5/AC7: ohne ladbares Bild steht ein Platzhalter mit Großbuchstaben, überall gleich gefärbt", async () => {
+    const lower: Repo = { ...wellarita, id: "r3", name: "alpha", url: "github.com/k/alpha" };
+    render(<Chat repos={[wellarita, lower]} split />);
+    const a = screen.getByRole("button", { name: "Wellarita" });
+    const b = screen.getByRole("button", { name: "alpha" });
+    fireEvent.error(iconOf(a)!);
+    fireEvent.error(iconOf(b)!);
+    expect(iconOf(a)).toBeNull();
+    expect(placeholderOf(a)).toHaveTextContent("W");
+    expect(placeholderOf(b)).toHaveTextContent("A");
+    expect((placeholderOf(a) as HTMLElement).style.background).toBe(
+      (placeholderOf(b) as HTMLElement).style.background,
+    );
   });
 });
