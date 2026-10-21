@@ -616,6 +616,15 @@ describe("cancelChatTurn (bug-030)", () => {
 // req-048: runClaude liefert über onOutput denselben Ereignisstrom, den der
 // Worker seit req-008/bug-001 schon per describeEvent zeigt — hier wird er
 // zusätzlich in getChatSteps() veröffentlicht, damit der Chat ihn lesen kann.
+const toolUse = (id: string, name: string, input: Record<string, unknown>) =>
+  JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } });
+const toolResult = (id: string, content: string, isError: boolean) =>
+  JSON.stringify({
+    type: "user",
+    message: { content: [{ type: "tool_result", tool_use_id: id, content, is_error: isError }] },
+  });
+const stepsOf = (json: string | null | undefined) => JSON.parse(json ?? "[]");
+
 describe("sichtbare Schritte (req-048)", () => {
   it("meldet null, solange für das Repo kein Zug läuft oder lief", () => {
     expect(getChatSteps("kein-repo")).toBeNull();
@@ -627,15 +636,15 @@ describe("sichtbare Schritte (req-048)", () => {
       store,
       token: "tok",
       prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
-      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
-        opts.onOutput?.("→ Read: lib/foo.ts");
+      runClaude: async (_dir, _prompt, opts: { onEvent?: (line: string) => void }) => {
+        opts.onEvent?.(toolUse("t1", "Read", { file_path: "lib/foo.ts" }));
         return { ok: true, summary: "ok", report: "Steht drin." };
       },
       now: () => new Date(),
       getActiveRepoId: async () => null,
     });
 
-    expect(getChatSteps(repo.id)).toBe("→ Read: lib/foo.ts");
+    expect(stepsOf(getChatSteps(repo.id))).toMatchObject([{ tool: "Read", target: "lib/foo.ts", status: "running" }]);
   });
 
   it("maskiert Zugangsschlüssel in den Schritten genauso wie der Worker (bug-003)", async () => {
@@ -644,8 +653,8 @@ describe("sichtbare Schritte (req-048)", () => {
       store,
       token: "tok",
       prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
-      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
-        opts.onOutput?.("→ Bash: curl -H 'Authorization: Bearer sk-ABCDEFGHIJKLMNOP'");
+      runClaude: async (_dir, _prompt, opts: { onEvent?: (line: string) => void }) => {
+        opts.onEvent?.(toolUse("t1", "Bash", { command: "curl -H 'Authorization: Bearer sk-ABCDEFGHIJKLMNOP'" }));
         return { ok: true, summary: "ok", report: "fertig" };
       },
       now: () => new Date(),
@@ -665,10 +674,10 @@ describe("sichtbare Schritte (req-048)", () => {
       runClaude: async (
         _dir,
         _prompt,
-        opts: { signal?: AbortSignal; onOutput?: (tail: string) => void },
+        opts: { signal?: AbortSignal; onEvent?: (line: string) => void },
       ) =>
         new Promise((resolve) => {
-          opts.onOutput?.("→ Bash: npm test");
+          opts.onEvent?.(toolUse("t1", "Bash", { command: "npm test" }));
           signalSeen.resolve(opts.signal!);
           opts.signal!.addEventListener("abort", () =>
             resolve({ ok: false, summary: ABORTED_MESSAGE, report: "" }),
@@ -682,7 +691,7 @@ describe("sichtbare Schritte (req-048)", () => {
     expect(cancelChatTurn(repo.id)).toBe(true);
     await turn;
 
-    expect(getChatSteps(repo.id)).toBe("→ Bash: npm test");
+    expect(stepsOf(getChatSteps(repo.id))).toMatchObject([{ tool: "Bash", target: "npm test" }]);
   });
 
   it("ein neuer Zug beginnt mit leeren Schritten statt die des vorigen Zugs fortzuführen", async () => {
@@ -691,14 +700,14 @@ describe("sichtbare Schritte (req-048)", () => {
       store,
       token: "tok",
       prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
-      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
-        opts.onOutput?.("→ Read: alt.ts");
+      runClaude: async (_dir, _prompt, opts: { onEvent?: (line: string) => void }) => {
+        opts.onEvent?.(toolUse("t1", "Read", { file_path: "alt.ts" }));
         return { ok: true, summary: "ok", report: "fertig" };
       },
       now: () => new Date(),
       getActiveRepoId: async () => null,
     });
-    expect(getChatSteps(repo.id)).toBe("→ Read: alt.ts");
+    expect(stepsOf(getChatSteps(repo.id))).toMatchObject([{ tool: "Read", target: "alt.ts" }]);
 
     const sawStepsAtStart = deferred<string | null>();
     await sendChatMessage(repo, "Zweiter Zug", {
@@ -728,8 +737,8 @@ describe("Schritte an der Antwort (req-049)", () => {
       store,
       token: "tok",
       prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
-      runClaude: async (_dir, _prompt, opts: { onOutput?: (tail: string) => void }) => {
-        opts.onOutput?.("→ Read: lib/foo.ts");
+      runClaude: async (_dir, _prompt, opts: { onEvent?: (line: string) => void }) => {
+        opts.onEvent?.(toolUse("t1", "Read", { file_path: "lib/foo.ts" }));
         return { ok: true, summary: "ok", report: "Steht drin." };
       },
       now: () => new Date(),
@@ -738,7 +747,7 @@ describe("Schritte an der Antwort (req-049)", () => {
 
     const [userMsg, answerMsg] = await store.listMessages(repo.id);
     expect(userMsg.steps).toBeUndefined();
-    expect(answerMsg.steps).toBe("→ Read: lib/foo.ts");
+    expect(stepsOf(answerMsg.steps)).toMatchObject([{ tool: "Read", target: "lib/foo.ts" }]);
   });
 
   it("ein Abbruch trägt ebenfalls die bis dahin gezeigten Schritte", async () => {
@@ -751,10 +760,10 @@ describe("Schritte an der Antwort (req-049)", () => {
       runClaude: async (
         _dir,
         _prompt,
-        opts: { signal?: AbortSignal; onOutput?: (tail: string) => void },
+        opts: { signal?: AbortSignal; onEvent?: (line: string) => void },
       ) =>
         new Promise((resolve) => {
-          opts.onOutput?.("→ Bash: npm test");
+          opts.onEvent?.(toolUse("t1", "Bash", { command: "npm test" }));
           signalSeen.resolve(opts.signal!);
           opts.signal!.addEventListener("abort", () =>
             resolve({ ok: false, summary: ABORTED_MESSAGE, report: "" }),
@@ -769,25 +778,31 @@ describe("Schritte an der Antwort (req-049)", () => {
     await turn;
 
     const [, abortMsg] = await store.listMessages(repo.id);
-    expect(abortMsg.steps).toBe("→ Bash: npm test");
+    expect(stepsOf(abortMsg.steps)).toMatchObject([{ tool: "Bash", target: "npm test" }]);
   });
 
-  it("läuft ohne die Zeilen-Kappung, die der Worker-Default verwendet (tailLines)", async () => {
+  it("Status und Ergebnis kommen aus dem Ereignisstrom und bleiben an der Antwort (req-051)", async () => {
     const store = createMemoryChatSessionStore();
-    const seenTailLines: unknown[] = [];
-    await sendChatMessage(repo, "Hallo", {
+    await sendChatMessage(repo, "Laufen die Tests?", {
       store,
       token: "tok",
       prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
-      runClaude: async (_dir, _prompt, opts: { tailLines?: number }) => {
-        seenTailLines.push(opts.tailLines);
+      runClaude: async (_dir, _prompt, opts: { onEvent?: (line: string) => void }) => {
+        opts.onEvent?.(toolUse("t1", "Bash", { command: "npm test" }));
+        opts.onEvent?.(toolResult("t1", "FAIL 3 tests", true));
+        opts.onEvent?.(toolUse("t2", "Read", { file_path: "a.ts" }));
+        opts.onEvent?.(toolResult("t2", "inhalt", false));
         return { ok: true, summary: "ok", report: "Antwort" };
       },
       now: () => new Date(),
       getActiveRepoId: async () => null,
     });
 
-    expect(seenTailLines).toEqual([Number.POSITIVE_INFINITY]);
+    const [, answer] = await store.listMessages(repo.id);
+    expect(stepsOf(answer.steps)).toMatchObject([
+      { tool: "Bash", target: "npm test", status: "error", result: "FAIL 3 tests" },
+      { tool: "Read", target: "a.ts", status: "ok", result: "inhalt" },
+    ]);
   });
 });
 

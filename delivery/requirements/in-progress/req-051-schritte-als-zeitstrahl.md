@@ -40,25 +40,25 @@ zweite Anzeige daneben.
 
 # Acceptance Criteria
 
-- [ ] Given Claude führt "npm test" aus, when der Schritt erscheint,
+- [x] Given Claude führt "npm test" aus, when der Schritt erscheint,
       then steht er als Punkt auf einer senkrechten Linie mit "Bash"
       in Fett und dahinter "npm test".
-- [ ] Given der Befehl "npm test" läuft noch, when ich den Punkt
+- [x] Given der Befehl "npm test" läuft noch, when ich den Punkt
       ansehe, then ist er grau.
-- [ ] Given "npm test" ist erfolgreich durchgelaufen, when ich den
+- [x] Given "npm test" ist erfolgreich durchgelaufen, when ich den
       Punkt ansehe, then ist er grün.
-- [ ] Given "npm test" ist mit Fehlern beendet, when ich den Punkt
+- [x] Given "npm test" ist mit Fehlern beendet, when ich den Punkt
       ansehe, then ist er rot.
-- [ ] Given ein abgeschlossener Schritt, when ich ihn ansehe, then ist
+- [x] Given ein abgeschlossener Schritt, when ich ihn ansehe, then ist
       sein Ergebnis eingeklappt.
-- [ ] Given ich tippe auf den Schritt "npm test", when er aufklappt,
+- [x] Given ich tippe auf den Schritt "npm test", when er aufklappt,
       then sehe ich die Ausgabe des Befehls.
-- [ ] Given die Ausgabe hat 300 Zeilen, when ich den Schritt aufklappe,
+- [x] Given die Ausgabe hat 300 Zeilen, when ich den Schritt aufklappe,
       then sehe ich die ersten 20 Zeilen und darunter "alle anzeigen".
-- [ ] Given ich habe die App geschlossen und öffne das Gespräch neu,
+- [x] Given ich habe die App geschlossen und öffne das Gespräch neu,
       when ich einen Schritt einer früheren Antwort antippe, then klappt
       sein Ergebnis auf.
-- [ ] Given Claude hat geantwortet, when ich das Gespräch ansehe, then
+- [x] Given Claude hat geantwortet, when ich das Gespräch ansehe, then
       ist der Zeitstrahl NICHT verschwunden und es steht KEINE zweite
       Schritt-Anzeige daneben.
 

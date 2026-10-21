@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 import { parseChatContentBlocks } from "@/lib/chat-message-blocks";
+import { parseChatSteps, type ChatStep } from "@/lib/chat-steps";
 import { CopyCommand } from "./CopyCommand";
 import { RepoIcon } from "./RepoIcon";
 
@@ -54,24 +55,98 @@ export function formatElapsed(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+/** Höchstens so viele Zeilen eines Ergebnisses stehen im aufgeklappten Schritt (req-051). */
+const RESULT_PREVIEW_LINES = 20;
+
+const STEP_DOT_COLOR: Record<ChatStep["status"], string> = {
+  running: "#9aa0a6",
+  ok: "#2e9e5b",
+  error: "#d64545",
+};
+
+/** Ein Schritt: Punkt auf der Linie, Art in Fett, Ziel; das Ergebnis klappt per Tipp auf. */
+function StepItem({ step }: { step: ChatStep }) {
+  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+  const result = step.result;
+  const resultLines = result ? result.split("\n") : [];
+  const shown = all ? resultLines : resultLines.slice(0, RESULT_PREVIEW_LINES);
+  const label = (
+    <>
+      <strong>{step.tool}</strong>
+      {step.target && <span style={{ marginLeft: 8, wordBreak: "break-all" }}>{step.target}</span>}
+    </>
+  );
+  return (
+    <div data-chat-step data-status={step.status} style={{ position: "relative", paddingLeft: 18 }}>
+      <span
+        data-chat-step-dot
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: -5,
+          top: 6,
+          width: 9,
+          height: 9,
+          borderRadius: "50%",
+          background: STEP_DOT_COLOR[step.status],
+        }}
+      />
+      {result ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            all: "unset",
+            cursor: "pointer",
+            display: "block",
+            width: "100%",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {label}
+        </button>
+      ) : (
+        <div style={{ whiteSpace: "pre-wrap" }}>{label}</div>
+      )}
+      {result && open && (
+        <div data-chat-step-result style={{ marginTop: 2 }}>
+          <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", font: "inherit" }}>
+            {shown.join("\n")}
+          </pre>
+          {!all && resultLines.length > RESULT_PREVIEW_LINES && (
+            <button
+              type="button"
+              onClick={() => setAll(true)}
+              style={{ all: "unset", cursor: "pointer", textDecoration: "underline" }}
+            >
+              alle anzeigen
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
- * Die Schritte eines Zugs (req-049) — jede Zeile des Ereignisstroms als
- * eigener Block, untereinander wie die Nachrichten selbst: normale
- * Schriftgröße (AC1), KEIN eigener Rollbalken (AC2), keine Höchsthöhe — der
- * Gesprächsbereich darüber rollt, nicht dieser Block (AC3). Das ersetzt die
- * frühere Anzeige aus req-048 (schmaler Kasten, danach unter "Schritte"
- * eingeklappt) komplett; es gibt keine zweite Anzeige daneben.
+ * Die Schritte eines Zugs als Zeitstrahl (req-051): eine senkrechte Linie, ein
+ * Punkt je Schritt (grau = läuft, grün = geklappt, rot = fehlgeschlagen).
+ * Sonst bleibt req-049: normale Schriftgröße, KEIN eigener Rollbalken, keine
+ * Höchsthöhe — der Gesprächsbereich darüber rollt, nicht dieser Block. Das
+ * ersetzt die Zeilen-Anzeige; es gibt keine zweite Anzeige daneben.
  */
 function StepList({ text }: { text: string }) {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0) return null;
+  const steps = parseChatSteps(text);
+  if (steps.length === 0) return null;
   return (
     <div
       data-chat-steps
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 3,
+        gap: 4,
         fontSize: 14,
         lineHeight: 1.4,
         color: muted(55),
@@ -80,12 +155,12 @@ function StepList({ text }: { text: string }) {
         // Gespräch diesen Block zusammen statt über ihn hinweg zu rollen.
         flexShrink: 0,
         padding: "2px 2px",
+        marginLeft: 5,
+        borderLeft: `1px solid ${muted(25)}`,
       }}
     >
-      {lines.map((line, i) => (
-        <div key={i} style={{ whiteSpace: "pre-wrap" }}>
-          {line}
-        </div>
+      {steps.map((step, i) => (
+        <StepItem key={step.id || i} step={step} />
       ))}
     </div>
   );

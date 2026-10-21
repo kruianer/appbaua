@@ -12,6 +12,7 @@ import { isRateLimit } from "./rate-limit";
 import { isSessionNotFound } from "./chat-session-lost";
 import { isAuthExpired, authExpiredChatMessage } from "./auth-expired";
 import { redact } from "./redact";
+import { createStepTracker } from "./chat-steps";
 
 // Orchestrates one chat turn (req-040): append the user's message, make sure
 // the repo has a working copy of its OWN (chat-workspace.ts, AC15), run
@@ -88,25 +89,19 @@ export function cancelChatTurn(repoId: string): boolean {
 
 /**
  * Live Schritte des gerade laufenden (oder soeben beendeten) Zugs je Repo
- * (req-048) — derselbe onOutput-Tail, den runClaude seit req-008/bug-001
- * über describeEvent schon für den Worker liefert, jetzt auch für den Chat.
- * Wird bei jedem Update überschrieben und erst geleert, wenn fuer dasselbe
- * Repo ein NEUER Zug beginnt — ein beendeter oder gestoppter Zug behält also
- * genau den Stand, den er zuletzt zeigte, statt zu verschwinden (bug-030).
+ * (req-048), seit req-051 als Zeitstrahl mit Status und Ergebnis je Schritt
+ * (lib/chat-steps.ts), gelesen aus dem Roh-Ereignisstrom (onEvent). Wird erst
+ * ersetzt, wenn fuer dasselbe Repo ein NEUER Zug beginnt — ein beendeter oder
+ * gestoppter Zug behält also seinen letzten Stand (bug-030).
  *
- * req-049: anders als der Worker braucht der Chat die VOLLSTÄNDIGE Historie
- * eines Zugs, nicht nur dessen letzte ~50 Zeilen — sie wird am Ende des
- * Zugs an der Antwort gespeichert (siehe `steps` unten), damit auch eine
- * frühere Frage ihre Schritte beim Zurückrollen noch zeigt (AC9). Deshalb
- * läuft der Chat-Aufruf mit `CHAT_STEPS_TAIL_LINES` statt dem Worker-Default.
+ * Der Stand wird am Ende des Zugs an der Antwort gespeichert (siehe `steps`
+ * unten), damit auch eine frühere Frage ihre Schritte samt Ergebnissen beim
+ * Zurückrollen noch zeigt. Eine Kappung wie beim Worker gibt es nicht.
  */
-const currentSteps = new Map<string, string>();
-
-/** req-049: siehe currentSteps oben — der Chat schneidet seine Schritte nicht ab. */
-export const CHAT_STEPS_TAIL_LINES = Number.POSITIVE_INFINITY;
+const currentSteps = new Map<string, ReturnType<typeof createStepTracker>>();
 
 export function getChatSteps(repoId: string): string | null {
-  return currentSteps.get(repoId) ?? null;
+  return currentSteps.get(repoId)?.serialize() ?? null;
 }
 
 /** Test-only reset: production never needs to clear this between runs. */
@@ -190,9 +185,11 @@ export async function sendChatMessage(
   // req-048: dieser Zug beginnt frisch — ein etwaiger Rest des vorigen Zugs
   // (fertig oder gestoppt) räumt jetzt erst Platz, nicht wenn DIESER Zug endet.
   currentSteps.delete(repo.id);
-  const onOutput = (tail: string) => {
-    currentSteps.set(repo.id, redact(tail));
-  };
+  // req-051: Schritte mit Status und Ergebnis aus dem Roh-Ereignisstrom; sie
+  // werden je Feld geschwärzt (redact).
+  const tracker = createStepTracker(redact);
+  currentSteps.set(repo.id, tracker);
+  const onEvent = (line: string) => tracker.push(line);
 
   let outcome: ClaudeOutcome;
   let finalSessionId = sessionId;
@@ -201,8 +198,7 @@ export async function sendChatMessage(
     outcome = await runClaudeImpl(dir, content, {
       model: CHAT_MODEL,
       signal: controller.signal,
-      onOutput,
-      tailLines: CHAT_STEPS_TAIL_LINES,
+      onEvent,
       ...(session ? { resume: sessionId } : { sessionId }),
     });
 
@@ -216,8 +212,7 @@ export async function sendChatMessage(
       outcome = await runClaudeImpl(dir, content, {
         model: CHAT_MODEL,
         signal: controller.signal,
-        onOutput,
-        tailLines: CHAT_STEPS_TAIL_LINES,
+        onEvent,
         sessionId: finalSessionId,
       });
     }
@@ -252,7 +247,7 @@ export async function sendChatMessage(
     // req-049 AC9: die Schritte dieses Zugs bleiben dauerhaft an SEINER
     // Antwort hängen — so zeigt auch eine ältere Frage ihre eigenen Schritte
     // beim Zurückrollen, statt nur den zuletzt gelaufenen Zug des Repos.
-    steps: currentSteps.get(repo.id),
+    steps: getChatSteps(repo.id) ?? undefined,
     ...(outcome.ok
       ? { role: "assistant" as const, content: outcome.report || outcome.summary }
       : isAborted(outcome.summary)

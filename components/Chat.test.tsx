@@ -491,7 +491,7 @@ describe("sichtbare Schritte (req-048)", () => {
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Was steht in foo.ts?");
     await user.click(screen.getByRole("button", { name: "Senden" }));
 
-    await waitFor(() => expect(screen.getByText("→ Read: lib/foo.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("lib/foo.ts")).toBeInTheDocument());
   });
 
   it("AC2: zeigt einen ausgeführten Befehl", async () => {
@@ -505,7 +505,7 @@ describe("sichtbare Schritte (req-048)", () => {
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Laufen die Tests?");
     await user.click(screen.getByRole("button", { name: "Senden" }));
 
-    await waitFor(() => expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("npm test")).toBeInTheDocument());
   });
 
   it("AC3: neue Schritte kommen von selbst dazu, ohne dass ich etwas tun muss", async () => {
@@ -518,13 +518,13 @@ describe("sichtbare Schritte (req-048)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     // Der Stand ändert sich serverseitig, OHNE dass hier etwas getan wird —
     // der nächste Poll-Tick (POLL_MS) muss das von selbst aufgreifen.
     stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
     await waitFor(
-      () => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument(),
+      () => expect(screen.getByText("npm test")).toBeInTheDocument(),
       { timeout: 3000 },
     );
   });
@@ -539,14 +539,14 @@ describe("sichtbare Schritte (req-048)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     // Weg zu Wellarita und zurück — zwischendurch läuft CellarVoice weiter.
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "Wellarita");
     stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
     await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
 
-    await waitFor(() => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("npm test")).toBeInTheDocument());
   });
 
   it("AC7: nach einem Stopp bleiben die bis dahin gezeigten Schritte stehen", async () => {
@@ -562,12 +562,12 @@ describe("sichtbare Schritte (req-048)", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Abbrechen" })).toBeInTheDocument(),
     );
-    await waitFor(() => expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("npm test")).toBeInTheDocument());
 
     await user.click(screen.getByRole("button", { name: "Abbrechen" }));
     await waitFor(() => expect(screen.getByText("Abgebrochen.")).toBeInTheDocument());
 
-    expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument();
+    expect(screen.getByText("npm test")).toBeInTheDocument();
   });
 
   it("AC6 (req-049): ist die Antwort fertig, stehen die Schritte weiterhin unverändert da statt eingeklappt zu sein", async () => {
@@ -580,7 +580,7 @@ describe("sichtbare Schritte (req-048)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     releaseAnswer.r1 = true;
     await waitFor(
@@ -590,7 +590,7 @@ describe("sichtbare Schritte (req-048)", () => {
 
     // Kein <details> mehr — der Schritt steht direkt und ungeklickt da.
     expect(document.querySelector("details[data-chat-steps]")).not.toBeInTheDocument();
-    expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument();
+    expect(screen.getByText("a.ts")).toBeInTheDocument();
   });
 
   it("AC1/AC2 (req-049): die Schritte stehen in normaler Schriftgröße ohne eigenen Rollbalken", async () => {
@@ -603,7 +603,7 @@ describe("sichtbare Schritte (req-048)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     const stepsBox = document.querySelector("[data-chat-steps]") as HTMLElement;
     // Dieselbe Schriftgröße wie der Nachrichtentext (14px), nicht der kleine
@@ -623,7 +623,7 @@ describe("sichtbare Schritte (req-048)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     releaseAnswer.r1 = true;
     await waitFor(
@@ -651,7 +651,7 @@ describe("sichtbare Schritte (req-048)", () => {
     stepsByRepo.r1 = "→ Read: erste.ts";
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Erste Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: erste.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("erste.ts")).toBeInTheDocument());
     releaseAnswer.r1 = true;
     await waitFor(
       () => expect(screen.getByText("Antwort auf: Erste Frage")).toBeInTheDocument(),
@@ -662,7 +662,7 @@ describe("sichtbare Schritte (req-048)", () => {
     stepsByRepo.r1 = "→ Read: zweite.ts";
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Zweite Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: zweite.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("zweite.ts")).toBeInTheDocument());
     releaseAnswer.r1 = true;
     await waitFor(
       () => expect(screen.getByText("Antwort auf: Zweite Frage")).toBeInTheDocument(),
@@ -671,8 +671,8 @@ describe("sichtbare Schritte (req-048)", () => {
 
     // Die Schritte der ERSTEN Frage stehen weiterhin an ihrem eigenen Platz —
     // unverändert durch die inzwischen gelaufene zweite Frage.
-    expect(screen.getByText("→ Read: erste.ts")).toBeInTheDocument();
-    expect(screen.getByText("→ Read: zweite.ts")).toBeInTheDocument();
+    expect(screen.getByText("erste.ts")).toBeInTheDocument();
+    expect(screen.getByText("zweite.ts")).toBeInTheDocument();
   });
 
   it("AC9 (req-049): auf dem iPhone (kein Split) stehen Schritte und Antwort gleichzeitig im Gespräch", async () => {
@@ -686,7 +686,7 @@ describe("sichtbare Schritte (req-048)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("npm test")).toBeInTheDocument());
 
     releaseAnswer.r1 = true;
     await waitFor(
@@ -697,8 +697,8 @@ describe("sichtbare Schritte (req-048)", () => {
     // Beide stehen zugleich im Gespräch — die Schritte haben die Antwort
     // nicht verdrängt, und der Gesprächsbereich (nicht die Schritte selbst)
     // trägt den einzigen Rollbalken.
-    expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument();
-    expect(screen.getByText("→ Bash: npm test")).toBeInTheDocument();
+    expect(screen.getByText("a.ts")).toBeInTheDocument();
+    expect(screen.getByText("npm test")).toBeInTheDocument();
     expect(screen.getByText("Antwort auf: Frage")).toBeInTheDocument();
     const messagesEl = document.querySelector("[data-chat-messages]") as HTMLElement;
     expect(messagesEl.style.overflowY).toBe("auto");
@@ -767,7 +767,7 @@ describe("Darstellung (bug-034)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     const messagesEl = document.querySelector("[data-chat-messages]") as HTMLDivElement;
     expect(messagesEl.scrollTop).toBe(mockScrollHeight);
@@ -775,7 +775,7 @@ describe("Darstellung (bug-034)", () => {
     mockScrollHeight = 1400; // die Schritte sind gewachsen, der Bereich damit höher
     stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
     await waitFor(
-      () => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument(),
+      () => expect(screen.getByText("npm test")).toBeInTheDocument(),
       { timeout: 3000 },
     );
     await waitFor(() => expect(messagesEl.scrollTop).toBe(mockScrollHeight));
@@ -791,7 +791,7 @@ describe("Darstellung (bug-034)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     const messagesEl = document.querySelector("[data-chat-messages]") as HTMLDivElement;
     // Nach oben gerollt, um die bisherigen Schritte zu lesen.
@@ -800,7 +800,7 @@ describe("Darstellung (bug-034)", () => {
 
     stepsByRepo.r1 = "→ Read: a.ts\n→ Bash: npm test";
     await waitFor(
-      () => expect(screen.getByText(/→ Bash: npm test/)).toBeInTheDocument(),
+      () => expect(screen.getByText("npm test")).toBeInTheDocument(),
       { timeout: 3000 },
     );
     expect(messagesEl.scrollTop).toBe(0);
@@ -823,7 +823,7 @@ describe("Darstellung (bug-036)", () => {
 
     await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
     await user.click(screen.getByRole("button", { name: "Senden" }));
-    await waitFor(() => expect(screen.getByText("→ Read: a.ts")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("a.ts")).toBeInTheDocument());
 
     const steps = document.querySelector("[data-chat-steps]") as HTMLElement;
     expect(steps.style.flexShrink).toBe("0");
@@ -962,3 +962,79 @@ describe("Favicon je Repo (req-050)", () => {
     );
   });
 });
+
+// req-051: die Schritte als Zeitstrahl mit Status und aufklappbarem Ergebnis.
+describe("Zeitstrahl (req-051)", () => {
+  const timeline = (status: string, result?: string) =>
+    JSON.stringify([{ id: "t1", tool: "Bash", target: "npm test", status, result }]);
+
+  const sendAndWait = async (steps: string) => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = steps;
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(screen.getByText("npm test")).toBeInTheDocument());
+    return user;
+  };
+
+  it("AC1: Punkt auf senkrechter Linie, Art in Fett, dahinter das Ziel", async () => {
+    await sendAndWait(timeline("running"));
+    const box = document.querySelector("[data-chat-steps]") as HTMLElement;
+    expect(box.style.borderLeft).not.toBe("");
+    expect(box.querySelectorAll("[data-chat-step-dot]")).toHaveLength(1);
+    expect(screen.getByText("Bash").tagName).toBe("STRONG");
+  });
+
+  it.each([
+    ["running", "rgb(154, 160, 166)"],
+    ["ok", "rgb(46, 158, 91)"],
+    ["error", "rgb(214, 69, 69)"],
+  ])("AC2-4: Status %s färbt den Punkt", async (status, color) => {
+    await sendAndWait(timeline(status));
+    const dot = document.querySelector("[data-chat-step-dot]") as HTMLElement;
+    expect(dot.style.background).toBe(color);
+  });
+
+  it("AC5/6: das Ergebnis ist eingeklappt und klappt per Tipp auf", async () => {
+    const user = await sendAndWait(timeline("ok", "alles grün"));
+    expect(screen.queryByText("alles grün")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Bash.*npm test/ }));
+    expect(screen.getByText("alles grün")).toBeInTheDocument();
+  });
+
+  it("AC7: bei 300 Zeilen nur die ersten 20 und 'alle anzeigen'", async () => {
+    const out = Array.from({ length: 300 }, (_, i) => `zeile ${i + 1}`).join("\n");
+    const user = await sendAndWait(timeline("ok", out));
+    await user.click(screen.getByRole("button", { name: /Bash.*npm test/ }));
+    const pre = document.querySelector("[data-chat-step-result] pre") as HTMLElement;
+    expect(pre.textContent!.split("\n")).toHaveLength(20);
+    expect(pre.textContent).toContain("zeile 20");
+    expect(pre.textContent).not.toContain("zeile 21");
+    await user.click(screen.getByRole("button", { name: "alle anzeigen" }));
+    expect(pre.textContent!.split("\n")).toHaveLength(300);
+    expect(screen.queryByRole("button", { name: "alle anzeigen" })).not.toBeInTheDocument();
+  });
+
+  it("AC7: bis 20 Zeilen gibt es kein 'alle anzeigen'", async () => {
+    const user = await sendAndWait(timeline("ok", "a\nb"));
+    await user.click(screen.getByRole("button", { name: /Bash.*npm test/ }));
+    expect(screen.queryByRole("button", { name: "alle anzeigen" })).not.toBeInTheDocument();
+  });
+
+  it("AC8/9: nach der Antwort bleibt der Zeitstrahl, aufklappbar, ohne zweite Anzeige", async () => {
+    const user = await sendAndWait(timeline("ok", "alles grün"));
+    releaseAnswer.r1 = true;
+    await waitFor(
+      () => expect(screen.getByText(/Antwort auf: Frage/)).toBeInTheDocument(),
+      { timeout: 3000 },
+    );
+    expect(document.querySelectorAll("[data-chat-steps]")).toHaveLength(1);
+    await user.click(screen.getByRole("button", { name: /Bash.*npm test/ }));
+    expect(screen.getByText("alles grün")).toBeInTheDocument();
+  });
+});
+
