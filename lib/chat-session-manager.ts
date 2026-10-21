@@ -137,7 +137,13 @@ export async function sendChatMessage(
   // liegt im Store und bleibt davon unberührt, bleibt also auch nach einer
   // Verdrängung oder einem Leerlaufende vollständig lesbar und beschreibbar.
   const nowMs = now().getTime();
-  activeSessionIds = pruneIdleSessions(activeSessionIds, lastActiveAtMs, nowMs);
+  activeSessionIds = pruneIdleSessions(
+    activeSessionIds,
+    lastActiveAtMs,
+    nowMs,
+    undefined,
+    new Set(runningTurns.keys()),
+  );
   const touched = touchActiveSession(activeSessionIds, repo.id);
   activeSessionIds = touched.active;
   lastActiveAtMs[repo.id] = nowMs;
@@ -220,6 +226,10 @@ export async function sendChatMessage(
       runningControllers.delete(repo.id);
     }
   }
+
+  // bug-038: das Ende der Arbeit zählt als Aktivität — die Stunde Leerlauf
+  // beginnt erst jetzt, nicht schon beim Absenden.
+  lastActiveAtMs[repo.id] = now().getTime();
 
   await store.putSession({
     repoId: repo.id,

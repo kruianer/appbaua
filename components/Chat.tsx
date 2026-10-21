@@ -176,9 +176,16 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   const loadMessages = async (id: string): Promise<ChatMessage[]> => {
     try {
       const res = await fetch(`/api/chat/${id}/messages`);
-      const data = (await res.json()) as { messages?: ChatMessage[] };
+      const data = (await res.json()) as { messages?: ChatMessage[]; running?: boolean };
       const msgs = data.messages ?? [];
       setMessagesByRepo((prev) => ({ ...prev, [id]: msgs }));
+      // bug-038: läuft am Server noch ein Zug (z. B. nach einem Tab-Wechsel,
+      // der diese Ansicht neu aufgebaut hat), gilt das Repo wieder als
+      // beschäftigt — das Nachfragen holt dann die Antwort.
+      if (data.running) {
+        setPendingByRepo((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+        setSendingSinceByRepo((prev) => (prev[id] ? prev : { ...prev, [id]: Date.now() }));
+      }
       return msgs;
     } catch {
       return messagesByRepo[id] ?? [];

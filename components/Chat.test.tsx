@@ -39,6 +39,8 @@ let releaseAnswer: Record<string, boolean>;
 let cancelCalls: string[];
 /** Simuliert getChatSteps() je Repo (req-048) — wie die Steps-Route es liefert. */
 let stepsByRepo: Record<string, string | null>;
+/** Simuliert isChatTurnRunning() je Repo (bug-038). */
+let runningByRepo: Record<string, boolean>;
 
 function nextId(repoId: string): number {
   return (messagesByRepo[repoId]?.length ?? 0) + 1;
@@ -61,6 +63,7 @@ beforeEach(() => {
   releaseAnswer = { r1: true, r2: true };
   cancelCalls = [];
   stepsByRepo = { r1: null, r2: null };
+  runningByRepo = {};
   mockScrollHeight = 20;
   vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
     if (url === "/api/chat/state" && (!init || init.method === undefined)) {
@@ -117,7 +120,7 @@ beforeEach(() => {
           list[list.length - 1] = { ...last, steps: stepsByRepo[repoId] ?? undefined };
         }
       }
-      return { ok: true, json: async () => ({ messages: visible }) };
+      return { ok: true, json: async () => ({ messages: visible, running: runningByRepo[repoId] ?? false }) };
     }
     if (messagesMatch && init?.method === "POST") {
       const repoId = messagesMatch[1];
@@ -867,5 +870,26 @@ describe("formatElapsed (bug-033 AC4)", () => {
 
   it("rundet ab statt aufzurunden", () => {
     expect(formatElapsed(14.9)).toBe("0:14");
+  });
+});
+
+describe("Sitzung überlebt den Tab-Wechsel (bug-038)", () => {
+  it("eine frisch geöffnete Ansicht zeigt den noch laufenden Zug und holt dessen Antwort", async () => {
+    // Der Zug lief schon, bevor diese Ansicht entstand (Tab-Wechsel hat sie neu aufgebaut).
+    messagesByRepo.r1 = [
+      { id: 1, repoId: "r1", role: "user", content: "Lange Aufgabe", createdAt: "2026-10-21T10:00:00Z" },
+    ];
+    runningByRepo.r1 = true;
+    render(<Chat repos={[cellarVoice, wellarita]} />);
+    await waitFor(() => expect(screen.getByText("Claude schreibt …")).toBeInTheDocument());
+
+    // Der Zug endet im Hintergrund.
+    messagesByRepo.r1 = [
+      ...messagesByRepo.r1,
+      { id: 2, repoId: "r1", role: "assistant", content: "Fertig", createdAt: "2026-10-21T10:05:00Z" },
+    ];
+    runningByRepo.r1 = false;
+    await waitFor(() => expect(screen.getByText("Fertig")).toBeInTheDocument(), { timeout: 4000 });
+    expect(screen.queryByText("Claude schreibt …")).not.toBeInTheDocument();
   });
 });

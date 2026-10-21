@@ -393,8 +393,8 @@ describe("Fünf-Sitzungen-Grenze (req-040 AC10/AC11)", () => {
   });
 });
 
-describe("Acht-Stunden-Leerlaufende (req-040 AC12)", () => {
-  it("eine acht Stunden unbenutzte Sitzung endet von selbst, ohne dass dafür fünf andere nötig wären", async () => {
+describe("Ein-Stunden-Leerlaufende (bug-038)", () => {
+  it("eine Stunde lang unbenutzte Sitzung endet von selbst, ohne dass dafür fünf andere nötig wären", async () => {
     const store = createMemoryChatSessionStore();
     let clockMs = 0;
     const deps = {
@@ -409,14 +409,14 @@ describe("Acht-Stunden-Leerlaufende (req-040 AC12)", () => {
     await sendChatMessage(repo, "Hallo", deps);
     expect(activeSessionRepoIds()).toEqual([repo.id]);
 
-    clockMs += 8 * 60 * 60_000 + 1; // acht Stunden und einen Moment später
+    clockMs += 60 * 60_000 + 1; // eine Stunde und einen Moment später
     await sendChatMessage(repoOf("r2"), "Hallo von r2", deps);
 
     expect(activeSessionRepoIds()).not.toContain(repo.id);
     expect(activeSessionRepoIds()).toContain("r2");
   });
 
-  it("das Gespräch bleibt da, und ich kann nach acht Stunden weiterschreiben", async () => {
+  it("das Gespräch bleibt da, und ich kann nach einer Stunde weiterschreiben", async () => {
     const store = createMemoryChatSessionStore();
     let clockMs = 0;
     const deps = {
@@ -429,14 +429,14 @@ describe("Acht-Stunden-Leerlaufende (req-040 AC12)", () => {
     };
 
     await sendChatMessage(repo, "Erste Nachricht", deps);
-    clockMs += 8 * 60 * 60_000 + 1;
-    await sendChatMessage(repo, "Nach acht Stunden", deps);
+    clockMs += 60 * 60_000 + 1;
+    await sendChatMessage(repo, "Nach einer Stunde", deps);
 
     const messages = await store.listMessages(repo.id);
     expect(messages.map((m) => m.content)).toEqual([
       "Erste Nachricht",
       "Antwort",
-      "Nach acht Stunden",
+      "Nach einer Stunde",
       "Antwort",
     ]);
   });
@@ -788,5 +788,48 @@ describe("Schritte an der Antwort (req-049)", () => {
     });
 
     expect(seenTailLines).toEqual([Number.POSITIVE_INFINITY]);
+  });
+});
+
+describe("Hintergrundlauf (bug-038)", () => {
+  it("ein lang laufender Zug zählt als Arbeit: die Leerlaufstunde beginnt erst an seinem Ende", async () => {
+    const store = createMemoryChatSessionStore();
+    let clockMs = 0;
+    const deps = {
+      store,
+      token: "tok",
+      prepareRepo: async (r: Repo) => ({ dir: `/chat/${r.id}`, branch: "dev" }),
+      runClaude: async () => {
+        clockMs += 90 * 60_000; // der Zug dauert anderthalb Stunden
+        return { ok: true, summary: "ok", report: "Antwort" };
+      },
+      now: () => new Date(clockMs),
+      getActiveRepoId: async () => null,
+    };
+    await sendChatMessage(repo, "Lange Aufgabe", deps);
+    clockMs += 30 * 60_000; // 30 Minuten nach Ende der Arbeit
+    await sendChatMessage(repoOf("r2"), "Hallo", deps);
+    expect(activeSessionRepoIds()).toContain(repo.id);
+  });
+
+  it("isChatTurnRunning zeigt den Zug, solange er läuft, und danach nicht mehr", async () => {
+    const store = createMemoryChatSessionStore();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const turn = startChatTurn(repo, "Hallo", {
+      store,
+      token: "tok",
+      prepareRepo: async () => ({ dir: "/chat/r1", branch: "dev" }),
+      runClaude: async () => {
+        await gate;
+        return { ok: true, summary: "ok", report: "Antwort" };
+      },
+      getActiveRepoId: async () => null,
+    });
+    expect(isChatTurnRunning(repo.id)).toBe(true);
+    release();
+    await turn;
+    await Promise.resolve();
+    expect(isChatTurnRunning(repo.id)).toBe(false);
   });
 });

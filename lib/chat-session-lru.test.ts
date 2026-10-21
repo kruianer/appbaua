@@ -39,18 +39,30 @@ describe("touchActiveSession", () => {
   });
 });
 
-// req-040 AC12: eine Sitzung ohne Eingabe acht Stunden lang wird beendet.
+// bug-038: eine Sitzung ohne Eingabe eine Stunde lang wird beendet.
 describe("pruneIdleSessions", () => {
-  it("lässt eine Sitzung innerhalb der acht Stunden unberührt", () => {
+  it("lässt eine Sitzung innerhalb der eine Stunde unberührt", () => {
     const lastActiveAtMs = { a: 1000 };
     const result = pruneIdleSessions(["a"], lastActiveAtMs, 1000 + SESSION_IDLE_MS);
     expect(result).toEqual(["a"]);
   });
 
-  it("entfernt eine Sitzung, die länger als acht Stunden nicht benutzt wurde", () => {
+  it("entfernt eine Sitzung, die länger als eine Stunde nicht benutzt wurde", () => {
     const lastActiveAtMs = { a: 1000 };
     const result = pruneIdleSessions(["a"], lastActiveAtMs, 1000 + SESSION_IDLE_MS + 1);
     expect(result).toEqual([]);
+  });
+
+  it("lässt eine Sitzung mit noch laufendem Zug nie ablaufen", () => {
+    const lastActiveAtMs = { a: 0 };
+    const result = pruneIdleSessions(
+      ["a"],
+      lastActiveAtMs,
+      SESSION_IDLE_MS * 10,
+      SESSION_IDLE_MS,
+      new Set(["a"]),
+    );
+    expect(result).toEqual(["a"]);
   });
 
   it("betrifft nur die abgelaufene Sitzung, andere bleiben aktiv", () => {
