@@ -33,4 +33,30 @@ describe("Chat-Arbeitskopie (req-040 AC15)", () => {
     expect(result.dir).toBe(repoDir(repo.url, CHAT_WORK_ROOT));
     expect(result.dir).not.toBe(repoDir(repo.url));
   });
+  // bug-040: Commits und Änderungen überleben die nächste Nachricht.
+  it("bug-040: setzt die Arbeitskopie nicht zurück und räumt nichts weg", async () => {
+    const calls: string[][] = [];
+    const runImpl = vi.fn(async (_cmd: string, args: string[]) => {
+      calls.push(args);
+      const stdout = args[0] === "rev-parse" && args.includes("--abbrev-ref") ? "dev\n" : "";
+      return { ok: true, code: 0, stdout, stderr: "" };
+    });
+    await prepareChatRepo(repo, "token", { runImpl, readFileImpl: async () => null });
+    expect(calls.some((a) => a[0] === "reset")).toBe(false);
+    expect(calls.some((a) => a[0] === "clean")).toBe(false);
+    expect(calls.some((a) => a[0] === "checkout")).toBe(false);
+  });
+
+  it("bug-040: wechselt auf einen vorhandenen lokalen Zweig ohne -B", async () => {
+    const calls: string[][] = [];
+    const runImpl = vi.fn(async (_cmd: string, args: string[]) => {
+      calls.push(args);
+      const stdout = args[0] === "rev-parse" && args.includes("--abbrev-ref") ? "main\n" : "";
+      return { ok: true, code: 0, stdout, stderr: "" };
+    });
+    await prepareChatRepo(repo, "token", { runImpl, readFileImpl: async () => null });
+    const co = calls.find((a) => a[0] === "checkout");
+    expect(co).toEqual(["checkout", "dev"]);
+    expect(calls.some((a) => a[0] === "reset")).toBe(false);
+  });
 });
