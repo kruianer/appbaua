@@ -493,6 +493,15 @@ export function authEnv(token: string): Record<string, string> {
   };
 }
 
+/**
+ * Git credential helper that answers from the `GITHUB_TOKEN` environment
+ * variable (bug-041). The chat lets Claude run a plain `git push` / `git pull`
+ * in its working copy; the helper makes git find the token without it being
+ * written anywhere — `.git/config` holds only the name of the variable.
+ */
+export const ENV_CREDENTIAL_HELPER =
+  '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f';
+
 /** Local directory name for a repo (owner-repo), under `root` (default: the worker's own). */
 export function repoDir(normalizedUrl: string, root: string = WORK_ROOT): string {
   const slug = normalizedUrl.replace(/[^a-z0-9]+/gi, "-");
@@ -513,6 +522,7 @@ async function syncRepo(
   git: typeof run,
   wait: (ms: number) => Promise<void>,
   root: string = WORK_ROOT,
+  withCredentialHelper = false,
 ): Promise<{ dir: string; auth: Record<string, string> }> {
   const dir = repoDir(normalizedUrl, root);
   const url = remoteUrl(normalizedUrl);
@@ -544,6 +554,12 @@ async function syncRepo(
   // Ensure identity so commits succeed in a fresh container.
   await git("git", ["config", "user.email", "worker@appbaua.local"], { cwd: dir });
   await git("git", ["config", "user.name", "appbaua-worker"], { cwd: dir });
+
+  if (withCredentialHelper) {
+    await git("git", ["config", "credential.helper", ENV_CREDENTIAL_HELPER], {
+      cwd: dir,
+    });
+  }
 
   return { dir, auth };
 }
@@ -675,6 +691,7 @@ export async function prepareRepoOnConvention(
     git,
     wait,
     deps.root ?? WORK_ROOT,
+    deps.keepLocalWork === true,
   );
 
   const stated = devBranchFrom(await read(dir, DEVOPS_FILE).catch(() => null));

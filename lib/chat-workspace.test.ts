@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { repoDir } from "./workspace";
+import { ENV_CREDENTIAL_HELPER, repoDir } from "./workspace";
 import { CHAT_WORK_ROOT, prepareChatRepo } from "./chat-workspace";
 import type { Repo } from "./repos";
 
@@ -58,5 +58,20 @@ describe("Chat-Arbeitskopie (req-040 AC15)", () => {
     const co = calls.find((a) => a[0] === "checkout");
     expect(co).toEqual(["checkout", "dev"]);
     expect(calls.some((a) => a[0] === "reset")).toBe(false);
+  });
+
+  // bug-041: ein normales git push/pull im Chat findet den Token selbst.
+  it("bug-041: trägt einen Credential-Helper ein, der den Token aus der Umgebung liest", async () => {
+    const configs: string[][] = [];
+    const runImpl = vi.fn(async (_cmd: string, args: string[]) => {
+      if (args[0] === "config") configs.push(args);
+      const stdout = args[0] === "rev-parse" && args.includes("--abbrev-ref") ? "dev\n" : "";
+      return { ok: true, code: 0, stdout, stderr: "" };
+    });
+    await prepareChatRepo(repo, "geheim-123", { runImpl, readFileImpl: async () => null });
+    const helper = configs.find((a) => a[1] === "credential.helper");
+    expect(helper?.[2]).toBe(ENV_CREDENTIAL_HELPER);
+    expect(helper?.[2]).toContain("$GITHUB_TOKEN");
+    expect(configs.flat().join(" ")).not.toContain("geheim-123");
   });
 });
