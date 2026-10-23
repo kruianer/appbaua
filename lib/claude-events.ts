@@ -75,7 +75,7 @@ function contentBlocks(message: unknown): ContentBlock[] {
   return Array.isArray(content) ? (content as ContentBlock[]) : [];
 }
 
-function toolTarget(input: unknown): string {
+export function toolTarget(input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const rec = input as Record<string, unknown>;
   for (const key of TOOL_TARGET_KEYS) {
@@ -107,7 +107,7 @@ function describeAssistant(message: unknown): string[] {
   return lines;
 }
 
-function toolResultText(content: unknown): string {
+export function toolResultText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content

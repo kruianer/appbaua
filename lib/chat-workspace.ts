@@ -22,6 +22,8 @@ export async function prepareChatRepo(
 ): Promise<PreparedRepo> {
   return prepareRepoOnConvention(repo.url, token, {
     ...deps,
+    // bug-040: the chat keeps unpushed commits and edits between messages.
+    keepLocalWork: true,
     root: deps.root ?? CHAT_WORK_ROOT,
   });
 }

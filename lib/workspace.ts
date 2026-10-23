@@ -95,6 +95,14 @@ export type PreparedRepo = { dir: string; branch: string };
 
 export type PrepareDeps = WorkspaceDeps & {
   /**
+   * Keep what is in the working copy (bug-040): no `reset --hard`, no
+   * `git clean`. Only the chat sets this — it works like a session at a
+   * machine, so local commits and edits survive until Claude pushes or drops
+   * them. The remote's state is fetched, never forced onto the branch; Claude
+   * pulls it itself. The worker keeps the default (reset to origin).
+   */
+  keepLocalWork?: boolean;
+  /**
    * Reads the repo's devops.md out of the working copy (req-020). A seam of its
    * own, so the branch decision is testable without a filesystem.
    */
@@ -485,6 +493,15 @@ export function authEnv(token: string): Record<string, string> {
   };
 }
 
+/**
+ * Git credential helper that answers from the `GITHUB_TOKEN` environment
+ * variable (bug-041). The chat lets Claude run a plain `git push` / `git pull`
+ * in its working copy; the helper makes git find the token without it being
+ * written anywhere — `.git/config` holds only the name of the variable.
+ */
+export const ENV_CREDENTIAL_HELPER =
+  '!f() { test "$1" = get || exit 0; echo username=x-access-token; echo "password=$GITHUB_TOKEN"; }; f';
+
 /** Local directory name for a repo (owner-repo), under `root` (default: the worker's own). */
 export function repoDir(normalizedUrl: string, root: string = WORK_ROOT): string {
   const slug = normalizedUrl.replace(/[^a-z0-9]+/gi, "-");
@@ -505,6 +522,7 @@ async function syncRepo(
   git: typeof run,
   wait: (ms: number) => Promise<void>,
   root: string = WORK_ROOT,
+  withCredentialHelper = false,
 ): Promise<{ dir: string; auth: Record<string, string> }> {
   const dir = repoDir(normalizedUrl, root);
   const url = remoteUrl(normalizedUrl);
@@ -536,6 +554,12 @@ async function syncRepo(
   // Ensure identity so commits succeed in a fresh container.
   await git("git", ["config", "user.email", "worker@appbaua.local"], { cwd: dir });
   await git("git", ["config", "user.name", "appbaua-worker"], { cwd: dir });
+
+  if (withCredentialHelper) {
+    await git("git", ["config", "credential.helper", ENV_CREDENTIAL_HELPER], {
+      cwd: dir,
+    });
+  }
 
   return { dir, auth };
 }
@@ -577,7 +601,29 @@ async function checkoutTracking(
   dir: string,
   branch: string,
   token: string,
+  keepLocalWork = false,
 ): Promise<void> {
+  if (keepLocalWork) {
+    // Already on the branch: touch nothing. Otherwise switch to the existing
+    // local branch (keeping its unpushed commits) or create it from the remote.
+    if ((await currentBranch(git, dir)) === branch) return;
+    const local = await git(
+      "git",
+      ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`],
+      { cwd: dir },
+    );
+    const sw = await git(
+      "git",
+      local.ok
+        ? ["checkout", branch]
+        : ["checkout", "-B", branch, `origin/${branch}`],
+      { cwd: dir },
+    );
+    if (!sw.ok) {
+      throw new Error(`checkout ${branch} failed: ${redact(sw.stderr, [token])}`);
+    }
+    return;
+  }
   const co = await git("git", ["checkout", "-B", branch, `origin/${branch}`], {
     cwd: dir,
   });
@@ -645,17 +691,21 @@ export async function prepareRepoOnConvention(
     git,
     wait,
     deps.root ?? WORK_ROOT,
+    deps.keepLocalWork === true,
   );
 
   const stated = devBranchFrom(await read(dir, DEVOPS_FILE).catch(() => null));
   // Untracked leftovers of an earlier run must not be swept into this step's
   // commit, whichever way the branch was found (bug-002).
-  const clean = () => git("git", ["clean", "-fd"], { cwd: dir });
+  const keep = deps.keepLocalWork === true;
+  const clean = async () => {
+    if (!keep) await git("git", ["clean", "-fd"], { cwd: dir });
+  };
 
   if (stated?.kind === "named") {
     const branch = stated.branch;
     if (await remoteHasBranch(git, dir, auth, branch, wait)) {
-      await checkoutTracking(git, dir, branch, token);
+      await checkoutTracking(git, dir, branch, token, keep);
     } else {
       // The repo names a branch the remote does not have yet: create it where
       // the clone stands, exactly as the worker always did for `dev`.
@@ -687,7 +737,7 @@ export async function prepareRepoOnConvention(
       : await defaultBranch(dir, token, deps);
   }
 
-  await checkoutTracking(git, dir, branch, token);
+  await checkoutTracking(git, dir, branch, token, keep);
   await clean();
   return { dir, branch };
 }

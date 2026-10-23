@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { listRepos } from "@/lib/repo-service";
 import { getChatSessionStore } from "@/lib/chat-session-store";
-import { startChatTurn } from "@/lib/chat-session-manager";
+import { isChatTurnRunning, startChatTurn } from "@/lib/chat-session-manager";
 
 // req-040: das Gespräch eines Repos lesen (GET) bzw. eine Nachricht schicken
 // (POST). Der Versand selbst läuft im Hintergrund weiter (AC5/AC6): diese
@@ -14,7 +14,9 @@ export async function GET(
 ) {
   const { repoId } = await params;
   const messages = await getChatSessionStore().listMessages(repoId);
-  return NextResponse.json({ messages });
+  // bug-038: `running` lässt eine neu geöffnete Ansicht erkennen, dass die
+  // Arbeit im Hintergrund weiterläuft, statt sie für verloren zu halten.
+  return NextResponse.json({ messages, running: isChatTurnRunning(repoId) });
 }
 
 export async function POST(

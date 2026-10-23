@@ -27,19 +27,27 @@ export function touchActiveSession(
 }
 
 /**
- * req-040 constraint: "Eine Sitzung ohne Eingabe wird nach acht Stunden
- * beendet. Der Gesprächstext bleibt erhalten." Same split as the eviction
- * above — only this in-memory active set loses the entry, never the
- * persisted conversation.
+ * bug-038 (löst die acht Stunden aus req-040 ab): eine Sitzung wird erst
+ * beendet, wenn sie eine Stunde lang nichts zu tun hatte — weder gearbeitet
+ * noch eine neue Nachricht bekommen. Same split as the eviction above — only
+ * this in-memory active set loses the entry, never the persisted
+ * conversation.
  */
-export const SESSION_IDLE_MS = 8 * 60 * 60_000;
+export const SESSION_IDLE_MS = 60 * 60_000;
 
-/** Drop every repo whose last use is older than `idleMs` (default: 8h). */
+/**
+ * Drop every repo whose last use is older than `idleMs` (default: 1h). A repo
+ * in `busy` (its turn is still running) is never dropped, however long the
+ * turn takes (bug-038).
+ */
 export function pruneIdleSessions(
   active: string[],
   lastActiveAtMs: Record<string, number>,
   nowMs: number,
   idleMs: number = SESSION_IDLE_MS,
+  busy: ReadonlySet<string> = new Set(),
 ): string[] {
-  return active.filter((id) => nowMs - (lastActiveAtMs[id] ?? 0) <= idleMs);
+  return active.filter(
+    (id) => busy.has(id) || nowMs - (lastActiveAtMs[id] ?? 0) <= idleMs,
+  );
 }

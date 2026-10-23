@@ -487,6 +487,12 @@ export async function runClaude(
      */
     tailLines?: number;
     /**
+     * Receives every complete raw line of the event stream (req-051), so a
+     * caller can follow tool calls with their results and status instead of
+     * only the condensed activity lines. Errors from it are swallowed.
+     */
+    onEvent?: (line: string) => void;
+    /**
      * Fires once with the model the run's own "init" event names (req-027) —
      * the model actually used, read from the event stream rather than assumed
      * from the --model flag handed in. Never fires again after the first call.
@@ -521,6 +527,7 @@ export async function runClaude(
   const model = deps?.model ?? CLAUDE_MODEL;
   const onOutput = deps?.onOutput;
   const onModel = deps?.onModel;
+  const onEvent = deps?.onEvent;
   const activityData = onOutput
     ? createActivityStream(onOutput, { now: deps?.now, lines: deps?.tailLines })
     : undefined;
@@ -529,10 +536,22 @@ export async function runClaude(
   // process's stdout handler.
   let modelSeen = false;
   let rest = "";
+  let eventRest = "";
   const onData =
-    activityData || onModel
+    activityData || onModel || onEvent
       ? (chunk: string) => {
           activityData?.(chunk);
+          if (onEvent) {
+            const parts = (eventRest + chunk).split("\n");
+            eventRest = parts.pop() ?? "";
+            for (const line of parts) {
+              try {
+                onEvent(line);
+              } catch {
+                /* live output must never break the run */
+              }
+            }
+          }
           if (onModel && !modelSeen) {
             const parts = (rest + chunk).split("\n");
             rest = parts.pop() ?? "";

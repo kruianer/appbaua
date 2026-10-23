@@ -4,7 +4,9 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Repo } from "@/lib/repos";
 import type { ChatMessage } from "@/lib/chat-session-store";
 import { parseChatContentBlocks } from "@/lib/chat-message-blocks";
+import { parseChatSteps, type ChatStep } from "@/lib/chat-steps";
 import { CopyCommand } from "./CopyCommand";
+import { RepoIcon } from "./RepoIcon";
 
 // Chat-Tab (req-040): oben die Repo-Auswahl, darunter das Gespräch mit
 // Claude. Jedes Repo hat sein eigenes Gespräch UND seine eigene Claude-
@@ -53,24 +55,98 @@ export function formatElapsed(totalSeconds: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+/** Höchstens so viele Zeilen eines Ergebnisses stehen im aufgeklappten Schritt (req-051). */
+const RESULT_PREVIEW_LINES = 20;
+
+const STEP_DOT_COLOR: Record<ChatStep["status"], string> = {
+  running: "#9aa0a6",
+  ok: "#2e9e5b",
+  error: "#d64545",
+};
+
+/** Ein Schritt: Punkt auf der Linie, Art in Fett, Ziel; das Ergebnis klappt per Tipp auf. */
+function StepItem({ step }: { step: ChatStep }) {
+  const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+  const result = step.result;
+  const resultLines = result ? result.split("\n") : [];
+  const shown = all ? resultLines : resultLines.slice(0, RESULT_PREVIEW_LINES);
+  const label = (
+    <>
+      <strong>{step.tool}</strong>
+      {step.target && <span style={{ marginLeft: 8, wordBreak: "break-all" }}>{step.target}</span>}
+    </>
+  );
+  return (
+    <div data-chat-step data-status={step.status} style={{ position: "relative", paddingLeft: 18 }}>
+      <span
+        data-chat-step-dot
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: -5,
+          top: 6,
+          width: 9,
+          height: 9,
+          borderRadius: "50%",
+          background: STEP_DOT_COLOR[step.status],
+        }}
+      />
+      {result ? (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            all: "unset",
+            cursor: "pointer",
+            display: "block",
+            width: "100%",
+            whiteSpace: "pre-wrap",
+          }}
+        >
+          {label}
+        </button>
+      ) : (
+        <div style={{ whiteSpace: "pre-wrap" }}>{label}</div>
+      )}
+      {result && open && (
+        <div data-chat-step-result style={{ marginTop: 2 }}>
+          <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-all", font: "inherit" }}>
+            {shown.join("\n")}
+          </pre>
+          {!all && resultLines.length > RESULT_PREVIEW_LINES && (
+            <button
+              type="button"
+              onClick={() => setAll(true)}
+              style={{ all: "unset", cursor: "pointer", textDecoration: "underline" }}
+            >
+              alle anzeigen
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
- * Die Schritte eines Zugs (req-049) — jede Zeile des Ereignisstroms als
- * eigener Block, untereinander wie die Nachrichten selbst: normale
- * Schriftgröße (AC1), KEIN eigener Rollbalken (AC2), keine Höchsthöhe — der
- * Gesprächsbereich darüber rollt, nicht dieser Block (AC3). Das ersetzt die
- * frühere Anzeige aus req-048 (schmaler Kasten, danach unter "Schritte"
- * eingeklappt) komplett; es gibt keine zweite Anzeige daneben.
+ * Die Schritte eines Zugs als Zeitstrahl (req-051): eine senkrechte Linie, ein
+ * Punkt je Schritt (grau = läuft, grün = geklappt, rot = fehlgeschlagen).
+ * Sonst bleibt req-049: normale Schriftgröße, KEIN eigener Rollbalken, keine
+ * Höchsthöhe — der Gesprächsbereich darüber rollt, nicht dieser Block. Das
+ * ersetzt die Zeilen-Anzeige; es gibt keine zweite Anzeige daneben.
  */
 function StepList({ text }: { text: string }) {
-  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-  if (lines.length === 0) return null;
+  const steps = parseChatSteps(text);
+  if (steps.length === 0) return null;
   return (
     <div
       data-chat-steps
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 3,
+        gap: 4,
         fontSize: 14,
         lineHeight: 1.4,
         color: muted(55),
@@ -79,12 +155,12 @@ function StepList({ text }: { text: string }) {
         // Gespräch diesen Block zusammen statt über ihn hinweg zu rollen.
         flexShrink: 0,
         padding: "2px 2px",
+        marginLeft: 5,
+        borderLeft: `1px solid ${muted(25)}`,
       }}
     >
-      {lines.map((line, i) => (
-        <div key={i} style={{ whiteSpace: "pre-wrap" }}>
-          {line}
-        </div>
+      {steps.map((step, i) => (
+        <StepItem key={step.id || i} step={step} />
       ))}
     </div>
   );
@@ -97,6 +173,7 @@ function StepList({ text }: { text: string }) {
 export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean }) {
   const [repoId, setRepoId] = useState<string>(repos[0]?.id ?? "");
   const [draft, setDraft] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [messagesByRepo, setMessagesByRepo] = useState<Record<string, ChatMessage[]>>({});
   const [pendingByRepo, setPendingByRepo] = useState<Record<string, boolean>>({});
   const [stepsByRepo, setStepsByRepo] = useState<Record<string, string | null>>({});
@@ -110,6 +187,10 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   // werden — nur wer ohnehin am Ende steht (oder gerade selbst abgeschickt
   // hat), bleibt dort.
   const stickToBottomRef = useRef(true);
+  // bug-039: Repos, deren Absende-Anfrage noch unterwegs ist. Solange sie nicht
+  // beim Server angekommen ist, sagt "running: false" noch nichts über das
+  // Ende des Zugs — das Nachfragen darf dann nicht vorzeitig aufhören.
+  const postingRef = useRef<Record<string, boolean>>({});
 
   // useMemo statt eines einfachen Ausdrucks: sonst entsteht bei jedem Render
   // eine neue Array-Referenz und der Scroll-Effekt unten (abhängig von
@@ -173,15 +254,24 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadMessages = async (id: string): Promise<ChatMessage[]> => {
+  const loadMessages = async (
+    id: string,
+  ): Promise<{ msgs: ChatMessage[]; running: boolean | null }> => {
     try {
       const res = await fetch(`/api/chat/${id}/messages`);
-      const data = (await res.json()) as { messages?: ChatMessage[] };
+      const data = (await res.json()) as { messages?: ChatMessage[]; running?: boolean };
       const msgs = data.messages ?? [];
       setMessagesByRepo((prev) => ({ ...prev, [id]: msgs }));
-      return msgs;
+      // bug-038: läuft am Server noch ein Zug (z. B. nach einem Tab-Wechsel,
+      // der diese Ansicht neu aufgebaut hat), gilt das Repo wieder als
+      // beschäftigt — das Nachfragen holt dann die Antwort.
+      if (data.running) {
+        setPendingByRepo((prev) => (prev[id] ? prev : { ...prev, [id]: true }));
+        setSendingSinceByRepo((prev) => (prev[id] ? prev : { ...prev, [id]: Date.now() }));
+      }
+      return { msgs, running: data.running ?? false };
     } catch {
-      return messagesByRepo[id] ?? [];
+      return { msgs: messagesByRepo[id] ?? [], running: null };
     }
   };
 
@@ -211,12 +301,15 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   // Schritte mit, damit ihr Stand beim Zurückschalten ebenfalls aktuell ist.
   useEffect(() => {
     if (!repoId || !pendingByRepo[repoId]) return;
-    const before = (messagesByRepo[repoId] ?? []).length;
     let stopped = false;
     const check = () => {
       void loadSteps(repoId);
-      void loadMessages(repoId).then((msgs) => {
-        if (!stopped && msgs.length > before) {
+      // bug-039: Ende des Zugs = der Server meldet, dass nichts mehr läuft.
+      // Früher zählte das Nachfragen nur, ob die Nachrichtenzahl wuchs — ein
+      // verpasster Zuwachs ließ die Ansicht ewig "beschäftigt" und die Antwort
+      // blieb bis zur nächsten Nachricht unsichtbar.
+      void loadMessages(repoId).then(({ running }) => {
+        if (!stopped && running === false && !postingRef.current[repoId]) {
           setPendingByRepo((prev) => ({ ...prev, [repoId]: false }));
         }
       });
@@ -247,7 +340,6 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
     // bug-034: Abschicken gilt immer als "ans Ende" — unabhängig davon, wohin
     // zuvor hochgerollt wurde.
     stickToBottomRef.current = true;
-    const countBeforeSend = (messagesByRepo[targetRepoId] ?? []).length + 1; // +1: die Nachricht selbst
     const optimistic: ChatMessage = {
       id: -Date.now(),
       repoId: targetRepoId,
@@ -261,6 +353,7 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
     }));
     setPendingByRepo((prev) => ({ ...prev, [targetRepoId]: true }));
     setSendingSinceByRepo((prev) => ({ ...prev, [targetRepoId]: Date.now() }));
+    postingRef.current[targetRepoId] = true;
     try {
       await fetch(`/api/chat/${targetRepoId}/messages`, {
         method: "POST",
@@ -269,12 +362,14 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
       });
     } catch {
       // Das Nachfragen unten holt die Antwort trotzdem, sobald sie da ist.
+    } finally {
+      postingRef.current[targetRepoId] = false;
     }
     // Gleich einmal nachfragen: läuft Claude schnell (oder lief die Antwort
     // schon, bevor diese Anfrage überhaupt ankam), steht sie damit sofort da,
     // statt erst auf den nächsten Intervall-Tick des Effekts unten zu warten.
-    const msgs = await loadMessages(targetRepoId);
-    if (msgs.length > countBeforeSend) {
+    const { running } = await loadMessages(targetRepoId);
+    if (running === false) {
       setPendingByRepo((prev) => ({ ...prev, [targetRepoId]: false }));
     }
   };
@@ -287,14 +382,13 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
   const cancel = async () => {
     const targetRepoId = repoId;
     if (!targetRepoId) return;
-    const countBefore = (messagesByRepo[targetRepoId] ?? []).length;
     try {
       await fetch(`/api/chat/${targetRepoId}/cancel`, { method: "POST" });
     } catch {
       // Das Nachfragen unten merkt das Ende des Laufs ohnehin.
     }
-    const msgs = await loadMessages(targetRepoId);
-    if (msgs.length > countBefore) {
+    const { running } = await loadMessages(targetRepoId);
+    if (running === false) {
       setPendingByRepo((prev) => ({ ...prev, [targetRepoId]: false }));
     }
   };
@@ -502,6 +596,7 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
                   color: r.active ? "var(--color-text)" : muted(40),
                 }}
               >
+                <RepoIcon repoId={r.id} name={r.name} />
                 <span
                   style={{
                     flex: 1,
@@ -536,6 +631,7 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
               borderBottom: "1px solid var(--color-divider)",
             }}
           >
+            {activeRepo && <RepoIcon repoId={activeRepo.id} name={activeRepo.name} />}
             <span data-chat-active-repo style={{ fontSize: 14, fontWeight: 600 }}>
               {activeRepo?.name ?? ""}
             </span>
@@ -556,12 +652,92 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
         minHeight: 0,
       }}
     >
-      <div style={{ padding: "0 20px 10px", flexShrink: 0 }}>
+      <div style={{ padding: "0 20px 10px", flexShrink: 0, position: "relative" }}>
+        {/* req-050: ein natives <select> kann kein Bild vor die Einträge setzen,
+            deshalb zeigt eine eigene Auswahl die Favicons. Das echte <select>
+            bleibt unsichtbar daneben bestehen (Bedienhilfen, Tests). */}
+        <button
+          type="button"
+          data-repo-picker
+          aria-haspopup="listbox"
+          aria-expanded={pickerOpen}
+          onClick={() => setPickerOpen((o) => !o)}
+          className="input"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 9,
+            width: "100%",
+            textAlign: "left",
+            font: "inherit",
+            cursor: "pointer",
+          }}
+        >
+          {activeRepo && <RepoIcon repoId={activeRepo.id} name={activeRepo.name} />}
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {activeRepo?.name ?? ""}
+          </span>
+          <span aria-hidden="true">▾</span>
+        </button>
+        {pickerOpen && (
+          <ul
+            role="listbox"
+            aria-label="Repo-Auswahl"
+            style={{
+              position: "absolute",
+              left: 20,
+              right: 20,
+              zIndex: 20,
+              margin: "4px 0 0",
+              padding: 4,
+              listStyle: "none",
+              maxHeight: "50vh",
+              overflowY: "auto",
+              background: "var(--color-surface, var(--color-bg))",
+              border: "1px solid var(--color-divider)",
+              borderRadius: "var(--radius-md)",
+            }}
+          >
+            {repos.map((r) => (
+              <li
+                key={r.id}
+                role="option"
+                aria-selected={r.id === repoId}
+                onClick={() => {
+                  setPickerOpen(false);
+                  selectRepo(r.id);
+                }}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 9,
+                  padding: "10px",
+                  cursor: "pointer",
+                  borderRadius: "var(--radius-md)",
+                  background:
+                    r.id === repoId
+                      ? "color-mix(in srgb, var(--color-accent) 12%, transparent)"
+                      : "transparent",
+                }}
+              >
+                <RepoIcon repoId={r.id} name={r.name} />
+                <span>{r.name}</span>
+              </li>
+            ))}
+          </ul>
+        )}
         <select
           aria-label="Repo"
-          className="input"
+          tabIndex={-1}
           value={repoId}
           onChange={(e) => selectRepo(e.target.value)}
+          style={{
+            position: "absolute",
+            width: 1,
+            height: 1,
+            opacity: 0,
+            overflow: "hidden",
+          }}
         >
           {repos.map((r) => (
             <option key={r.id} value={r.id}>

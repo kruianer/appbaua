@@ -820,3 +820,16 @@ describe("Zeitgrenze eines Claude-Laufs", () => {
     );
   });
 });
+
+describe("onEvent (req-051)", () => {
+  it("liefert jede vollständige Rohzeile, auch über Chunk-Grenzen hinweg", async () => {
+    const runImpl: typeof run = async (_cmd, _args, opts = {}) => {
+      opts.onData?.('{"a":1}\n{"b"');
+      opts.onData?.(":2}\n");
+      return { ok: true, code: 0, signal: null, stdout: "", stderr: "" } as Awaited<ReturnType<typeof run>>;
+    };
+    const lines: string[] = [];
+    await runClaude("/repo", "prompt", { runImpl, onEvent: (l) => lines.push(l) });
+    expect(lines).toEqual(['{"a":1}', '{"b":2}']);
+  });
+});
