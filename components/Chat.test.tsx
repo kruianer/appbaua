@@ -1038,3 +1038,58 @@ describe("Zeitstrahl (req-051)", () => {
   });
 });
 
+
+// bug-042: der Gesprächsverlauf ließ sich seitlich rollen. overflowY: auto
+// macht den Bereich in beide Richtungen rollbar, sobald ein Inhalt breiter
+// ist — und ein langes Wort ohne Leerzeichen (Pfad, Link, Befehl) brach in
+// den Blasen nicht um. jsdom layoutet nicht; geprüft werden deshalb die
+// Regeln, die das Breiterwerden verhindern.
+describe("Kein seitliches Rollen (bug-042)", () => {
+  const longPath = `/work/${"sehr-langer-ordnername/".repeat(20)}datei.ts`;
+
+  it("der Gesprächsbereich rollt nur senkrecht, nie seitlich", async () => {
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+
+    const messages = document.querySelector("[data-chat-messages]") as HTMLElement;
+    expect(messages.style.overflowY).toBe("auto");
+    expect(messages.style.overflowX).toBe("hidden");
+  });
+
+  it("lange Wörter ohne Leerzeichen brechen in der Nachricht um, die Nachricht passt sich der Breite an", async () => {
+    const user = userEvent.setup();
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), `${longPath}{Enter}`);
+    await waitFor(() => expect(screen.getByText(`Antwort auf: ${longPath}`)).toBeInTheDocument());
+
+    for (const text of [longPath, `Antwort auf: ${longPath}`]) {
+      const block = screen.getByText(text);
+      expect(block.style.overflowWrap).toBe("anywhere");
+      const bubble = block.parentElement as HTMLElement;
+      expect(bubble.style.minWidth).toBe("0");
+      const messageEl = bubble.parentElement as HTMLElement;
+      expect(messageEl.style.minWidth).toBe("0");
+    }
+  });
+
+  it("die Schritte brechen lange Inhalte ebenfalls um", async () => {
+    const user = userEvent.setup();
+    releaseAnswer.r1 = false;
+    stepsByRepo.r1 = JSON.stringify([
+      { id: "t1", tool: "Bash", target: longPath, status: "ok", result: longPath },
+    ]);
+    render(<Chat repos={repos} />);
+    await waitFor(() => expect(stateCalls.length).toBeGreaterThan(0));
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Repo" }), "CellarVoice");
+    await user.type(screen.getByRole("textbox", { name: "Nachricht" }), "Frage");
+    await user.click(screen.getByRole("button", { name: "Senden" }));
+    await waitFor(() => expect(document.querySelector("[data-chat-steps]")).not.toBeNull());
+
+    const steps = document.querySelector("[data-chat-steps]") as HTMLElement;
+    expect(steps.style.minWidth).toBe("0");
+    expect(steps.style.overflowWrap).toBe("anywhere");
+  });
+});

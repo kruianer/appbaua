@@ -154,6 +154,10 @@ function StepList({ text }: { text: string }) {
         // bug-036: kein Flex-Kind darf schrumpfen, sonst drückt das wachsende
         // Gespräch diesen Block zusammen statt über ihn hinweg zu rollen.
         flexShrink: 0,
+        // bug-042: lange Ziele/Ergebnisse brechen um, statt den Verlauf
+        // seitlich rollbar zu machen.
+        minWidth: 0,
+        overflowWrap: "anywhere",
         padding: "2px 2px",
         marginLeft: 5,
         borderLeft: `1px solid ${muted(25)}`,
@@ -418,6 +422,9 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
         flex: 1,
         minHeight: 0,
         overflowY: "auto",
+        // bug-042: der Verlauf rollt nur senkrecht — overflowY: auto allein
+        // macht ihn auch seitlich rollbar, sobald ein Inhalt breiter ist.
+        overflowX: "hidden",
         paddingTop: split ? 16 : 0,
         paddingLeft: split ? 16 : 20,
         paddingRight: split ? 16 : 20,
@@ -448,6 +455,9 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
               // bug-036: Flex-Kind des Gesprächsbereichs — nicht schrumpfen,
               // sonst drückt Flexbox die Nachrichten statt zu rollen.
               flexShrink: 0,
+              // bug-042: ein Flex-Kind ist sonst mindestens so breit wie sein
+              // längstes Wort — die Nachricht passt sich der Breite an.
+              minWidth: 0,
             }}
           >
             <div style={{ fontSize: 10, color: muted(50) }}>{ROLE_LABEL[m.role]}</div>
@@ -467,13 +477,14 @@ export function Chat({ repos, split = false }: { repos: Repo[]; split?: boolean 
                 display: "flex",
                 flexDirection: "column",
                 gap: "var(--space-2)",
+                minWidth: 0,
               }}
             >
               {parseChatContentBlocks(m.content).map((block, i) =>
                 block.type === "command" ? (
                   <CopyCommand key={i} command={block.command} />
                 ) : (
-                  <div key={i} style={{ whiteSpace: "pre-wrap" }}>
+                  <div key={i} style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
                     {block.text}
                   </div>
                 ),
